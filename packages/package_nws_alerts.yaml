@@ -1,0 +1,227 @@
+#######################################################################################################################
+## NWS Alert Package
+## https://github.com/dcshoecomp/nws_alerts
+#######################################################################################################################
+
+homeassistant:
+  customize:
+    alert.weather_nws_alert:
+      friendly_name: NWS Alert
+      icon: mdi:weather-hurricane
+
+variable:
+  current_nws_alert_severity:
+    value: cleared
+    attributes:
+      friendly_name: "Current NWS Alert Severity"
+      icon: mdi:weather-hurricane
+    restore: true
+
+  previous_nws_alert_severity:
+    value: cleared
+    attributes:
+      friendly_name: "Previous NWS Alert Severity"
+      icon: mdi:weather-hurricane
+    restore: true
+
+alert:
+  weather_nws_alert:
+    name: "NWS Weather Alert"
+    title: "NWS Weather Alert"
+    message: "{{ states.sensor.nws_alerts.attributes.display_desc }}"
+    entity_id: binary_sensor.nws_alert_active
+    state: 'on'
+    repeat: 720
+    can_acknowledge: false
+    skip_first: false
+    notifiers: jason
+    data:
+      tag: nws_alert
+      timestamp: "{{ as_timestamp(now()) }}" #push
+      priority: high
+      renotify: true #push
+      ttl: 3600
+      silent: false #push
+      requireInteraction: true #push
+      sticky: true #app
+      url: /lovelace/weather #push
+      clickAction: /lovelace/weather #app
+      color: !secret WARNING_COLOR #app #IDEA match to severity
+      icon: !secret STORM_ICON #push
+      badge: !secret STORM_BADGE #push
+
+binary_sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## NWS Connected
+#######################################################################################################################
+      nws_connected:
+        friendly_name: NWS
+        unique_id: nws_connected
+        icon_template: "{{ 'mdi:weather-hurricane' if is_state('binary_sensor.nws_connected','on') else 'mdi:cellphone-off' }}"
+        device_class: connectivity
+        value_template: "{{ not states('sensor.nws_alerts') in ['unknown','unavailable','none'] }}"
+
+      nws_connected_alert: 
+        friendly_name: NWS
+        unique_id: nws_connected_alert
+        icon_template: mdi:alert-circle
+        value_template: "{{ is_state('binary_sensor.nws_connected','off') }}"
+
+#######################################################################################################################
+## Active NWS Weather Alert
+#######################################################################################################################
+      nws_alert_active:
+        friendly_name: NWS Alert
+        unique_id: nws_alert_active
+        icon_template: mdi:weather-hurricane
+        device_class: safety
+        value_template: "{{ states('sensor.nws_alerts')|int > 0 }}"
+        availability_template: "{{ is_state('binary_sensor.nws_connected','on') }}"
+
+automation:
+#######################################################################################################################
+## NWS Alert
+## attr: event_type, event_severity, urgency, headline, description, instruction
+## event_severity values: Extreme, Severe, Moderate, Minor, Unknown
+## urgency: Immediate, Expected, Future, Past, Unknown
+#######################################################################################################################
+  - id: nws_alerts_weather_alert
+    alias: "[NWS Alerts] Weather Alert"
+    description: "Display weather alert on UI play alert/announcement for severe alerts."
+    initial_state: false
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id: sensor.nws_alerts
+
+      - platform: state
+        entity_id: variable.startup_complete
+        to: 'true'
+
+    condition:
+      - condition: state
+        entity_id: variable.startup_complete
+        state: 'true'
+
+    action:
+      # clear alert severity variables if no active alerts
+      # - choose:
+      #     - conditions:
+      #         - condition: numeric_state
+      #           entity_id: sensor.nws_alerts
+      #           below: 1
+
+      #       sequence:
+      #         - service: variable.set_variable
+      #           data:
+      #             variable: previous_nws_alert_severity
+      #             value: cleared
+
+      #         - service: variable.set_variable
+      #           data:
+      #             variable: current_nws_alert_severity
+      #             value: cleared
+
+        # default:
+          # # set previous alert severity (from variable.current_dark_sky_alert_severity)
+          # - service: variable.set_variable
+          #   data:
+          #     variable: previous_nws_alert_severity
+          #     value: "{{ states('variable.current_nws_alert_severity')|lower }}"
+
+          # # set current alert severity from alert
+          # - service: variable.set_variable
+          #   data:
+          #     variable: current_nws_alert_severity
+          #     value: >
+          #       {% if states.sensor.nws_alerts.attributes.alerts[0] is defined %}{{states.sensor.nws_alerts.attributes.alerts[0].severity|lower }}
+          #       {% else %}{{ state_attr('sensor.nws_alerts','event_severity')|lower }}
+          #       {% endif %}
+
+          # # only run if new alert is extreme or more severe than current alert
+          # - condition: template
+          #   value_template: >
+          #     {% set p = states('variable.previous_nws_alert_severity') %}
+          #     {% set c = states('variable.current_nws_alert_severity')%}
+          #     {% if 'tornado' in state_attr('sensor.dark_sky_alerts','title_0')|lower %} true
+          #     {% else %}
+          #       {{ p == 'severe' and c in ['extreme']
+          #           or p == 'moderate' and c in ['extreme','severe']
+          #           or p == 'minor' and c in ['extreme','severe','moderate']
+          #           or p in ['cleared','unknown','unavailable','none']
+          #             and c in ['extreme','severe','moderate','minor'] }}
+          #     {% endif %}
+
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.display_weather_alerts
+
+      # play as alert if extreme severity otherwise play as an announcement, quiet play if severe, moderate
+      - service: script.tts_announcement
+        data:
+          play_message: |
+            Attention! The National Weather Service has issued a weather alert.
+            {{ states.sensor.nws_alerts.attributes.spoken_desc }}
+          #TODO quiet_play: "{{ state_attr('sensor.nws_alerts','event_severity')|lower in ['extreme','severe'] }}"
+          # alert: "{{ state_attr('sensor.nws_alerts','event_severity')|lower == 'extreme' }}"
+
+#######################################################################################################################
+## NWS Alerts Reset Weather Alert
+#######################################################################################################################
+  - id: nws_alerts_reset_weather_alert
+    alias: "[NWS Alerts] Reset Weather Alert"
+    description: "Reset weather alert severity so weather alerts replay daily."
+    initial_state: true
+    mode: restart
+    trigger:
+      - platform: template
+        value_template: "{{ is_state('sensor.time',states('sensor.waketime_today')) }}"
+
+    action:
+      # wait until 30 minutes past waketime
+      - delay:
+          minutes: 30
+
+      - service: variable.set_variable
+        data:
+          variable: current_nws_alert_severity
+          value: cleared
+
+      - service: variable.set_variable
+        data:
+          variable: previous_nws_alert_severity
+          value: cleared
+
+
+# attribution: Data provided by Weather.gov
+# title: Lakeshore Flood Advisory
+# event_id: 3744144
+# display_desc:
+# >
+# Headline: LAKESHORE FLOOD ADVISORY IN EFFECT UNTIL 10 AM EST SUNDAY
+# Severity: Minor
+# Certainty: Likely
+# Description: * WHAT...Minor increase in lakeshore flooding expected.
+
+# * WHERE...St. Clair, Macomb, Wayne and Monroe Counties.
+
+# * WHEN...Until 10 AM EST Sunday.
+
+# * IMPACTS...Minor additional flooding and erosion of prone areas
+# along the Lake Erie and Lake St Clair shorelines.
+
+# * ADDITIONAL DETAILS... South wind increases to frequent gusts
+# near 30 mph during the evening driving higher waves and water
+# level into shoreline areas. The south wind direction mainly
+# affects Lake Erie north of Monroe to Gibraltar and Anchor Bay
+# and to Harsens Island along Lake St Clair.
+
+# Strong south wind shifts west with the passage of a strong cold
+# front Sunday morning which is expected to further impact
+# Harsens Island.
+# Instruction: Residents on or near the shore should take appropriate action to
+# protect property from rising water levels.
+# spoken_desc: LAKESHORE FLOOD ADVISORY IN EFFECT UNTIL 10 AM EST SUNDAY
+# friendly_name: NWS Alerts
+# icon: mdi:alert

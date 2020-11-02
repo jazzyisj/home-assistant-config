@@ -1,0 +1,165 @@
+#######################################################################################################################
+## Presence - Occupancy Notification
+## - delay to report correct alarm state in notification
+#######################################################################################################################
+- id: presence_occupancy_notification
+  alias: "[Presence] Occupancy Notification"
+  description: "Send notification when occupancy mode has changed."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Night
+        - Guest
+        - Away
+        - Vacation
+      for:
+        seconds: 5 # prevent trigger on quick changes in state (eg guest-> home-> guest)
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.presence_automation
+      state: 'on'
+
+  action:
+    # minimum delay for correct alarm status if armed direct (no pending state)
+    - delay:
+        seconds: 15
+
+    # wait for alarm to finish pending so notification shows new alarmed state
+    - wait_template: "{{ not is_state('alarm_control_panel.house','pending') }}"
+      timeout:
+        minutes: 2
+      continue_on_timeout: true
+
+    - choose:
+        conditions:
+          - condition: state
+            entity_id: input_boolean.occupancy_announcements
+            state: 'on'
+
+        sequence:
+          - service: script.turn_on
+            data:
+              entity_id: script.tts_announcement
+              variables:
+                #NOTE alarm disarmed announced in disarmed automation
+                # it would get skipped if disarming in home/guest mode (armed home-> disarmed)
+                # if auto arming is on report alarm status here to avoid 2 separate announcements
+                play_message: >
+                  The house is now in {{ states('input_select.occupancy_mode') }} mode
+                  {{- '. Personalized occupant automations are disabled' if is_state('input_select.occupancy_mode','Guest') -}}
+                  {%- if is_state('input_boolean.alarm_auto_arming','on') -%}
+                    {%- if not states('input_select.occupancy_mode') in ['Home','Guest'] -%}
+                    , and the house alarm is {{ states('sensor.alarm_status') -}}
+                    {%- endif -%}
+                  {%- endif -%}.
+                ignore_away: true
+                min_volume: "{{ 20 if states('sensor.tts_media_player') in state_attr('group.google_speaker_groups','entity_id') else 30 }}"
+
+    - condition: state
+      entity_id: input_boolean.occupancy_notifications
+      state: 'on'
+
+    # delay to allow occupant to disarm alarm before notification sent
+    - delay:
+        minutes: 10
+
+    - service: !include /config/include/template/notify_jason_template.yaml
+      data:
+        title: "Occupancy Mode"
+        message: "Mode: {{ states('input_select.occupancy_mode') }} | Alarm: {{ states('sensor.alarm_status') }}."
+        data:
+          actions:
+            - action: turn_off_occupancy_notifications
+              title: Turn Alerts Off
+            - action: close_occupancy_notification
+              title: Close
+          tag: occupancy_notification
+          timestamp: "{{ as_timestamp(now()) }}" #push
+          priority: normal
+          renotify: true #push
+          ttl: 3600
+          silent: false #push
+          requireInteraction: false #push
+          sticky: false #app
+          url: /lovelace/home #push
+          clickAction: /lovelace/home #app
+          color: !secret NOTIFY_COLOR #app
+          image: !secret OCCUPANCY_IMAGE_TEMPLATE
+          icon: !secret OCCUPANCY_ICON_TEMPLATE #push
+          badge: !secret OCCUPANCY_BADGE_TEMPLATE #push
+
+#######################################################################################################################
+## Presence - Turn Off Occupancy Notifications
+#######################################################################################################################
+- id: presence_turn_off_occupancy_notifications
+  alias: "[Presence] Turn Off Occupancy Notifications"
+  description: "Turn off boolean when notification action clicked."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: event
+      event_type: html5_notification.clicked
+      event_data:
+        action: turn_off_occupancy_notifications
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_occupancy_notifications
+
+  action:
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.occupancy_notifications
+
+#######################################################################################################################
+## Presence - Close Occupancy Notification Notification
+#######################################################################################################################
+- id: presence_close_occupancy_notification_notifications
+  alias: "[Presence] Close Occupancy Notification Notifications"
+  description: "Dismiss notifcation on all devices."
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.occupancy_notifications
+      to: 'off'
+
+    - platform: event
+      event_type: html5_notification.closed
+      event_data:
+        tag: occupancy_notification
+
+    #BUG html5 closed event doesn't work if notification is in tray
+    - platform: event
+      event_type: html5_notification.clicked
+      event_data:
+        action: close_occupancy_notification
+
+    - platform: event
+      event_type: html5_notification.clicked
+      event_data:
+        action: turn_off_occupancy_notifications
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: close_occupancy_notification
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_occupancy_notifications
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile_app_jphone
+        category: presence
+        tag: occupancy_notification
+        pause: false

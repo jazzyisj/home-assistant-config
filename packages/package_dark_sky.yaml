@@ -1,0 +1,792 @@
+#######################################################################################################################
+## Dark Sky Weather Integration Package
+## https://www.home-assistant.io/integrations/darksky/
+## sensor attributes: time_0, title_0, description_0, expires_0, severity_0, uri_0, regions_0
+## severity values: warning, watch, advisory, statement
+#######################################################################################################################
+
+homeassistant:
+  customize:
+    alert.weather_dark_sky_alert:
+      friendly_name: EnvCan Alert
+      icon: mdi:weather-hurricane
+
+variable:
+  current_dark_sky_alert_severity:
+    value: none
+    attributes:
+      friendly_name: "Current Dark Sky Alert Severity"
+      icon: mdi:weather-hurricane
+    restore: true
+
+  previous_dark_sky_alert_severity:
+    value: none
+    attributes:
+      friendly_name: "Previous Dark Sky Alert Severity"
+      icon: mdi:weather-hurricane
+    restore: true
+
+alert:
+  weather_dark_sky_alert:
+    name: "Dark Sky Weather"
+    title: "Dark Sky Weather Alert"
+    message: |
+      {{ state_attr('sensor.dark_sky_alerts','title_0') }}
+      Severity: {{ state_attr('sensor.dark_sky_alerts','severity_0') }}
+      {{ state_attr('sensor.dark_sky_alerts','description_1').split('###')[0] }}
+    entity_id: binary_sensor.dark_sky_alert_active
+    state: 'on'
+    repeat: 720
+    can_acknowledge: true
+    skip_first: false
+    notifiers: jason
+    data:
+      tag: darksky_alert
+      timestamp: "{{ as_timestamp(now()) }}" #push
+      priority: high
+      renotify: true #push
+      ttl: 3600
+      silent: false #push
+      requireInteraction: true #push
+      sticky: true #app
+      url: /lovelace/weather #push
+      clickAction: /lovelace/weather #app
+      color: !secret WARNING_COLOR #app  #IDEA match to severity
+      icon: !secret STORM_ICON #push
+      badge: !secret STORM_BADGE #push
+
+binary_sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## Dark Sky Connected
+#######################################################################################################################
+      dark_sky_connected:
+        friendly_name: Dark Sky Connected
+        unique_id: dark_sky_connected
+        icon_template: "{{ 'mdi:weather-partly-snowy-rainy' if is_state('binary_sensor.dark_sky_connected','on') else 'mdi:alert-circle' }}"
+        device_class: connectivity
+        value_template: "{{ not states('sensor.dark_sky_temperature') in ['unknown','unavailable','none'] }}"
+
+      dark_sky_connected_alert:
+        friendly_name: Dark Sky
+        unique_id: dark_sky_connected_alert
+        icon_template: mdi:weather-partly-snowy-rainy
+        value_template: "{{ is_state('binary_sensor.dark_sky_connected','off') }}"
+
+#######################################################################################################################
+## Dark Sky Alert Active - do not disabled with alerts_enabled
+#######################################################################################################################
+      dark_sky_alert_active:
+        friendly_name: EnvCan Alert
+        unique_id: dark_sky_alert_active
+        icon_template: mdi:weather-hurricane
+        device_class: safety
+        value_template: "{{ states('sensor.dark_sky_alerts')|int > 0 }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+sensor:
+#######################################################################################################################
+## Darksky Weather Platform
+#######################################################################################################################
+  - platform: darksky
+    name: Dark Sky
+    api_key: !secret DARKSKY_API
+    scan_interval: '00:15'
+    forecast:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+    hourly_forecast:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+    monitored_conditions:
+      - alerts
+      - icon
+      - summary
+      - minutely_summary
+      - daily_summary
+      - hourly_summary
+      - precip_probability
+      - precip_type
+      - precip_accumulation
+      - precip_intensity_max
+      - precip_intensity
+      - wind_speed
+      - wind_bearing
+      - wind_gust
+      - cloud_cover
+      - temperature_low
+      - temperature_high
+      - humidity
+      - dew_point
+      - nearest_storm_distance
+      - nearest_storm_bearing
+      - apparent_temperature
+      - apparent_temperature_high
+      - apparent_temperature_low
+      - ozone
+      - uv_index
+      - temperature
+      - pressure
+      - visibility
+      - sunrise_time
+      - sunset_time
+      - moon_phase
+
+#######################################################################################################################
+## Template Sensors
+#######################################################################################################################
+  - platform: template
+    sensors:
+#######################################################################################################################
+## Dark Sky Severe Weather Alert
+## conditions list least severe to most -> last to match is attribute value
+#######################################################################################################################
+      dark_sky_severe_weather_alert:
+        unique_id: dark_sky_severe_weather_alert
+        value_template: >
+          {% set conditions = ['wind','hail','snowfall','tornado'] %}
+          {% set found = namespace(value=0) %}
+          {% for cond in conditions %}
+            {% if cond in state_attr('sensor.dark_sky_alerts','description_1')|lower %}{% set found.value = 1 %}{% endif %}
+          {% endfor %}
+          {{ 'on' if is_state_attr('sensor.dark_sky_alerts','severity_1','warning') or found.value == 1 else 'off' }}
+        attributes_template:
+          condition: >
+            {% set conditions = ['wind','hail','snowfall','tornado'] %}
+            {% set condition = namespace() %}
+            {% for cond in conditions %}
+              {% if cond in state_attr('sensor.dark_sky_alerts','description_1')|lower %}{% set condition.value = conditions[loop.index0] %}{% endif %}
+            {% endfor %}
+            {{ condition.value|title }} Warning
+
+#######################################################################################################################
+## Dark Sky Current Text
+#######################################################################################################################
+      dark_sky_current_text:
+        unique_id: dark_sky_current_text
+        value_template: >
+          {% if is_state("sensor.dark_sky_icon","clear-day") %} Clear
+          {% elif is_state("sensor.dark_sky_icon","clear-night") %} Clear
+          {% elif is_state("sensor.dark_sky_icon","rain") %} Rain
+          {% elif is_state("sensor.dark_sky_icon","snow") %} Snowy
+          {% elif is_state("sensor.dark_sky_icon","fog") %} Foggy
+          {% elif is_state("sensor.dark_sky_icon","sleet") %} Sleet
+          {% elif is_state("sensor.dark_sky_icon","wind") %} Windy
+          {% elif is_state("sensor.dark_sky_icon","cloudy") %} Cloudy
+          {% elif is_state("sensor.dark_sky_icon","partly-cloudy-day") %} Partly Cloudy
+          {% elif is_state("sensor.dark_sky_icon","partly-cloudy-night") %} Partly Cloudy
+          {% elif is_state("sensor.dark_sky_icon","hail") %} Hailing
+          {% elif is_state("sensor.dark_sky_icon","lightning") %} Lightning
+          {% elif is_state("sensor.dark_sky_icon","thunderstorm") %} Thunderstorm
+          {% endif %}
+
+#######################################################################################################################
+## Override Dark Sky Current Text - Dark Sky Lovelace Card
+## https://github.com/iammexx/home-assistant-config/tree/master/ui/darksky
+#######################################################################################################################
+      dark_sky_alt_current_text:
+        unique_id: dark_sky_alt_current_text
+        value_template: >
+          {% if is_state("sensor.dark_sky_icon","clear-day") %} Clear
+          {% elif is_state("sensor.dark_sky_icon","clear-night") %} Clear
+          {% elif is_state("sensor.dark_sky_icon","rain") %} Rain
+          {% elif is_state("sensor.dark_sky_icon","snow") %} Snowy
+          {% elif is_state("sensor.dark_sky_icon","fog") %} Foggy
+          {% elif is_state("sensor.dark_sky_icon","sleet") %} Sleet
+          {% elif is_state("sensor.dark_sky_icon","wind") %} Windy
+          {% elif is_state("sensor.dark_sky_icon","cloudy") %} Cloudy
+          {% elif is_state("sensor.dark_sky_icon","partly-cloudy-day") %} Partly Cloudy
+          {% elif is_state("sensor.dark_sky_icon","partly-cloudy-night") %} Partly Cloudy
+          {% elif is_state("sensor.dark_sky_icon","hail") %} Hailing
+          {% elif is_state("sensor.dark_sky_icon","lightning") %} Lightning
+          {% elif is_state("sensor.dark_sky_icon","thunderstorm") %} Thunderstorm
+          {% endif %}
+
+#######################################################################################################################
+## Dark Sky Alt Wind - Dark Sky Lovelace Card
+#https://github.com/iammexx/home-assistant-config/tree/master/ui/darksky
+#######################################################################################################################
+      dark_sky_alt_wind:
+        unique_id: dark_sky_alt_wind
+        value_template: >
+          {% set winddir = ['North','North-Northeast','Northeast','East-Northeast','East','East-Southeast','Southeast','South-Southeast','South','South-Southwest','Southwest','West-Southwest','West','West-Northwest','Northwest','North-Northwest','North'] %}
+          {{ '%0.0f'|format(states('sensor.dark_sky_wind_speed')|float) }} mi/h from the {{ winddir[(('%0.0f'|format(states('sensor.dark_sky_wind_bearing')|float/360)*16)|float)] }}
+
+#######################################################################################################################
+## Wind Direction - Cardinal
+#######################################################################################################################
+  - platform: template
+    sensors:
+      wind_cardinal_direction:
+        unique_id: wind_cardinal_direction
+        value_template: >
+          {% set b = states('sensor.dark_sky_wind_bearing')|float %}
+          {% if 348.75 <= b < 11.25 %}'N'
+          {% elif 11.25 <= b < 33.75 %} NNE
+          {% elif 33.75 <= b < 56.25 %} NE
+          {% elif 56.25 <= b < 78.75 %} ENE
+          {% elif 78.75 <= b < 101.25 %} E
+          {% elif 101.25 <= b < 123.75 %} ESE
+          {% elif 123.75 <= b < 146.25 %} SE
+          {% elif 146.25 <= b < 168.75 %} SSE
+          {% elif 168.75 <= b < 191.25 %} S
+          {% elif 191.25 <= b < 213.75 %} SSW
+          {% elif 213.75 <= b < 236.25 %} SW
+          {% elif 236.25 <= b < 258.75 %} WSW
+          {% elif 258.75 <= b < 281.25 %} W
+          {% elif 281.25 <= b < 303.75 %} WNW
+          {% elif 303.75 <= b < 326.25 %} NW
+          {% elif 326.25 <= b < 348.75 %} NNW
+          {% else %} Unknown
+          {% endif %}
+
+#######################################################################################################################
+## Storm Direction - Cardinal
+#######################################################################################################################
+  - platform: template
+    sensors:
+      storm_cardinal_direction:
+        unique_id: storm_cardinal_direction
+        value_template: >
+          {% set b = states('sensor.dark_sky_nearest_storm_bearing')|float %}
+          {% if 348.75 <= b < 11.25 %} 'N'
+          {% elif 11.25 <= b < 33.75 %} NNE
+          {% elif 33.75 <= b < 56.25 %} NE
+          {% elif 56.25 <= b < 78.75 %} ENE
+          {% elif 78.75 <= b < 101.25 %} E
+          {% elif 101.25 <= b < 123.75 %} ESE
+          {% elif 123.75 <= b < 146.25 %} SE
+          {% elif 146.25 <= b < 168.75 %} SSE
+          {% elif 168.75 <= b < 191.25 %} S
+          {% elif 191.25 <= b < 213.75 %} SSW
+          {% elif 213.75 <= b < 236.25 %} SW
+          {% elif 236.25 <= b < 258.75 %} WSW
+          {% elif 258.75 <= b < 281.25 %} W
+          {% elif 281.25 <= b < 303.75 %} WNW
+          {% elif 303.75 <= b < 326.25 %} NW
+          {% elif 326.25 <= b < 348.75 %} NNW
+          {% else %} Unknown
+          {% endif %}
+
+#######################################################################################################################
+## Storm Direction - Full Cardinal
+#######################################################################################################################
+  - platform: template
+    sensors:
+      storm_full_cardinal_direction:
+        unique_id: storm_full_cardinal_direction
+        value_template: >-
+          {% set d = states('sensor.storm_cardinal_direction') %}
+          {% if d == 'N' %} North
+          {% elif d == 'NNE' %} North North East
+          {% elif d == 'NE' %} North East
+          {% elif d == 'ENE' %} East North East
+          {% elif d == 'E' %} East
+          {% elif d == 'ESE' %} East South East
+          {% elif d == 'SE' %} South East
+          {% elif d == 'SSE' %} South South East
+          {% elif d == 'S' %} South
+          {% elif d == 'SSW' %} South South West
+          {% elif d == 'SW' %} South West
+          {% elif d == 'WSW' %} West South West
+          {% elif d == 'W' %} West
+          {% elif d == 'WNW' %} West North West
+          {% elif d == 'NW' %} North West
+          {% elif d == 'NNW' %} North North West
+          {% else %} Unknown
+          {% endif %}
+
+#######################################################################################################################
+## Dark Sky Forecasts
+#######################################################################################################################
+  - platform: template
+    sensors:
+      forecast_0d:
+        friendly_name: Today
+        unique_id: forecast_0d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_0d')|float) -}} (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_0d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_0d')|float) }}%
+        entity_picture_template: >
+          {% if states('sensor.dark_sky_icon_0d') == 'partly-cloudy-day' %}
+            {% set icon_name = 'cloudy-day-1' %}
+          {% else %}
+            {% set icon_name = states('sensor.dark_sky_icon_0d') %}
+          {% endif %}
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_0d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_1d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (1 * 86400 ) -%}
+          {{ date|timestamp_custom("Tomorrow (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_1d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_1d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_1d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_1d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_1d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_2d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (2 * 86400 ) -%}
+          {{ date|timestamp_custom("%A (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_2d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_2d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_2d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_2d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_2d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_3d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (3 * 86400 ) -%}
+          {{ date|timestamp_custom("%A (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_3d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_3d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_3d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_3d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_3d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_4d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (4 * 86400 ) -%}
+          {{ date|timestamp_custom("%A (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_4d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_4d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_4d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_4d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_4d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_5d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (5 * 86400 ) -%}
+          {{ date|timestamp_custom("%A (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_5d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_5d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_5d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_5d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_5d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_6d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (6 * 86400 ) -%}
+          {{ date|timestamp_custom("%A (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_6d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_6d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_6d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_6d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_6d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_7d:
+        friendly_name_template: >
+          {%- set date = as_timestamp(now()) + (7 * 86400 ) -%}
+          {{ date|timestamp_custom("%A (%m/%d)")|replace("(0", "(")|replace("/0", "/") }}
+        unique_id: forecast_7d
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_daytime_high_temperature_7d')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_overnight_low_temperature_7d')|float) -}}°)
+          {{- ' ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_7d')|float) }}%
+        entity_picture_template: >
+          {{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_7d') ~ '.svg'}}
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+#######################################################################################################################
+## Dark Sky Hourly Forecast Sensors
+#######################################################################################################################
+      forecast_0h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 1 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 1 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 1 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_0h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_0h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_0h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_0h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_0h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_1h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 2 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 2 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 2 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_1h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_1h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_1h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_1h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_1h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_2h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 3 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 3 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 3 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_2h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_2h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_2h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_2h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_2h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_3h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 4 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 4 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 4 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_3h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_3h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_3h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_3h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_3h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_4h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 5 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 5 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 5 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_4h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_4h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_4h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_4h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_4h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_5h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 6 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 6 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 6 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_5h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_5h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_5h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_5h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_5h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_6h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 7 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 7 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 7 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_6h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_6h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_6h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_6h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_6h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_7h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 8 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 8 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 8 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_7h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_7h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_7h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_7h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_7h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_8h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 9 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 9 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 9 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_8h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_8h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_8h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_8h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_8h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_9h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 10 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 10 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 10 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_9h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_9h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_9h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_9h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_9h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_10h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 11 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 11 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 11 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_10h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_10h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_10h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_10h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_10h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_11h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 12 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 12 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 12 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+          {{- h -}}:{{- '%02d'|format(m) ~ ' ' ~ s -}}
+        unique_id: forecast_11h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_11h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_11h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_11h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_11h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+      forecast_12h:
+        friendly_name_template: >
+          {% set h = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 13 * 3600)|timestamp_custom('%I')|int %}
+          {% set m = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 13 * 3600)|timestamp_custom('%M')|int %}
+          {% set s = (as_timestamp(strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M"))|float + 13 * 3600)|timestamp_custom('%p') %}
+          {% if 0 > m <= 15 %}{% set m = 15 %}
+          {% elif 15 > m <= 30 %}{% set m = 30 %}
+          {% elif 30 > m <= 45 %}{% set m = 45 %}
+          {% else %}{% set m = 0 %}
+          {% endif %}
+        unique_id: forecast_12h
+        value_template: >
+          {{- '%0.0f'|format(states('sensor.dark_sky_temperature_12h')|float) -}}° (
+          {{- '%0.0f'|format(states('sensor.dark_sky_apparent_temperature_12h')|float) -}}°)
+          {{- '  ' ~ '%0.0f'|format(states('sensor.dark_sky_precip_probability_12h')|float) -}}%
+        entity_picture_template: "{{ '/local/icons/weather_icons/dark_sky/' ~ states('sensor.dark_sky_icon_12h') ~ '.svg' }}"
+        availability_template: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+
+automation:
+#######################################################################################################################
+## Dark Sky Weather Alert
+#######################################################################################################################
+  - id: dark_sky_weather_alert
+    alias: "[Dark Sky] Weather Alert"
+    description: "Display weather alert on UI, play alert/announcement for severe alerts."
+    initial_state: true
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id: sensor.dark_sky_alerts
+
+      - platform: state
+        entity_id: variable.startup_complete
+        to: 'true'
+
+    condition:
+      - condition: state
+        entity_id: variable.startup_complete
+        state: 'true'
+
+    action:
+      # clear alert severity variables if no active alerts
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.dark_sky_alerts
+                below: 1
+
+            sequence:
+              - service: variable.set_variable
+                data:
+                  variable: previous_dark_sky_alert_severity
+                  value: cleared
+
+              - service: variable.set_variable
+                data:
+                  variable: current_dark_sky_alert_severity
+                  value: cleared
+
+        default:
+          # set previous alert severity (from variable.current_dark_sky_alert_severity)
+          - service: variable.set_variable
+            data:
+              variable: previous_dark_sky_alert_severity
+              value: "{{ states('variable.current_dark_sky_alert_severity')|lower }}"
+
+         # set current alert severity from alert
+          - service: variable.set_variable
+            data:
+              variable: current_dark_sky_alert_severity
+              value: "{{ state_attr('sensor.dark_sky_alerts','severity_0')|lower }}"
+
+          # only run if new alert is a watch or more severe than previous alert #VERIFY tornado
+          - condition: template
+            value_template: >
+              {% set p = states('variable.previous_dark_sky_alert_severity') %}
+              {% set c = states('variable.current_dark_sky_alert_severity') %}
+              {% if 'tornado' in state_attr('sensor.dark_sky_alerts','title_0')|lower %} true
+              {% else %}
+                {{ p == 'watch' and c in ['warning']
+                    or p == 'advisory' and c in ['warning','watch']
+                    or p == 'statement' and c in ['warning','watch','advisory']
+                    or p|lower in ['cleared','unknown','unavailable','none']
+                      and c in ['warning','watch','advisory','statement'] }}
+              {% endif %}
+
+          - service: input_boolean.turn_on
+            entity_id: input_boolean.display_weather_alerts
+
+          - service: script.tts_announcement
+            data:
+              alert: "{{ 'tornado' in state_attr('sensor.dark_sky_alerts','description_1')|lower }}" #VERIFY
+              quiet_play: "{{ states('variable.current_dark_sky_alert_severity') in ['warning','watch'] }}"
+              play_message: >
+                Attention! Weather Alert!
+                Environment Canada has issued a {{ state_attr('sensor.dark_sky_alerts','title_0') }} for your immediate area.
+                {{ state_attr('sensor.dark_sky_alerts','description_1').split('###')[0] }}
+
+          # https://weather.gc.ca/warnings/index_e.html  #TODO
+          # Winter Storm
+          # Snowfall
+          # Wind
+          # Blizzard
+          # Rainfall
+          # Freezing rain
+
+#######################################################################################################################
+## Dark Sky Reset Weather Alert
+#######################################################################################################################
+  - id: dark_sky_reset_weather_alert
+    alias: "[Dark Sky] Reset Weather Alert"
+    description: "Reset previous weather alert to retrigger notifications if alert still active."
+    initial_state: true
+    mode: restart
+    trigger:
+      - platform: template
+        value_template: "{{ is_state('sensor.time',states('sensor.waketime_today')) }}"
+
+    action:
+      # wait until 30 minutes past waketime
+      - delay:
+          minutes: 30
+
+      - service: variable.set_variable
+        data:
+          variable: previous_dark_sky_alert_severity
+          value: cleared
+
+      - service: automation.trigger
+        data:
+          entity_id: automation.dark_sky_weather_alert
+          skip_condition: false
+

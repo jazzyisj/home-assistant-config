@@ -1,0 +1,301 @@
+#######################################################################################################################
+## Authenticated Users Sensor
+## https://github.com/custom-components/authenticated
+#######################################################################################################################
+- platform: authenticated
+  enable_notification: true
+  exclude: !secret HASSIO_IP
+  provider: ipapi  # ipapi, extreme, ipvigilante
+  log_location: '/config/home-assistant.log'
+
+#######################################################################################################################
+## Github Sensor
+## https://www.home-assistant.io/components/sensor.github/
+#######################################################################################################################
+- platform: github
+  access_token: !secret GIT_SENSOR_TOKEN
+  repositories:
+    - path: 'jazzyisj/home-assistant-config'
+      name: Jazzyisj Hassio Git
+
+#######################################################################################################################
+## DNS IP Sensor
+#######################################################################################################################
+- platform: dnsip
+
+#######################################################################################################################
+## Rpi CPU Temperature
+#######################################################################################################################
+- platform: command_line
+  name: CPU Temperature
+  command: "cat /sys/class/thermal/thermal_zone0/temp"
+  value_template: "{{ '%0.1f'|format(value|float|multiply(0.001)) }}"
+  unit_of_measurement: 'C'
+  scan_interval: 300
+
+#######################################################################################################################
+## Assistant Relay Status 
+#######################################################################################################################
+- platform: command_line
+  name: Assistant Relay Status
+  command: 'curl http://supervisor/addons/6a3d001f_assistant_relay/stats -H "Authorization: Bearer $SUPERVISOR_TOKEN"'
+  value_template: "{{ 'on' if value_json.result == 'ok' else 'off' }}"
+  scan_interval: 60
+  json_attributes:
+    - data
+
+#OPTION - platform: rest
+#   resource: "http://192.168.1.110:8123/api/hassio/addons/6a3d001f_assistant_relay/info"
+#   headers:
+#     Authorization: "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiI2YmQ1NDgzZDhlOWQ0NTY2YTBlNjk0MzI0ZmQ4ZWFlNCIsImlhdCI6MTYwMjYyMzk1MywiZXhwIjoxOTE3OTgzOTUzfQ.3CFjFbHOy_SO2_PpdXJkVPKiD1FfFZ3mHYoDh5QNn34"
+#     Content-Type: application/json
+# #   # json_attributes_path: "$.data"
+# #   # json_attributes:
+# #   #   - version
+#   name: Assistant Relay Status
+#   value_template: "{{value_json['result']}}"
+#   scan_interval: 60
+
+#######################################################################################################################
+## Folder Size Sensors
+## https://www.home-assistant.io/integrations/folder/
+## path must ben in allowlist_external_dirs
+#######################################################################################################################
+- platform: folder
+  folder: '/config/www/alarm_snapshots'
+  filter: '*'
+
+- platform: folder
+  folder: '/config/tts'
+  filter: '*'
+
+#######################################################################################################################
+## Hassio Database File Size
+## https://www.home-assistant.io/integrations/sql/
+## https://www.home-assistant.io/integrations/filesize/
+## path must ben in allowlist_external_dirs
+#######################################################################################################################
+- platform: filesize #OPTION when using sqlite
+  file_paths: /config/home-assistant_v2.db
+
+#OPTION - platform: sql
+#   db_url: !secret MARIADB_URL
+#   queries:
+#     - name: Hassio DB
+#       query: 'SELECT table_schema "database", Round(Sum(data_length + index_length) / 1048576, 2) "value" FROM information_schema.tables WHERE table_schema="homeassistant" GROUP BY table_schema;'
+#       column: 'value'
+#       unit_of_measurement: MB
+
+#######################################################################################################################
+## Uptime Sensor
+#######################################################################################################################
+- platform: uptime
+
+#######################################################################################################################
+## System Monitor
+#######################################################################################################################
+- platform: systemmonitor
+  resources:
+    - type: last_boot
+    - type: disk_use_percent
+      arg: /home
+    - type: memory_use_percent
+    - type: swap_use_percent
+    - type: processor_use
+    - type: load_1m
+    - type: load_5m
+    - type: load_15m
+    - type: ipv6_address
+      arg: eth0
+    - type: network_in
+      arg: eth0
+    - type: network_out
+      arg: eth0
+    - type: throughput_network_in
+      arg: eth0
+    - type: throughput_network_out
+      arg: eth0
+    - type: packets_in
+      arg: eth0
+    - type: packets_out
+      arg: eth0
+
+- platform: template
+  sensors:
+#######################################################################################################################
+## Dummy Sensor - sensor for custom dummy headers
+#######################################################################################################################
+    dummy:
+      value_template: ' '
+
+#######################################################################################################################
+## Remote UI Connections
+## - state: number of UI browsers active
+## - attributes: list of active browsers
+#######################################################################################################################
+    remote_ui_connected:
+      friendly_name: Browser UI Connected
+      unique_id: remote_ui_connected
+      unit_of_measurement: Browsers
+      icon_template: mdi:laptop
+      value_template: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|list|count }}"
+      attribute_templates:
+        browsers: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='name')|join('\n') }}"
+
+#######################################################################################################################
+## Online Network Devices
+## display online devices on network / total devices
+## used for network monitor lovelace card
+#######################################################################################################################
+    online_network_devices:
+      friendly_name: Network Devices
+      unique_id: online_network_devices
+      icon_template: mdi:devices
+      value_template:  >
+        {{ states.device_tracker|selectattr('state','eq','home')|reject('in',state_attr('group.ignored_trackers','entity_id'))
+            |list|count -}}/{{- states('sensor.total_network_devices') }}
+
+#######################################################################################################################
+## Total Network Devices
+## count devices on network
+## used for binary_sensor.network_device, sensor.online_network_devices
+#######################################################################################################################
+    total_network_devices:
+      friendly_name: Total Network Devices
+      unique_id: total_network_devices
+      icon_template: mdi:devices
+      value_template: >
+        {{ states.device_tracker|map(attribute='entity_id')|reject('in',state_attr('group.ignored_trackers','entity_id'))|list|count }}
+
+#######################################################################################################################
+## Rpi Uptime Sensor
+## display system uptime in friendly format
+#######################################################################################################################
+    rpi_uptime:
+      friendly_name: RPi Uptime
+      unique_id: rpi_uptime
+      icon_template: mdi:clock-start
+      value_template: >
+        {% set up_time = as_timestamp(now()) - as_timestamp(states('sensor.last_boot')) %}
+        {% set minutes = (up_time // 60)|int %}
+        {% set hours = (minutes // 60) %}
+        {% set days = (hours // 24) %}
+        {% set weeks = (days // 7) %}
+        {% set minutes = (minutes % 60) %}
+        {% set hours =  (hours % 24) %}
+        {% set days = (days % 7) %}
+        {% macro phrase(value, name) %}
+          {%- set value = value %}
+          {%- set end = 's' if value > 1 else '' %}
+          {{- '{} {}{}'.format(value, name, end) if value|int > 0 else '' }}
+        {%- endmacro %}
+        {% set text = [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hr'), phrase(minutes, 'min') ]|select('!=','')|list|join(',') %}
+        {% set last_comma = text.rfind(',') %}
+        {% if last_comma != -1 %}
+          {% set text = text[:last_comma] + ' and' + text[last_comma + 1:] %}
+        {% endif %}
+        {{ text }}
+
+#######################################################################################################################
+## HA Uptime Sensor
+## display home assistant system uptime in friendly format
+#######################################################################################################################
+    ha_uptime:
+      friendly_name: Home Assistant Uptime
+      unique_id: ha_uptime
+      icon_template: mdi:clock-start
+      value_template: >
+        {% if states('sensor.uptime') == '0.0' %}
+          Just restarted...
+        {% else %}
+          {% macro phrase(value, name) %}
+          {%- set value = value|int %}
+          {%- set end = 's' if value > 1 else '' %}
+          {{- '{} {}{}'.format(value, name, end) if value|int > 0 else '' }}
+          {%- endmacro %}
+          {% set weeks = (states('sensor.uptime')|int / 7)|int %}
+          {% set days = (states('sensor.uptime')|int) - (weeks * 7) %}
+          {% set hours = (states('sensor.uptime')|float - states('sensor.uptime')|int) * 24 %}
+          {% set minutes = (hours - hours|int) * 60 %}
+          {{ [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hr'), phrase(minutes, 'min') ]|select('!=','')|list|join(',') }}
+        {% endif %}
+
+#######################################################################################################################
+## Last Boot Date & Time
+## display last boot date/time in friendly format
+#######################################################################################################################
+    last_boot_date_time:
+      friendly_name: Last Boot Date
+      unique_id: last_boot_date_time
+      icon_template: mdi:clock-start
+      value_template: >
+        {% set date = as_timestamp(states('sensor.last_boot'))|timestamp_custom('%d') %}
+        {% set date = '{:01}'.format(date|int) %}
+        {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
+        {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
+        {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
+        {% else %}{% set date = date ~ 'th' %}
+        {% endif %}
+        {{ as_timestamp(states('sensor.last_boot'))|timestamp_custom('%H:%M on %a') }} {{ date }} {{ as_timestamp(states('sensor.last_boot'))|timestamp_custom('%b %Y',true) }}
+
+#######################################################################################################################
+## Offline Devices
+## - state: number of offline devices
+## - attribute: entities: - comma separated list of unavailable device entity id's
+## - attribute: names: - comma separated list of unavailable device names
+## - updates every minute (sensor.time)
+## - Nest devices separate, binary sensor shows off state when unavailable
+#######################################################################################################################
+    offline_devices:
+      friendly_name_template: "{{ 'All Devices Online' if is_state('sensor.offline_devices','0') else 'Offline Devices' }} "
+      unique_id: offline_devices
+      icon_template: "{{ 'mdi:check-circle' if is_state('sensor.offline_devices','0') else 'mdi:alert-circle' }}"
+      value_template:  >
+        {% set devices = states|selectattr('domain','in',['alarm_control_panel','cover','light','switch','fan','climate','camera','media_player'])
+            |selectattr('state','in',['unavailable','unknown','none'])
+            |rejectattr('entity_id','in',state_attr('group.ignored_sensors','entity_id'))
+            |map(attribute='entity_id')|list|count %}
+        {% set nest_devices = states|selectattr('entity_id','in',state_attr('group.nest_devices','entity_id'))
+            |selectattr('state','in',['unavailable','unknown','none','off'])|list|count %}
+        {{ devices + nest_devices }}
+      attribute_templates:
+        entities: >
+          {% set devices = states|selectattr('domain','in',['alarm_control_panel','cover','light','switch','fan','climate','camera','media_player'])
+              |selectattr('state','in',['unavailable','unknown','none'])
+              |rejectattr('entity_id','in',state_attr('group.ignored_sensors','entity_id'))|list %}
+          {% set nest_devices = states|selectattr('entity_id','in',state_attr('group.nest_devices','entity_id'))
+              |selectattr('state','in',['unavailable','unknown','none','off'])|list %}
+          {{ (devices + nest_devices)|map(attribute='entity_id')|join(',') }}
+
+#######################################################################################################################
+## ZWave Unavailable Devices
+#ISSUE when zwave devices go unavailable they are no longer in the zwave domain??
+#######################################################################################################################
+    zwave_unavailable_devices:
+      friendly_name_template: "{{ 'Zwave Devices All Online' if is_state('sensor.zwave_unavailable_devices','0') else 'ZWave Device Offline'}}"
+      unique_id: zwave_unavailable_devices
+      icon_template: "{{ 'mdi:z-wave' if is_state('sensor.zwave_unavailable_devices','0') else 'mdi:alert-circle' }}"
+      value_template: "{{ states.zwave|selectattr('state','ne','ready')|list|length }}"
+      attribute_templates:
+        entities: >
+          {{ states.zwave|selectattr('state','ne','ready')|reject('in',state_attr('group.ignored_sensors','entity_id'))|map(attribute='entity_id')|list|join(',') }}
+
+#######################################################################################################################
+## Unavailable Sensors
+## state: number of unavailable sensors
+## attribute: names - comma separated list of unavailable sensor names
+## attribute: sensor_entities: - comma separated list of unavailable sensor entity id's
+## - updates every minute (sensor.time)
+## - sensor entity_id's in ignored_sensors are filtered
+#######################################################################################################################
+    unavailable_sensors:
+      friendly_name_template: "{{ 'Sensors All Available' if is_state('sensor.unavailable_sensors','0') else 'Unavailable Sensors'}}"
+      unique_id: unavailable_sensors
+      icon_template: "{{ 'mdi:check-circle' if is_state('sensor.unavailable_sensors','0') else 'mdi:alert-circle' }}"
+      value_template: >
+          {{ states|selectattr('domain','in',['sensor','binary_sensor','variable'])|selectattr('state','in',['unavailable','unknown','none'])
+              |rejectattr('entity_id','in',state_attr('group.ignored_sensors','entity_id'))|map(attribute='entity_id')|list|count }}
+      attribute_templates:
+        entities: >
+          {{ states|selectattr('domain','in',['sensor','binary_sensor','variable'])|selectattr('state','in',['unavailable','unknown','none'])
+              |rejectattr('entity_id','in',state_attr('group.ignored_sensors','entity_id'))|map(attribute='entity_id')|join(',') }}

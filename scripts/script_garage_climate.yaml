@@ -1,0 +1,122 @@
+######################################################################################################################
+## Garage Climate On
+#######################################################################################################################
+garage_climate_on:
+  alias: "Garage Climate On"
+  description: "Turn on garage heat."
+  icon: mdi:thermostat-box
+  mode: restart
+  sequence:
+    # only run if garage climate automation is enabled
+    - condition: state
+      entity_id: input_boolean.garage_climate_automation
+      state: 'on'
+
+    # only run on if freeze protection or heat is on
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: input_boolean.garage_freeze_protection
+          state: 'on'
+
+        - condition: state
+          entity_id: input_boolean.garage_heat
+          state: 'on'
+
+    # turn off garage thermostat automation to avoid recursive calls
+    - service: automation.turn_off
+      entity_id: automation.garage_climate_thermostat_adjusted
+
+    # turn garage heat on
+    - service: climate.set_operation_mode
+      data:
+        entity_id: climate.garage_thermostat
+        operation_mode: 'heat'
+
+    # set either freeze or heat temperature
+    - service: climate.set_temperature
+      data:
+        entity_id: climate.garage_thermostat
+        # set to heat temp if heat on else set to freeze protection temp
+        temperature: >
+          {% if is_state('input_boolean.garage_heat','on') %}
+            {{ states('input_number.garage_heat_temperature')|int }}
+          {% else %}
+            {{ states('input_number.garage_freeze_temperature')|int }}
+          {% endif %}
+
+    # wait for heat to turn on before turning climate state automation back on
+    - wait_template: "{{ is_state('climate.garage_thermostat','heat') }}"
+      timeout:
+        minutes: 1
+      continue_on_timeout: true
+
+    # turn garage thermostat automation back on
+    - service: automation.turn_on
+      entity_id: automation.garage_climate_thermostat_adjusted
+
+#######################################################################################################################
+## Garage Climate Off
+#######################################################################################################################
+garage_climate_off:
+  alias: "Garage Climate Off"
+  description: "Turn off garage heat."
+  icon: mdi:thermostat-box
+  mode: restart
+  sequence:
+    # only run if garage climate automation is enabled
+    - condition: state
+      entity_id: input_boolean.garage_climate_automation
+      state: 'on'
+
+    - service: climate.set_temperature
+      data:
+        entity_id: climate.garage_thermostat
+        # set temperature to freeze protection temp if on or leave it at current setting
+        temperature: >
+          {% if is_state('input_boolean.garage_freeze_protection','on') %}
+            {{ states('input_number.garage_freeze_temperature')|int }}
+          {% else %}
+            {{ state_attr('climate.garage_thermostat','temperature')|int }}
+          {% endif %}
+
+    # wait for thermostat temp = freeze temp if freeze protection on
+    - wait_template: >
+        {% if is_state('input_boolean.garage_freeze_protection','on') %}
+          "{{ states('input_number.garage_freeze_temperature')|float == state_attr('climate.garage_thermostat','temperature')|float }}"
+        {% else %}
+          true
+        {% endif %}
+      timeout:
+        minutes: 2
+      continue_on_timeout: true
+
+    # only turn off if freeze protection is off or garage door is open
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: input_boolean.garage_freeze_protection
+          state: 'off'
+
+        - condition: state
+          entity_id: binary_sensor.garage_door_open
+          state: 'on'
+
+    # turn off garage thermostat automation to avoid recursive calls
+    - service: automation.turn_off
+      entity_id: automation.garage_climate_thermostat_adjusted
+
+    - service: climate.set_operation_mode
+      data:
+        entity_id: climate.garage_thermostat
+        operation_mode: 'off'
+
+    # wait for heat to turn off before turning climate state automation back on
+    - wait_template: "{{ is_state('climate.garage_thermostat','off') }}"
+      timeout:
+        minutes: 1
+      continue_on_timeout: true
+
+    # turn garage thermostat automation back on
+    - service: automation.turn_on
+      entity_id: automation.garage_climate_thermostat_adjusted

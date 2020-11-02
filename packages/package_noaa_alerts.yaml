@@ -1,0 +1,388 @@
+#######################################################################################################################
+## Dark Sky Weather Integration Package
+## https://github.com/dcshoecomp/noaa_alerts
+#######################################################################################################################
+
+homeassistant:
+  customize:
+    alert.weather_noaa_alert:
+      friendly_name: NOAA Alert
+      icon: mdi:weather-hurricane
+
+variable:
+  current_noaa_alert_severity:
+    value: none
+    attributes:
+      friendly_name: "Current NOAA Alert Severity"
+      icon: mdi:weather-hurricane
+    restore: true
+
+  previous_noaa_alert_severity:
+    value: none
+    attributes:
+      friendly_name: "Previous NOAA Alert Severity"
+      icon: mdi:weather-hurricane
+    restore: true
+
+alert:
+  weather_noaa_alert:
+    name: "NOAA Weather Alert"
+    title: "NOAA Weather Alert"
+    message: |
+      {% set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
+      {% set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
+      {% set inst = states.sensor.noaa_alerts_miz076.attributes.alerts[0].instruction %}
+      {% set start = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].onset)|timestamp_custom('%_I:%M %p %A',true) %}
+      {% set until = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].ends)|timestamp_custom('%_I:%M %p %A') %}
+      There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if not until == '' }}.
+      {{ inst }}.
+    entity_id: binary_sensor.noaa_alert_active
+    state: 'on'
+    repeat: 720
+    can_acknowledge: false
+    skip_first: false
+    notifiers: jason
+    data:
+      tag: noaa_alert
+      timestamp: "{{ as_timestamp(now()) }}" #push
+      priority: high
+      renotify: true #push
+      ttl: 3600
+      silent: false #push
+      requireInteraction: true #push
+      sticky: true #app
+      url: /lovelace/weather #push
+      clickAction: /lovelace/weather #app
+      color: !secret WARNING_COLOR #app #IDEA match to severity
+      icon: !secret STORM_ICON #push
+      badge: !secret STORM_BADGE #push
+
+sensor:
+  - platform: noaa_alerts
+    zoneid: MIZ076
+    #OPTION zoneid: MIC163
+
+binary_sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## NOAA Connected
+#######################################################################################################################
+      noaa_connected:
+        friendly_name: NOAA
+        unique_id: noaa_connected
+        icon_template: "{{ 'mdi:weather-hurricane' if is_state('binary_sensor.noaa_connected','on') else 'mdi:cellphone-off' }}"
+        device_class: connectivity
+        value_template: "{{ not states('sensor.noaa_alerts_miz076') in ['unknown','unavailable','none'] }}"
+
+      noaa_connected_alert:
+        friendly_name: NOAA
+        unique_id: noaa_connected_alert
+        icon_template: mdi:alert-circle
+        value_template: "{{ is_state('binary_sensor.noaa_connected','off') }}"
+
+#######################################################################################################################
+## Active NOAA Weather Alert
+#######################################################################################################################
+      noaa_alert_active:
+        friendly_name: NOAA Alert
+        unique_id: noaa_alert_active
+        icon_template: mdi:weather-hurricane
+        device_class: safety
+        value_template: "{{ states('sensor.noaa_alerts_miz076')|int > 0 }}"
+        availability_template: "{{ is_state('binary_sensor.noaa_connected','on') }}"
+
+automation:
+#######################################################################################################################
+## NOAA Alert
+## attr: event_type, event_severity, urgency, headline, description, instruction
+## event_severity values: Extreme, Severe, Moderate, Minor, Unknown
+## urgency: Immediate, Expected, Future, Past, Unknown
+#######################################################################################################################
+  - id: noaa_alerts_weather_alert
+    alias: "[NOAA Alerts] Weather Alert"
+    description: "Display weather alert on UI play alert/announcement for severe alerts."
+    initial_state: true
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id: sensor.noaa_alerts_miz076
+
+      - platform: state
+        entity_id: variable.startup_complete
+        to: 'true'
+
+    condition:
+      - condition: state
+        entity_id: variable.startup_complete
+        state: 'true'
+
+    action:
+      # clear alert severity variables if no active alerts
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.noaa_alerts_miz076
+                below: 1
+
+            sequence:
+              - service: variable.set_variable
+                data:
+                  variable: previous_noaa_alert_severity
+                  value: cleared
+
+              - service: variable.set_variable
+                data:
+                  variable: current_noaa_alert_severity
+                  value: cleared
+
+        default:
+          # set previous alert severity (from variable.current_dark_sky_alert_severity)
+          - service: variable.set_variable
+            data:
+              variable: previous_noaa_alert_severity
+              value: "{{ states('variable.current_noaa_alert_severity')|lower }}"
+
+          # set current alert severity from alert
+          - service: variable.set_variable
+            data:
+              variable: current_noaa_alert_severity
+              value: >
+                {% if states.sensor.noaa_alerts_miz076.attributes.alerts[0] is defined %}{{states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity|lower }}
+                {% else %}{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower }}
+                {% endif %}
+
+          # only run if new alert is extreme or more severe than current alert
+          - condition: template
+            value_template: >
+              {% set p = states('variable.previous_noaa_alert_severity') %}
+              {% set c = states('variable.current_noaa_alert_severity')%}
+              {% if 'tornado' in state_attr('sensor.dark_sky_alerts','title_0')|lower %} true
+              {% else %}
+                {{ p == 'severe' and c in ['extreme']
+                    or p == 'moderate' and c in ['extreme','severe']
+                    or p == 'minor' and c in ['extreme','severe','moderate']
+                    or p in ['cleared','unknown','unavailable','none']
+                      and c in ['extreme','severe','moderate','minor'] }}
+              {% endif %}
+
+          - service: input_boolean.turn_on
+            entity_id: input_boolean.display_weather_alerts
+
+          # play as alert if extreme severity otherwise play as an announcement, quiet play if severe, moderate
+          - service: script.tts_announcement
+            data:
+              play_message: |
+                {% set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
+                {% set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
+                {% set inst = states.sensor.noaa_alerts_miz076.attributes.alerts[0].instruction %}
+                {% set start = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].onset)|timestamp_custom('%_I:%M %p %A',true) %}
+                {% set until = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].ends)|timestamp_custom('%_I:%M %p %A') %}
+                Attention! The National Weather Service has issued an {{ type }}.
+                There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if not until == '' }}.
+                {{ inst }}.
+              quiet_play: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower in ['extreme','severe'] }}"
+              alert: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower == 'extreme' }}"
+
+#######################################################################################################################
+## NOAA Alerts Reset Weather Alert
+#######################################################################################################################
+  - id: noaa_alerts_reset_weather_alert
+    alias: "[NOAA Alerts] Reset Weather Alert"
+    description: "Reset weather alert severity so weather alerts replay daily."
+    initial_state: true
+    mode: restart
+    trigger:
+      - platform: template
+        value_template: "{{ is_state('sensor.time',states('sensor.waketime_today')) }}"
+
+    action:
+      # wait until 30 minutes past waketime
+      - delay:
+          minutes: 30
+
+      - service: variable.set_variable
+        data:
+          variable: current_noaa_alert_severity
+          value: cleared
+
+      - service: variable.set_variable
+        data:
+          variable: previous_noaa_alert_severity
+          value: cleared
+          
+          
+# alerts:
+#   - '@id': 'https://api.weather.gov/alerts/NWS-IDP-PROD-4468116-3715033'
+#     '@type': 'wx:Alert'
+#     id: NWS-IDP-PROD-4468116-3715033
+#     areaDesc: >-
+#       Oakland; Livingston; Midland; Lenawee; Huron; Bay; Tuscola; Monroe;
+#       Genesee; Saginaw; Sanilac; Wayne; Shiawassee; St. Clair; Lapeer;
+#       Washtenaw; Macomb
+#     geocode:
+#       UGC:
+#         - MIZ069
+#         - MIZ068
+#         - MIZ047
+#         - MIZ082
+#         - MIZ049
+#         - MIZ048
+#         - MIZ054
+#         - MIZ083
+#         - MIZ061
+#         - MIZ053
+#         - MIZ055
+#         - MIZ076
+#         - MIZ060
+#         - MIZ063
+#         - MIZ062
+#         - MIZ075
+#         - MIZ070
+#       SAME:
+#         - '026125'
+#         - 026093
+#         - '026111'
+#         - 026091
+#         - '026063'
+#         - '026017'
+#         - '026157'
+#         - '026115'
+#         - 026049
+#         - '026145'
+#         - '026151'
+#         - '026163'
+#         - '026155'
+#         - '026147'
+#         - 026087
+#         - '026161'
+#         - 026099
+#     affectedZones:
+#       - 'https://api.weather.gov/zones/forecast/MIZ069'
+#       - 'https://api.weather.gov/zones/forecast/MIZ068'
+#       - 'https://api.weather.gov/zones/forecast/MIZ047'
+#       - 'https://api.weather.gov/zones/forecast/MIZ082'
+#       - 'https://api.weather.gov/zones/forecast/MIZ049'
+#       - 'https://api.weather.gov/zones/forecast/MIZ048'
+#       - 'https://api.weather.gov/zones/forecast/MIZ054'
+#       - 'https://api.weather.gov/zones/forecast/MIZ083'
+#       - 'https://api.weather.gov/zones/forecast/MIZ061'
+#       - 'https://api.weather.gov/zones/forecast/MIZ053'
+#       - 'https://api.weather.gov/zones/forecast/MIZ055'
+#       - 'https://api.weather.gov/zones/forecast/MIZ076'
+#       - 'https://api.weather.gov/zones/forecast/MIZ060'
+#       - 'https://api.weather.gov/zones/forecast/MIZ063'
+#       - 'https://api.weather.gov/zones/forecast/MIZ062'
+#       - 'https://api.weather.gov/zones/forecast/MIZ075'
+#       - 'https://api.weather.gov/zones/forecast/MIZ070'
+#     references: []
+#     sent: '2020-10-02T14:38:00-04:00'
+#     effective: '2020-10-02T14:38:00-04:00'
+#     onset: '2020-10-03T00:00:00-04:00'
+#     expires: '2020-10-03T08:00:00-04:00'
+#     ends: '2020-10-03T08:00:00-04:00'
+#     status: Actual
+#     messageType: Alert
+#     category: Met
+#     severity: Minor
+#     certainty: Likely
+#     urgency: Expected
+#     event: Frost Advisory
+#     sender: w-nws.webmaster@noaa.gov
+#     senderName: NWS Detroit/Pontiac MI
+#     headline: >-
+#       Frost Advisory issued October 2 at 2:38PM EDT until October 3 at 8:00AM
+#       EDT by NWS Detroit/Pontiac MI
+#     description: |-
+#       * WHAT...Clearing sky after midnight leads to low temperatures in
+#       the mid 30s and frost formation most locations by sunrise
+#       Saturday.
+
+#       * WHERE...Southeast Michigan mainly outside of Detroit.
+
+#       * WHEN...From midnight tonight to 8 AM EDT Saturday.
+
+#       * IMPACTS...Frost could kill sensitive outdoor vegetation if left
+#       uncovered.
+#     instruction: Take steps now to protect vulnerable plants from the cold.
+#     response: Prepare
+#     parameters:
+#       NWSheadline:
+#         - FROST ADVISORY IN EFFECT FROM MIDNIGHT TONIGHT TO 8 AM EDT SATURDAY
+#       VTEC:
+#         - /O.NEW.KDTX.FR.Y.0003.201003T0400Z-201003T1200Z/
+#       PIL:
+#         - DTXNPWDTX
+#       BLOCKCHANNEL:
+#         - CMAS
+#         - EAS
+#         - NWEM
+#       eventEndingTime:
+#         - '2020-10-03T12:00:00+00:00'
+# urgency: Expected
+# event_type: Frost Advisory
+# event_severity: Minor
+# description: |-
+#   * WHAT...Clearing sky after midnight leads to low temperatures in
+#   the mid 30s and frost formation most locations by sunrise
+#   Saturday.
+
+#   * WHERE...Southeast Michigan mainly outside of Detroit.
+
+#   * WHEN...From midnight tonight to 8 AM EDT Saturday.
+
+#   * IMPACTS...Frost could kill sensitive outdoor vegetation if left
+#   uncovered.
+# headline: >-
+#   Frost Advisory issued October 2 at 2:38PM EDT until October 3 at 8:00AM EDT by
+#   NWS Detroit/Pontiac MI
+# instruction: Take steps now to protect vulnerable plants from the cold.
+# alerts_string: >-
+#   [{"@id": "https://api.weather.gov/alerts/NWS-IDP-PROD-4468116-3715033",
+#   "@type": "wx:Alert", "id": "NWS-IDP-PROD-4468116-3715033", "areaDesc":
+#   "Oakland; Livingston; Midland; Lenawee; Huron; Bay; Tuscola; Monroe; Genesee;
+#   Saginaw; Sanilac; Wayne; Shiawassee; St. Clair; Lapeer; Washtenaw; Macomb",
+#   "geocode": {"UGC": ["MIZ069", "MIZ068", "MIZ047", "MIZ082", "MIZ049",
+#   "MIZ048", "MIZ054", "MIZ083", "MIZ061", "MIZ053", "MIZ055", "MIZ076",
+#   "MIZ060", "MIZ063", "MIZ062", "MIZ075", "MIZ070"], "SAME": ["026125",
+#   "026093", "026111", "026091", "026063", "026017", "026157", "026115",
+#   "026049", "026145", "026151", "026163", "026155", "026147", "026087",
+#   "026161", "026099"]}, "affectedZones":
+#   ["https://api.weather.gov/zones/forecast/MIZ069",
+#   "https://api.weather.gov/zones/forecast/MIZ068",
+#   "https://api.weather.gov/zones/forecast/MIZ047",
+#   "https://api.weather.gov/zones/forecast/MIZ082",
+#   "https://api.weather.gov/zones/forecast/MIZ049",
+#   "https://api.weather.gov/zones/forecast/MIZ048",
+#   "https://api.weather.gov/zones/forecast/MIZ054",
+#   "https://api.weather.gov/zones/forecast/MIZ083",
+#   "https://api.weather.gov/zones/forecast/MIZ061",
+#   "https://api.weather.gov/zones/forecast/MIZ053",
+#   "https://api.weather.gov/zones/forecast/MIZ055",
+#   "https://api.weather.gov/zones/forecast/MIZ076",
+#   "https://api.weather.gov/zones/forecast/MIZ060",
+#   "https://api.weather.gov/zones/forecast/MIZ063",
+#   "https://api.weather.gov/zones/forecast/MIZ062",
+#   "https://api.weather.gov/zones/forecast/MIZ075",
+#   "https://api.weather.gov/zones/forecast/MIZ070"], "references": [], "sent":
+#   "2020-10-02T14:38:00-04:00", "effective": "2020-10-02T14:38:00-04:00",
+#   "onset": "2020-10-03T00:00:00-04:00", "expires": "2020-10-03T08:00:00-04:00",
+#   "ends": "2020-10-03T08:00:00-04:00", "status": "Actual", "messageType":
+#   "Alert", "category": "Met", "severity": "Minor", "certainty": "Likely",
+#   "urgency": "Expected", "event": "Frost Advisory", "sender":
+#   "w-nws.webmaster@noaa.gov", "senderName": "NWS Detroit/Pontiac MI",
+#   "headline": "Frost Advisory issued October 2 at 2:38PM EDT until October 3 at
+#   8:00AM EDT by NWS Detroit/Pontiac MI", "description": "* WHAT...Clearing sky
+#   after midnight leads to low temperatures in\nthe mid 30s and frost formation
+#   most locations by sunrise\nSaturday.\n\n* WHERE...Southeast Michigan mainly
+#   outside of Detroit.\n\n* WHEN...From midnight tonight to 8 AM EDT
+#   Saturday.\n\n* IMPACTS...Frost could kill sensitive outdoor vegetation if
+#   left\nuncovered.", "instruction": "Take steps now to protect vulnerable plants
+#   from the cold.", "response": "Prepare", "parameters": {"NWSheadline": ["FROST
+#   ADVISORY IN EFFECT FROM MIDNIGHT TONIGHT TO 8 AM EDT SATURDAY"], "VTEC":
+#   ["/O.NEW.KDTX.FR.Y.0003.201003T0400Z-201003T1200Z/"], "PIL": ["DTXNPWDTX"],
+#   "BLOCKCHANNEL": ["CMAS", "EAS", "NWEM"], "eventEndingTime":
+#   ["2020-10-03T12:00:00+00:00"]}}]
+# friendly_name: NOAA Alerts (MIZ076)
+# icon: 'mdi:weather-hurricane'
+          

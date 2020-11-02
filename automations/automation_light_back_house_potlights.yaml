@@ -1,0 +1,139 @@
+#######################################################################################################################
+## Light - Back House Potlights Nobody Home
+#######################################################################################################################
+- id: light_back_house_potlights_nobody_home
+  alias: "[Light] Back House Potlights Nobody Home"
+  description: "Turn light on when nobody is home."
+  initial_state: true
+  mode: single
+  variables:
+    default: 150
+    quiet: 80
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 10 # must be after away mode has run
+
+    - platform: time_pattern
+      minutes: '/15'
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.light_automation
+        - input_boolean.presence_automation
+        - binary_sensor.auto_light_on
+      state: 'on'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Away
+        - Vacation
+
+    - condition: state
+      entity_id: variable.alarm_triggered
+      state: 'false'
+
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.back_house_potlights
+        brightness:  "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Back House Potlights Auto On
+#######################################################################################################################
+- id: light_back_house_potlights_auto_on
+  alias: "[Light] Back House Potlights Auto On"
+  description: "Turn on lights."
+  initial_state: true
+  mode: single
+  variables:
+    current: "{{ state_attr('light.back_house_potlights','brightness')|int }}"
+    default: 175
+    quiet: 100
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.auto_light_on
+      to: 'on'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      for:
+        seconds: 5 # allow switch back to home/night mode and light scripts to start
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.light_automation
+        - binary_sensor.auto_light_on
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
+
+    - condition: template
+      value_template: "{{ current > quiet if trigger.entity_id == 'binary_sensor.quiet_hours' else current < default }}"
+
+    - condition: state
+      entity_id: variable.alarm_triggered
+      state: 'false'
+
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.back_house_potlights
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Back House Potlights Auto Off
+## - don't turn off in away mode
+#######################################################################################################################
+- id: light_back_house_potlights_auto_off
+  alias: "[Light] Back House Potlights Auto Off"
+  description: "Turn off lights."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.auto_light_on
+      to: 'off'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+        - Night
+      for:
+        minutes: 5 # allow timer to cancel, occupant to leave
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: variable.alarm_triggered
+      state: 'false'
+
+  action:
+    - service: light.turn_off
+      entity_id: light.back_house_potlights

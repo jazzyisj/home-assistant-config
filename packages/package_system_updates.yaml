@@ -1,0 +1,344 @@
+#######################################################################################################################
+## Package - System Updates
+## use system category
+#######################################################################################################################
+homeassistant:
+  customize:
+    alert.system_system_update:
+      friendly_name: System Update
+      icon: mdi:cloud-upload
+    binary_sensor.updater:
+      icon: mdi:update
+
+
+alert:
+#######################################################################################################################
+## Alert - System Update
+#######################################################################################################################
+  system_system_update:
+    name: "System Update"
+    title: "System Update Alert"
+    message: !include /config/include/template/system_update_message.yaml
+    entity_id: binary_sensor.system_update_alert
+    state: 'on'
+    repeat: 1440 #24h
+    can_acknowledge: true
+    skip_first: false
+    notifiers: jason
+    data:
+      actions:
+        - action: pause_system_update
+          title: Pause
+        - action: close_system_update
+          title: Close
+      tag: system_update
+      timestamp: "{{ as_timestamp(now()) }}" #push
+      priority: normal
+      renotify: true #push
+      ttl: 3600
+      silent: true #push
+      requireInteraction: false #push
+      sticky: false #app
+      url: /lovelace/system #push
+      clickAction: /lovelace/system #app
+      color: !secret WARNING_COLOR #app
+      icon: !secret OFFLINE_ICON #push  #IMAGE
+      badge: !secret OFFLINE_BADGE #push
+
+binary_sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## System Update
+#######################################################################################################################
+      system_update:
+        friendly_name: System Update
+        unique_id: system_update
+        icon_template: "{{ 'mdi:cloud-upload' if is_state('binary_sensor.system_update','on') else 'mdi:cloud-check' }}"
+        device_class: problem
+        value_template: >
+            {{ is_state('binary_sensor.updater','on')
+                or is_state('sensor.updater_core','on')
+                or is_state('binary_sensor.updater_supervisor','on')
+                or is_state('sensor.updater_hassos','on')
+                or is_state('binary_sensor.updater_addons','on')
+                or is_state('binary_sensor.updater_hacs','on')
+                or is_state('binary_sensor.updater_breaking_changes','on')
+                or is_state('sensor.updater_cli','on')
+                or is_state('sensor.updater_dns','on')
+                or is_state('sensor.updater_audio','on')
+                or is_state('sensor.updater_multicast','on') }}
+
+      system_update_alert:
+        unique_id: system_update_alert
+        value_template: "{{ is_state('binary_sensor.system_update','on') and is_state('binary_sensor.alerts_enabled','on') }}"
+
+#######################################################################################################################
+## Supervisor Updates  https://community.home-assistant.io/t/update-notifications-core-hacs-supervisor-and-addons/182295
+#######################################################################################################################
+      updater_supervisor:
+        friendly_name: Updater Supervisor
+        unique_id: updater_supervisor
+        device_class: problem
+        value_template: >
+          {% if states('sensor.updater_supervisor') in ['unknown','unavailable','none'] %} false
+          {% else %}{{ state_attr('sensor.updater_supervisor','current_version') != state_attr('sensor.updater_supervisor','newest_version') }}
+          {% endif %}
+        availability_template: "{{ (states('sensor.updater_supervisor')|int(-1)) > -1 }}"
+
+      updater_hacs:
+        friendly_name: Updater - HACS
+        unique_id: updater_hacs
+        device_class: problem
+        value_template: "{{ states('sensor.hacs')|int > 0 }}"
+        availability_template: "{{ states('sensor.hacs') not in ['unknown','unavailable','none'] }}"
+
+      updater_addons:
+        friendly_name: Updater - Addons
+        unique_id: updater_addons
+        device_class: problem
+        value_template: "{{ states('sensor.updater_supervisor')|int > 0 }}"
+        availability_template: "{{ states('sensor.updater_supervisor') not in ['unknown','unavailable','none'] }}"
+
+      updater_breaking_changes:
+        friendly_name: Updater - Breaking Changes
+        unique_id: updater_breaking_changes
+        device_class: problem
+        value_template: "{{ states('sensor.breaking_change_warnings')|int > 0 }}"
+        availability_template: "{{ states('sensor.breaking_change_warnings') not in ['unknown','unavailable','none'] }}"
+
+      updater_multicast:
+        friendly_name: Updater - Multicast
+        unique_id: updater_multicast
+        device_class: problem
+        value_template: "{{ state_attr('sensor.updater_multicast','current_version') != state_attr('sensor.updater_multicast','newest_version') }}"
+        availability_template: "{{ states('sensor.updater_multicast') not in ['unknown','unavailable','none'] }}"
+
+      updater_hassos:
+        friendly_name: Updater - Hass OS
+        unique_id: updater_hassos
+        device_class: problem
+        value_template: >
+          {% if states('sensor.hassos_current_version') in ['unknown','unavailable','none'] or states('sensor.hassos_newest_version') in ['unknown','unavailable','none'] %} false
+          {% else %}{{ states('sensor.hassos_current_version') != states('sensor.hassos_newest_version') }}
+          {% endif %}
+        availability_template: >
+          {{ states('sensor.hassos_current_version') not in ['unknown','unavailable','none']
+              and states('sensor.hassos_newest_version') not in ['unknown','unavailable','none'] }}
+
+sensor:
+#######################################################################################################################
+## Version Sensor
+## https://www.home-assistant.io/components/sensor.version/
+#######################################################################################################################
+  - platform: version
+    name: Home Assistant Version
+    image: raspberrypi3
+    source: local
+
+#######################################################################################################################
+## Supervisor Updates - track available updates for supervisor & addons
+## https://community.home-assistant.io/t/update-notifications-core-hacs-supervisor-and-addons/182295
+#######################################################################################################################
+  - platform: command_line
+    name: Updater Supervisor
+    command: 'curl http://supervisor/supervisor/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)" | jq ''{"newest_version":.data.version_latest,"current_version":.data.version,"addons":[.data.addons[] | select(.version != .version_latest)]}'''
+    value_template: "{{ value_json.addons | length }}"
+    json_attributes:
+      - newest_version
+      - current_version
+      - addons
+    scan_interval: 300
+    command_timeout: 60
+
+  # Sensors to track updates to other core components (audio, dns and CLI)
+  - platform: command_line
+    name: Updater Audio
+    command: 'curl http://supervisor/audio/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)" | jq ''{"newest_version":.data.version_latest,"current_version":.data.version}'''
+    value_template: "{% if value_json.newest_version != value_json.current_version %}on{% else %}off{% endif %}"
+    json_attributes:
+      - newest_version
+      - current_version
+    scan_interval: 300
+    command_timeout: 60
+
+  - platform: command_line
+    name: Updater DNS
+    command: 'curl http://supervisor/dns/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)" | jq ''{"newest_version":.data.version_latest,"current_version":.data.version}'''
+    value_template: "{% if value_json.newest_version != value_json.current_version %}on{% else %}off{% endif %}"
+    json_attributes:
+      - newest_version
+      - current_version
+    scan_interval: 300
+    command_timeout: 60
+
+  - platform: command_line
+    name: Updater CLI
+    command: 'curl http://supervisor/cli/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)" | jq ''{"newest_version":.data.version_latest,"current_version":.data.version}'''
+    value_template: "{% if value_json.newest_version != value_json.current_version %}on{% else %}off{% endif %}"
+    json_attributes:
+      - newest_version
+      - current_version
+    scan_interval: 300
+    command_timeout: 60
+
+  # Alternate updater sensor for core since binary_sensor.updater is very slow to recognize updates
+  - platform: command_line
+    name: Updater Core
+    command: 'curl http://supervisor/core/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)" | jq ''{"newest_version":.data.version_latest,"current_version":.data.version}'''
+    value_template: "{% if value_json.newest_version != value_json.current_version %}on{% else %}off{% endif %}"
+    json_attributes:
+      - newest_version
+      - current_version
+    scan_interval: 300
+    command_timeout: 60
+
+  - platform: command_line
+    name: Updater Multicast
+    command: 'curl http://supervisor/multicast/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)" | jq ''{"newest_version":.data.version_latest,"current_version":.data.version}'''
+    value_template: "{% if value_json.newest_version != value_json.current_version %}on{% else %}off{% endif %}"
+    json_attributes:
+      - newest_version
+      - current_version
+
+  # Sensor to version of HassOS
+  - platform: command_line
+    name: HassOS Current Version
+    command: 'curl http://supervisor/host/info -H "Authorization: Bearer $(printenv SUPERVISOR_TOKEN)"'
+    value_template: "{{ value_json.data.operating_system[7:] }}"
+    json_attributes:
+      - data
+
+  - platform: rest
+    resource: https://version.home-assistant.io/stable.json
+    name: HassOS Newest Version
+    value_template: "{{ value_json.hassos.ova }}"
+    scan_interval: 3600
+
+automation:
+#######################################################################################################################
+## System - Update Available
+#######################################################################################################################
+  - id: system_update_available
+    alias: "[System] Update Available"
+    description: "Starts the check config addon when an update becomes available."
+    trigger:
+    - entity_id: sensor.updater_core
+      platform: state
+      to: 'on'
+
+    action:
+    - service: hassio.addon_start
+      data:
+        addon: core_check_config
+
+#######################################################################################################################
+## System - System Update Alert
+#######################################################################################################################
+  - id: system_update_alert
+    alias: "[System] Update Alert"
+    description: "Create notification when alert turns on."
+    initial_state: true
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id:
+          - alert.system_system_update
+          - binary_sensor.updater
+          - binary_sensor.updater_supervisor
+          - binary_sensor.updater_hacs
+          - binary_sensor.updater_addons
+          - binary_sensor.updater_breaking_changes
+          - sensor.updater_core
+          - sensor.updater_cli
+          - sensor.updater_dns
+          - sensor.updater_audio
+
+    condition:
+      - condition: state
+        entity_id: alert.system_system_update
+        state: 'on'
+
+    action:
+      - service: persistent_notification.create
+        data:
+          title: "System Updates"
+          message: !include /config/include/template/system_update_message.yaml
+          notification_id: system_update
+
+#######################################################################################################################
+## System - Close System Update Notifications
+#######################################################################################################################
+  - id: system_close_system_update_notifications
+    alias: "[System] Close System Update Notifications"
+    description: "Dismiss notifications on all devices."
+    initial_state: true
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: alert.system_system_update
+        to:
+          - idle
+          - 'off'
+
+      #BUG from_state of dismissed persistent notifcations is unknown, use state_changed event
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: persistent_notification.system_update
+
+      #BUG html5 closed event doesn't work if notification is in tray
+      # - platform: event
+      #   event_type: html5_notification.closed
+      #   event_data:
+      #     tag: system_update
+
+      - platform: event
+        event_type: html5_notification.clicked
+        event_data:
+          action: close_system_update
+
+      - platform: event
+        event_type: html5_notification.clicked
+        event_data:
+          action: pause_system_update
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: close_system_update
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_system_update
+
+    condition:
+      #BUGFIX conditions required as workaround for unknown persistent notification state
+      - condition: or
+        conditions:
+          - "{% if trigger.entity_id is defined %}{{ trigger.entity_id == 'alert.system_system_update' and states('alert.system_system_update') in ['idle','off'] }}{% endif %}"
+          - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'system_update' }}{% endif %}"
+          - "{% if trigger.event is defined %}{{ trigger.event.data['action'] in ['close_system_update','pause_system_update'] }}{% endif %}"
+          - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.system_update','notifying') }}{% endif %}"
+
+    action:
+      #DELETE - service: system_log.write
+      #   data:
+      #     message: |
+      #       trigger: {{ trigger.entity_id }}
+      #       alert: {{ states('alert.system_system_update') }}
+      #       pnote: {{ states('persistent_notification.system_system_update') }}
+      #       event: {% if trigger.event is defined %}{{ trigger.event }}{% endif %}
+      #       type: {% if trigger.event is defined %}{{ trigger.event.event_type }}{% endif %}
+      #       action: {% if trigger.event is defined %}{{ trigger.event.data['action'] }}{% endif %}
+      #       pause: {% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_system_update' }}{% endif %}
+
+      - service: script.close_notifications
+        data:
+          target: mobile_app_jphone
+          category: system
+          tag: system_update
+          pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_system_update' }}{% endif %}"

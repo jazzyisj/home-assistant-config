@@ -1,0 +1,45 @@
+#######################################################################################################################
+## Schedule - Morning Before Alarm
+## - turn eco mode off to preheat/cool house when waking up
+## - runs 30 minutes before scheduled wake time or at house wakeup time (whichever earlier)
+## - default to days time if work shift unknown
+## - only runs if someone home and still in night mode
+#######################################################################################################################
+- id: schedule_morning_before_alarm
+  alias: "[Schedule] Morning Before Alarm"
+  description: "Switch house to override mode before wakeup to preheat house."
+  initial_state: true
+  mode: single
+  trigger:
+    # work times -> weekends -> guest
+    - platform: template
+      value_template: >
+        {% set t = states('sensor.time') %}
+        {% set hw = (state_attr('input_datetime.house_waketime','timestamp') + 18000)|timestamp_custom('%H:%M',true) %}
+        {% set dw = (state_attr('input_datetime.days_waketime','timestamp')|int - (30*60) + 18000)|timestamp_custom('%H:%M',true) %}
+        {% set aw = (state_attr('input_datetime.afternoons_waketime','timestamp')|int - (30*60) + 18000)|timestamp_custom('%H:%M',true) %}
+        {% set ww = (state_attr('input_datetime.weekend_waketime','timestamp')|int - (30*60) + 18000)|timestamp_custom('%H:%M',true) %}
+        {% set gw = (state_attr('input_datetime.guest_waketime','timestamp')|int - (30*60) + 18000)|timestamp_custom('%H:%M',true) %}
+        {% if t == hw %} true
+        {% elif is_state('binary_sensor.owner_home','on') %}
+          {{ (t == aw if is_state('sensor.current_shift','Afternoons') else t == dw)
+            if is_state('binary_sensor.work_today','on') else t ==  ww }}
+        {% else %}{{ t ==  gw }}
+        {% endif %}
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.schedule_automation
+        - binary_sensor.someone_home
+      state: 'on'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state: Night
+
+  action:
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.occupancy_mode
+        option: Override

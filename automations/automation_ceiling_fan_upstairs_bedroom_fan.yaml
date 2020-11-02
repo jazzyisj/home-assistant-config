@@ -1,0 +1,133 @@
+#######################################################################################################################
+## Ceiling Fan - Upstairs Bedroom Fan In Use
+#######################################################################################################################
+- id: ceiling_fan_upstairs_bedroom_fan_in_use
+  alias: "[Ceiling Fan] Upstairs Bedroom Fan In Use"
+  description: "Turn in use timer on when device state changes."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: fan.upstairs_bedroom_fan
+
+  condition:
+    - condition: state
+      entity_id: variable.startup_complete
+      state: 'true'
+
+  action:
+    - service: timer.start
+      data:
+        entity_id: timer.upstairs_bedroom_fan
+
+#######################################################################################################################
+## Ceiling Fan - Upstairs Bedroom Fan Auto On
+#######################################################################################################################
+- id: ceiling_fan_upstairs_bedroom_fan_auto_on
+  alias: "[Ceiling Fan] Upstairs Bedroom Fan Auto On"
+  description: "Turn ceiling fan on."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.upstairs_thermostat_fan
+      to: 'on'
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.ceiling_fan_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: timer.upstairs_bedroom_fan
+      state: idle
+
+    # climate automation, hvac control must be enabled if trigger is furnace fan
+    - "{{ is_state('input_boolean.climate_automation','on') and is_state('input_boolean.hvac_fan_control','on')
+            if trigger.entity_id == 'binary_sensor.upstairs_thermostat_fan' else true }}"
+
+  action:
+    # turn off automation so we don't trigger device in use timers
+    - service: automation.turn_off
+      entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
+
+    - service: fan.turn_on
+      data:
+        entity_id: fan.upstairs_bedroom_fan
+        speed: medium
+
+    # delay to allow devices to change state
+    - delay:
+        seconds: 15  # fans are slow to change
+
+    - service: automation.turn_on
+      entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
+
+#######################################################################################################################
+## Ceiling Fan - Upstairs Bedroom Fan Auto Off
+#######################################################################################################################
+- id: ceiling_fan_upstairs_bedroom_fan_auto_off
+  alias: "[Ceiling Fan] Upstairs Bedroom Fan Auto Off"
+  description: "Turn ceiling fan off."
+  initial_state: true
+  mode: restart
+  trigger:
+    # failsafe if fan left on
+    - platform: state
+      entity_id: fan.upstairs_bedroom_fan
+      to: 'on'
+      for:
+        hours: 8
+
+    # delay to allow timers to cancel
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 5
+
+    - platform: state
+      entity_id: binary_sensor.upstairs_thermostat_fan
+      to: 'off'
+
+    # run at startup to prevent ceiling fans from being stranded on
+    - platform: state
+      entity_id: variable.startup_complete
+      to: 'true'
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.ceiling_fan_automation
+      state: 'on'
+
+    #IDEA can we get timers to survive restarts so we don't turn off a fan that was in use?
+    - condition: state
+      entity_id: timer.upstairs_bedroom_fan
+      state: idle
+
+    # presence automation must be enabled if trigger is occupancy mode
+    - "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    # climate automation must be enabled if trigger is furnace fan
+    - "{{ is_state('input_boolean.climate_automation','on') and is_state('input_boolean.hvac_fan_control','on')
+              if trigger.entity_id == 'binary_sensor.upstairs_thermostat_fan' else true }}"
+
+    # don't turn off if furnace fan is running and hvac fan control is on
+    - "{{ is_state('input_boolean.hvac_fan_control','off') if is_state('binary_sensor.upstairs_thermostat_fan','on') else true }}"
+
+  action:
+    # turn off automation so we don't trigger device in use timers
+    - service: automation.turn_off
+      entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
+
+    - service: fan.turn_off
+      entity_id: fan.upstairs_bedroom_fan
+
+    # delay to allow devices to change state
+    - delay:
+        seconds: 15  # fans are slow to change
+
+    - service: automation.turn_on
+      entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
