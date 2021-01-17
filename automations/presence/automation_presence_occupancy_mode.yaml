@@ -1,0 +1,177 @@
+#######################################################################################################################
+## Presence - Occupancy Mode
+#######################################################################################################################
+- id: presence_occupancy_mode
+  alias: "[Presence] Occupancy Mode"
+  description: "Actions when occupancy mode changes."
+  initial_state: true
+  mode: single
+  variables:
+    prev_mode: "{{ trigger.from_state.state }}"
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.presence_automation
+      state: 'on'
+
+  action:
+    # set previous occupancy mode
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.previous_occupancy_mode
+        option: "{{ prev_mode }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Home
+
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: binary_sensor.owner_home
+                      state: 'off'
+
+                  sequence:
+                    - service: automation.turn_off
+                      data:
+                        entity_id: group.occupancy_bypass_automations
+                        stop_actions: false
+
+                    # select guest if guest home or previous occupancy mode if not
+                    - service: input_select.select_option
+                      data:
+                        entity_id: input_select.occupancy_mode
+                        option: "{{ 'Guest' if is_state('input_boolean.guest_home','on') else prev_mode }}"
+
+                    - service: automation.turn_on
+                      entity_id: group.occupancy_bypass_automations
+
+              default:
+                - service: input_boolean.turn_off
+                  entity_id: input_boolean.guest_home
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: binary_sensor.someone_home
+                      state: 'off'
+
+                  sequence:
+                    - service: automation.turn_off
+                      data:
+                        entity_id: group.occupancy_bypass_automations
+                        stop_actions: false
+
+                    # back to previous mode
+                    - service: input_select.select_option
+                      data:
+                        entity_id: input_select.occupancy_mode
+                        option: "{{ prev_mode }}"
+
+                    - service: automation.turn_on
+                      entity_id: group.occupancy_bypass_automations
+
+              default:
+                # timers cancelled here so lights can turn off
+                - service: timer.cancel
+                  entity_id: group.light_in_use_timers
+
+                # make sure bedtime_delayed is off
+                - service: input_boolean.turn_off
+                  entity_id: input_boolean.bedtime_delayed
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state:
+                - Away
+                - Vacation
+
+          sequence:
+            # make sure guest boolean is off
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.guest_home
+
+            # timers cancelled here so lights / fans can turn off
+            - service: timer.cancel
+              entity_id:
+                - group.light_in_use_timers
+                - group.ceiling_fans_in_use_timers
+                - group.vent_fan_in_use_timers
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Guest
+
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: binary_sensor.owner_home
+                      state: 'on'
+
+                  sequence:
+                    - service: automation.turn_off
+                      data:
+                        entity_id: group.occupancy_bypass_automations
+                        stop_actions: false
+
+                    # turn guest home boolean on
+                    - service: input_boolean.turn_on
+                      entity_id: input_boolean.guest_home
+
+                    # back to previous mode if night/override else home mode
+                    - service: input_select.select_option
+                      data:
+                        entity_id: input_select.occupancy_mode
+                        option: "{{ prev_mode if prev_mode in ['Night','Override'] else 'Home' }}"
+
+                    - service: automation.turn_on
+                      entity_id: group.occupancy_bypass_automations
+
+              default:
+                - service: input_boolean.turn_on
+                  entity_id: input_boolean.guest_home
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: OVerride
+
+          sequence:
+            - wait_template: "{{ not is_state('input_select.occupancy_mode','Override') }}"
+              timeout:
+                minutes: 30
+              continue_on_timeout: true
+
+            # nobody has come home yet - reset occupancy mode
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Override
+
+            - service: automation.turn_off
+              data:
+                entity_id: group.occupancy_bypass_automations
+                stop_actions: false
+
+            - service: input_select.select_option
+              data:
+                entity_id: input_select.occupancy_mode
+                option: "{{ prev_mode }}"
+
+            - service: automation.turn_on
+              entity_id: group.occupancy_bypass_automations
+

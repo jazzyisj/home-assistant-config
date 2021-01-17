@@ -1,0 +1,150 @@
+#######################################################################################################################
+## Light - Living Room Pot Lights In Use #NEW_LIGHT
+#######################################################################################################################
+- id: light_living_room_pot_lights_in_use
+  alias: "[Light] Living Room Pot Lights In Use"
+  description: "Turn in use timer on when device state changes."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.living_room_pot_lights
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.startup_complete
+      state: 'on'
+
+  action:
+    - service: timer.start
+      data:
+        entity_id: timer.living_room_pot_lights
+
+#######################################################################################################################
+## Light - Living Room Potlights Auto On
+#######################################################################################################################
+- id: light_living_room_potlights_auto_on
+  alias: "[Light] Living Room Potlights Auto On"
+  description: "Turn on lights."
+  initial_state: true
+  mode: single
+  variables:
+    current: "{{ state_attr('light.living_room_pot_lights','brightness')|int }}"
+    default: 45
+    quiet: 20
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.auto_light_on
+        - binary_sensor.illuminance_light_on
+      to: 'on'
+
+    - platform: state
+      entity_id: binary_sensor.quiet_hours
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
+      for:
+        seconds: 5 # allow light scripts to start
+
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.auto_light_on
+          state: 'on'
+
+        - condition: state
+          entity_id: binary_sensor.illuminance_light_on
+          state: 'on'
+
+    - condition: template
+      value_template: "{{ current > quiet if trigger.entity_id == 'binary_sensor.quiet_hours' else current < default }}"
+
+    - condition: state
+      entity_id: binary_sensor.light_scene_active
+      state: 'off'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
+  action:
+    # turn off automation so we don't trigger device in use timers
+    - service: automation.turn_off
+      entity_id: automation.light_living_room_pot_lights_in_use
+
+    - service: light.turn_on
+      data:
+        entity_id: light.living_room_pot_lights
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+    - delay:
+        seconds: 5 #ZWAVE allow device to change state
+
+    - service: automation.turn_on
+      entity_id: automation.light_living_room_pot_lights_in_use
+
+#######################################################################################################################
+## Light - Living Room Potlights Auto Off
+#######################################################################################################################
+- id: light_living_room_potlights_auto_off
+  alias: "[Light] Living Room Potlights Auto Off"
+  description: "Turn off lights."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.auto_light_on
+        - binary_sensor.illuminance_light_on
+      to: 'off'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+      for:
+        minutes: 5 # allow timer to cancel, occupant to leave
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: binary_sensor.light_scene_active
+      state: 'off'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
+  action:
+    # turn off automation so we don't trigger device in use timers
+    - service: automation.turn_off
+      entity_id: automation.light_living_room_pot_lights_in_use
+
+    - service: light.turn_off
+      entity_id: light.living_room_pot_lights
+
+    - delay:
+        seconds: 5 #ZWAVE allow device to change state
+
+    - service: automation.turn_on
+      entity_id: automation.light_living_room_pot_lights_in_use

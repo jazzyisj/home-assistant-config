@@ -1,0 +1,287 @@
+#######################################################################################################################
+## Alarm - Triggered
+#######################################################################################################################
+- id: alarm_triggered
+  alias: "[Alarm] Triggered"
+  description: Sound alarm and send notifications when alarm is triggered.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to: triggered
+
+  action:
+    # cancel alarm triggered timer, may be running from previous instance
+    - service: timer.cancel
+      entity_id: timer.alarm_triggered_reset
+
+    - service: input_boolean.turn_on
+      entity_id: input_boolean.alarm_triggered
+
+    - service: input_text.set_value
+      data:
+        entity_id: input_text.current_alarm
+        value: "{{ states[state_attr('alarm_control_panel.house','changed_by').split('.')[0]][state_attr('alarm_control_panel.house','changed_by').split('.')[1]].name }}"
+
+    # first tts here before scene, snapshot delay
+    - service: script.turn_on
+      data:
+        entity_id: script.tts_play
+        variables:
+          alert: true
+          play_message: "Alarm! {{ states('input_text.current_alarm') }}"
+
+    - service: scene.create
+      data:
+        scene_id: alarm_triggered_lights_restore #NEW_LIGHT
+        entities:
+          light.living_room_pot_lights:
+            state: "{{ states('light.living_room_pot_lights') }}"
+            brightness: "{{ state_attr('light.living_room_pot_lights','brightness') }}"
+          light.living_room_cove_light:
+            state: "{{ states('light.living_room_cove_light') }}"
+            brightness: "{{ state_attr('light.living_room_cove_light','brightness') }}"
+          light.kitchen_potlights:
+            state: "{{ states('light.kitchen_potlights') }}"
+            brightness: "{{ state_attr('light.kitchen_potlights','brightness') }}"
+          light.kitchen_sink_light:
+            state: "{{ states('light.kitchen_sink_light') }}"
+          light.dining_room_potlights:
+            state: "{{ states('light.dining_room_potlights') }}"
+            brightness: "{{ state_attr('light.dining_room_potlights','brightness') }}"
+          light.dining_room_rgb_light:
+            state: "{{ states('light.dining_room_rgb_light') }}"
+            brightness: "{{ state_attr('light.dining_room_rgb_light','brightness') }}"
+          light.upstairs_hallway_potlights:
+            state: "{{ states('light.upstairs_hallway_potlights') }}"
+            brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness') }}"
+          light.upstairs_bathroom_vanity_rgb_light:
+            state: "{{ states('light.upstairs_bathroom_vanity_rgb_light') }}"
+            brightness: "{{ state_attr('light.upstairs_bathroom_vanity_rgb_light','brightness') }}"
+          light.upstairs_bathroom_shower_light:
+            state: "{{ states('light.upstairs_bathroom_shower_light') }}"
+            brightness: "{{ state_attr('light.upstairs_bathroom_shower_light','brightness') }}"
+          light.office_light:
+            state: "{{ states('light.office_light') }}"
+            brightness: "{{ state_attr('light.office_light','brightness') }}"
+          light.office_potlights:
+            state: "{{ states('light.office_potlights') }}"
+            brightness: "{{ state_attr('light.office_potlights','brightness') }}"
+          light.upstairs_bedroom_light:
+            state: "{{ states('light.upstairs_bedroom_light') }}"
+            brightness: "{{ state_attr('light.upstairs_bedroom_light','brightness') }}"
+          light.upstairs_bedroom_potlights:
+            state: "{{ states('light.upstairs_bedroom_potlights') }}"
+            brightness: "{{ state_attr('light.upstairs_bedroom_potlights','brightness') }}"
+          light.outside_garage_lights:
+            state: "{{ states('light.outside_garage_lights') }}"
+            brightness: "{{ state_attr('light.outside_garage_lights','brightness') }}"
+          light.front_porch_light:
+            state: "{{ states('light.front_porch_light') }}"
+            brightness: "{{ state_attr('light.front_porch_light','brightness') }}"
+          light.front_house_potlights:
+            state: "{{ states('light.front_house_potlights') }}"
+            brightness: "{{ state_attr('light.front_house_potlights','brightness') }}"
+          light.back_house_potlights:
+            state: "{{ states('light.back_house_potlights') }}"
+            brightness: "{{ state_attr('light.back_house_potlights','brightness') }}"
+          light.back_yard_tree_floodlights:
+            state: "{{ states('light.back_yard_tree_floodlights') }}"
+            brightness: "{{ state_attr('light.back_yard_tree_floodlights','brightness') }}"
+          light.back_yard_garden_light:
+            state: "{{ states('light.back_yard_garden_light') }}"
+          light.master_bedroom_light:
+            state: "{{ states('light.master_bedroom_light') }}"
+            brightness: "{{ state_attr('light.master_bedroom_light','brightness') }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.light_automation
+              state: 'on'
+
+          sequence:
+            - service: script.turn_on
+              entity_id: script.lights_on
+
+    - service: persistent_notification.create
+      data:
+        title: Alarm Triggered
+        notification_id: alarm_triggered
+        message: "Alarm Trigger: {{ states('input_text.current_alarm') }}"
+
+    # delay to allow garage motion/door snapshots to be created
+    #NOTE add other snapshot triggers here and update image template
+    - delay:
+        seconds: >
+          {{ (60 if is_state('binary_sensor.garage_motion','on')
+                or is_state('binary_sensor.garage_door_open','on') else 0)|int }}
+
+    # check to see if alarm still triggered
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.house
+              state: triggered
+
+          sequence:
+            #NOTE no alerts enabled condition - always run
+            - service: notify.alarm
+              data:
+                title: House Alarm Triggered
+                message: "Alarm: {{ states('input_text.current_alarm') }}"
+                data:
+                  tag: alarm_triggered
+                  group: Alarm
+                  channel: alarm_stream
+                  importance: max
+                  timeout: 600
+                  persistent: true
+                  clickAction: /lovelace/alarm
+                  color: !secret CRITICAL_COLOR
+                  icon_url: !secret ALARM_ICON
+                  image: !secret ALARM_IMAGE
+                  actions:
+                    - title: Disarm
+                      action: disarm_alarm_override #TEMP move to button on phone desktop must be unlocked
+                    - title: Cameras
+                      action: URI
+                      uri: app://com.flir.consumer.flir.lorexcloud
+
+            # delay before repeating alert
+            - delay:
+                seconds: 90
+
+            - repeat:
+                while:
+                  - condition: state
+                    entity_id: alarm_control_panel.house
+                    state: triggered
+
+                sequence:
+                  # play the alert, text was formated when stored
+                  - service: script.turn_on
+                    data:
+                      entity_id: script.tts_play
+                      variables:
+                        alert: true
+                        play_message: |
+                          Alert!
+                          {{ states('input_text.current_alarm') }}.
+                          Your intrusion has been detected and confirmed.
+                          The owners have been notified and the police have now been called.
+
+                  # repeat delay
+                  - delay:
+                      seconds: 90
+
+#######################################################################################################################
+## Alarm Triggered Reset Timer Finished
+#######################################################################################################################
+- id: alarm_triggered_reset_timer_finished
+  alias: "[Alarm] Triggered Reset Timer Finished"
+  description: Start reset notification script when timer is finished.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.alarm_triggered_reset
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'on'
+
+    - condition: state
+      entity_id: binary_sensor.someone_home
+      state: 'on'
+
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: triggered
+
+  action:
+    - service: input_boolean.turn_off
+      entity_id:
+        - input_boolean.alarm_warning
+        - input_boolean.alarm_triggered
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.light_automation
+              state: 'on'
+
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.activate_scene
+                variables:
+                  scene: scene.alarm_triggered_lights_restore
+
+            # delay to allow all lights to change state
+            - delay:
+                seconds: 30 #ZWAVE
+
+            # if warning before triggered, restore pre warning light settings
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.alarm_warning
+                      state: 'on'
+
+                  sequence:
+                    - service: automation.trigger
+                      entity_id: automation.alarm_warning_lights_restore
+
+    - service: input_text.set_value
+      data:
+        entity_id:
+          - input_text.current_alarm
+          - input_text.back_house_snapshot1
+          - input_text.back_house_snapshot2
+          - input_text.back_house_snapshot3
+          - input_text.garage_inside_snapshot1
+          - input_text.garage_inside_snapshot2
+          - input_text.garage_inside_snapshot3
+          - input_text.side_door_snapshot1
+          - input_text.side_door_snapshot2
+          - input_text.side_door_snapshot3
+          - input_text.side_drive_snapshot1
+          - input_text.side_drive_snapshot2
+          - input_text.side_drive_snapshot3
+        value: cleared
+
+    - service: script.turn_on
+      entity_id: script.tts_play_saved_messages
+
+#######################################################################################################################
+## Alarm - Close Alarm Triggered Notifications
+#######################################################################################################################
+- id: alarm_close_triggered_notifications
+  alias: "[Alarm] Close Triggered Notifications"
+  description: Dismiss notifications on all devices.
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to: disarmed
+
+  action:
+    - delay:
+        minutes: 15
+
+    - service: script.close_notifications
+      data:
+        target: mobile
+        tag: alarm_triggered
+
+    - delay:
+        seconds: 180 # prevent recursive triggers

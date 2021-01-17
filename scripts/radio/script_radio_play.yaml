@@ -1,0 +1,193 @@
+#######################################################################################################################
+## Radio Play
+#######################################################################################################################
+radio_play:
+  alias: Radio Play
+  description: Play streaming radio station.
+  fields:
+    preset:
+      description: Radio preset name.
+      example: morning
+    resume:
+      description: Resume radio play.
+      example: true
+  mode: restart
+  variables:
+    player: >
+      {% if preset == 'wake' %}{{ states('input_select.media_preset_speaker_wake') }}
+      {% elif preset == 'morning' %}{{ states('input_select.media_preset_speaker_wake') }}
+      {% elif preset == 'sleep' %}{{ states('input_select.media_preset_speaker_sleep') }}
+      {% elif preset == 'jason' %}{{ states('input_select.media_preset_speaker_jason') }}
+      {% elif preset == 'sheri' %}{{ states('input_select.media_preset_speaker_sheri') }}
+      {% elif preset == 'shower' %}{{ states('input_select.media_preset_speaker_shower') }}
+      {% elif preset == 'company' %}{{ states('input_select.media_preset_speaker_company') }}
+      {% else %}{{ states('input_select.radio_media_player') }}
+      {% endif %}
+    station: >
+      {% if preset == 'wake' %}{{ states('input_select.media_preset_radio_wake') }}
+      {% elif preset == 'morning' %}{{ states('input_select.media_preset_radio_morning') }}
+      {% elif preset == 'sleep' %}{{ states('input_select.media_preset_radio_sleep') }}
+      {% elif preset == 'jason' %}{{ states('input_select.media_preset_radio_jason') }}
+      {% elif preset == 'sheri' %}{{ states('input_select.media_preset_radio_sheri') }}
+      {% elif preset == 'shower' %}{{ states('input_select.media_preset_radio_shower') }}
+      {% elif preset == 'company' %}{{ states('input_select.media_preset_radio_company') }}
+      {% else %}{{ states('input_select.radio_station') }}
+      {% endif %}
+    volume: >
+      {% set qvol = states('input_number.media_volume_quiet')|int %}
+      {% if preset == 'wake' %}{% set vol = states('input_number.media_preset_volume_wake')|int %}
+      {% elif preset == 'morning' %}{% set vol = states('input_number.media_preset_volume_morning')|int %}
+      {% elif preset == 'sleep' %}{% set vol = states('input_number.media_preset_volume_sleep')|int %}
+      {% elif preset == 'jason' %}{% set vol = states('input_number.media_preset_volume_jason')|int %}
+      {% elif preset == 'sheri' %}{% set vol = states('input_number.media_preset_volume_sheri')|int %}
+      {% elif preset == 'shower' %}{% set vol = states('input_number.media_preset_volume_shower')|int %}
+      {% elif preset == 'company' %}{% set vol = states('input_number.media_preset_volume_company')|int %}
+      {% else %}{% set vol = states('input_number.radio_volume')|int %}
+      {% endif %}
+      {{ qvol if (is_state('binary_sensor.quiet_hours','on') and vol > qvol) and is_state('input_boolean.volume_override','off') else vol }}
+    current_player: "{{ states('sensor.radio_media_player') }}"
+  sequence:
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.radio_failed
+
+    - wait_template: "{{ is_state('script.radio_stop','off') and is_state('binary_sensor.tts_playing','off') }}"
+      timeout:
+        seconds: 300
+      continue_on_timeout: false # something wrong, do not continue
+
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: input_boolean.mute_all
+                  state: 'on'
+
+                - condition: state
+                  entity_id: alarm_control_panel.house
+                  state: triggered
+
+                - !include /config/include/template/radio_alarm_clock_active_condition.yaml
+
+          sequence:
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.radio_on
+
+            - service: browser_mod.toast
+              data:
+                duration: 30000
+                message: >
+                  Radio cannot be turned on.
+                  {% if is_state('input_boolean.mute_all','on') %} The system mute is on.
+                  {% elif is_state('alarm_control_panel.house','triggered') %} The house alarm has been triggered.
+                  {% elif is_state('binary_sensor.alarm_clock_active','on') %} There is an alarm clock playing.
+                  {% else %} Try again later.
+                  {% endif %}
+
+      default:
+        # turn radio power button on to keep in sync if radio_play was called by script
+        - service: input_boolean.turn_on
+          entity_id: input_boolean.radio_on
+
+        # turn off radio pause boolean
+        - service: input_boolean.turn_off
+          entity_id: input_boolean.radio_pause
+
+        # set radio station to selected value
+        - service: input_select.select_option
+          data:
+            entity_id: input_select.radio_station
+            option: "{{ station }}"
+
+        # set media player to selected value
+        - service: input_select.select_option
+          data:
+            entity_id: input_select.radio_media_player
+            option: "{{ player }}"
+
+        # only set volume if not auto resumed from settings/tts/alarm clock)
+        - choose:
+            - conditions: "{{ not resume }}"
+
+              sequence:
+                - service: input_number.set_value
+                  data:
+                    entity_id: input_number.radio_volume
+                    value: "{{ volume }}"
+
+        # if current media player != new media player, turn off previous active radio media player so we don't leave it stranded on
+        - choose:
+            - conditions: "{{ not is_state('input_text.active_media_player_radio','cleared') and states('input_text.active_media_player_radio') != current_player }}"
+              sequence:
+                - service: script.active_radio_player_off
+
+        # if speaker group check state for each media_player
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: >
+                    {% if current_player in state_attr('group.google_speaker_groups','entity_id') %}
+                      {% set unavail = namespace(value=0) %}
+                      {% for entity_id in state_attr('group.' ~ current_player.split('.')[1], 'entity_id') -%}
+                        {% if states(entity_id)|lower in ['unknown','unavailable','none'] %}
+                          {% set unavail.value = unavail.value + 1 %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ unavail.value|int > 0 }}
+                    {% else %}
+                      {{ states(current_player) in ['','unknown','unavailable','none'] }}
+                    {% endif %}
+
+              sequence:
+                - service: input_boolean.turn_on
+                  entity_id: input_boolean.radio_failed
+
+          default:
+            # checks if phone on to save values
+            - service: script.save_media_player_volumes
+              data:
+                media_player: "{{ current_player }}"
+                source: radio_on
+
+            # mute media player volumes to prevent google bloops
+            - service: script.set_media_player_volumes
+              data:
+                media_player: "{{ current_player }}"
+                source: mute
+
+              # default:
+            - service: media_player.play_media
+              data:
+                entity_id: "{{ current_player }}"
+                media_content_id: !include /config/include/template/radio_station_selection_template.yaml
+                media_content_type: music
+
+            # wait for radio media player to begin playing
+            - wait_template: "{{ is_state(current_player,'playing') }}"
+              timeout:
+                seconds: 30
+              continue_on_timeout: true
+
+            # set radio media player volumes
+            - service: script.set_media_player_volumes
+              data:
+                media_player: "{{ current_player }}"
+                source: radio_on
+
+            # run radio failed script if media player doesn't play
+            - choose:
+                - conditions: "{{ not is_state(current_player,'playing') }}"
+
+                  sequence:
+                    - service: input_boolean.turn_on
+                      entity_id: input_boolean.radio_failed
+
+              default:
+                - service: input_boolean.turn_off
+                  entity_id: input_boolean.radio_failed
+
+                # populate new active media player entity_id
+                - service: input_text.set_value
+                  data:
+                    entity_id: input_text.active_media_player_radio
+                    value: "{{ current_player }}"

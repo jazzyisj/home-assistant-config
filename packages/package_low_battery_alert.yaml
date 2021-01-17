@@ -7,6 +7,7 @@ homeassistant:
     alert.system_low_battery:
       friendly_name: Low Battery
       icon: mdi:battery-alert
+      category: system
 
 input_number:
   battery_alert_threshold:
@@ -29,39 +30,41 @@ group:
 alert:
 #######################################################################################################################
 ## System - Low Battery
+#NOTE just playing with a different technique for message loop
 #######################################################################################################################
   system_low_battery:
-    name: "Low Battery"
-    title: "Low Battery Alert"
+    name: Low Battery
+    title: Low Battery Alert
     message: >
       {%- set ns = namespace(message='') -%}
-      !include /config/include/template/low_battery_message_template.yaml
+      {%- set t = states('input_number.battery_alert_threshold')|int -%}
+      {%- set b = states.zwave|selectattr('attributes.battery_level','defined')
+          |rejectattr('state','!=','ready')|selectattr('attributes.battery_level','>=',t) -%}
+      {%- for i in b -%}
+        {%- set ns.m = ns.m ~ '- ' ~ i.name ~ ' (' ~ '%0.0f'|format(i.attributes.battery_level|float)|string ~ '%)<br/>' -%}
+      {%- endfor -%}
+      {%- set nb = expand('group.nest_batteries')|selectattr('state','eq','Replace') -%}
+      {%- for i in nb -%}{%- set ns.m = ns.m ~ '- ' ~ i.name ~ '<br/>' -%}{%- endfor -%}
+      {{ ns.m }}
     entity_id: binary_sensor.low_battery_alert
     state: 'on'
-    repeat: 1440 # 24 hours
+    repeat: 1440
     can_acknowledge: true
     skip_first: false
-    notifiers: jason
+    notifiers: mobile_app_jphone
     data:
+      tag: low_battery
+      group: System
+      channel: Alert
+      importance: high
+      timeout: 86400
+      clickAction: /lovelace/system
+      color: !secret WARNING_COLOR
+      icon_url: !secret BATTERY_ICON
+      image: !secret BATTERY_IMAGE
       actions:
         - action: pause_low_battery
           title: Pause
-        - action: close_low_battery
-          title: Close
-      tag: low_battery
-      timestamp: "{{ as_timestamp(now()) }}" #push
-      priority: normal
-      renotify: true #push
-      ttl: 3600
-      silent: true #push
-      requireInteraction: false #push
-      sticky: false #app
-      url: /lovelace/system #push
-      clickAction: /lovelace/system #app
-      color: !secret WARNING_COLOR #app
-      image: !secret BATTERY_IMAGE
-      icon: !secret BATTERY_ICON #push
-      badge: !secret BATTERY_BADGE #push
 
 #######################################################################################################################
 ## Low Battery Sensor
@@ -87,7 +90,7 @@ automation:
 #######################################################################################################################
   - id: system_low_battery_alert
     alias: "[System] Low Battery Alert"
-    description: "Create notification when alert turns on."
+    description: Create notification when alert turns on.
     initial_state: true
     mode: single
     trigger:
@@ -105,16 +108,24 @@ automation:
           sequence:
             - service: persistent_notification.create
               data:
-                title: "Low Battery Alert"
+                title: Low Battery Alert
                 message: >
                   {%- set ns = namespace(message='The battery level of the following device(s) is low:\n') -%}
-                  !include /config/include/template/low_battery_message_template.yaml
+                  {%- set t = states('input_number.battery_alert_threshold')|int -%}
+                  {%- set b = states.zwave|selectattr('attributes.battery_level','defined')
+                      |rejectattr('state','!=','ready')|selectattr('attributes.battery_level','>=',t) -%}
+                  {%- for i in b -%}
+                    {%- set ns.m = ns.m ~ '- ' ~ i.name ~ ' (' ~ '%0.0f'|format(i.attributes.battery_level|float)|string ~ '%)\n' -%}
+                  {%- endfor -%}
+                  {%- set nb = expand('group.nest_batteries')|selectattr('state','eq','Replace') -%}
+                  {%- for i in nb -%}{%- set ns.m = ns.m ~ '- ' ~ i.name ~ '\n' -%}{%- endfor -%}
+                  {{ ns.m }}
                 notification_id: low_battery
 
             # wait for alert to turned off/dismissed
             - wait_template: "{{ not is_state('alert.system_low_battery','on') }}"
               timeout:
-                minutes: 15
+                days: 1
 
           until:
             - condition: not
@@ -128,7 +139,7 @@ automation:
 #######################################################################################################################
   - id: system_close_low_battery_notifications
     alias: "[System] Close Low Battery Notifications"
-    description: "Dismiss notifications on all devices."
+    description: Dismiss notifications on all devices.
     initial_state: true
     mode: single
     max_exceeded: silent
@@ -145,26 +156,10 @@ automation:
         event_data:
           entity_id: persistent_notification.low_battery
 
-      # - platform: event
-      #   event_type: html5_notification.closed
-      #   event_data:
-      #     tag: low_battery
-
-      #BUG html5 closed event doesn't work if notification is in tray
       - platform: event
-        event_type: html5_notification.clicked
+        event_type: mobile_app_notification_cleared
         event_data:
-          action: close_low_battery
-
-      - platform: event
-        event_type: html5_notification.clicked
-        event_data:
-          action: pause_low_battery
-
-      - platform: event
-        event_type: mobile_app_notification_action
-        event_data:
-          action: close_low_battery
+          tag: low_battery
 
       - platform: event
         event_type: mobile_app_notification_action
@@ -177,7 +172,7 @@ automation:
         conditions:
           - "{% if trigger.entity_id is defined %}{{ trigger.entity_id == 'alert.system_low_battery' and states('alert.system_low_battery') in ['idle','off'] }}{% endif %}"
           - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'low_battery' }}{% endif %}"
-          - "{% if trigger.event is defined %}{{ trigger.event.data['action'] in ['close_low_battery','pause_low_battery'] }}{% endif %}"
+          - "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_low_battery' }}{% endif %}"
           - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.low_battery','notifying') }}{% endif %}"
 
     action:
@@ -187,3 +182,6 @@ automation:
           category: system
           tag: low_battery
           pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_low_battery' }}{% endif %}"
+
+      - delay:
+          seconds: 180 # prevent recursive triggers

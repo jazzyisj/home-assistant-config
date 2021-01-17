@@ -1,0 +1,70 @@
+#######################################################################################################################
+## Media Player - Auto Off
+#######################################################################################################################
+- id: media_player_auto_off
+  alias: "[Media Player] Auto Off"
+  description: "Automatically stop and turn off media players."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+
+    - platform: state
+      entity_id:
+        - binary_sensor.smoke_detected_alert
+        - binary_sensor.co_detected_alert
+      to: 'on'
+      from: 'off'
+
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to: 'triggered'
+
+  # if triggered by occupancy mode only run if presence, media_player automation enabled, always run for alerts, smoke etc.
+  condition: >
+    {{ (is_state('input_boolean.presence_automation','on') and is_state('input_boolean.media_player_automation','on'))
+        if trigger.entity_id == 'input_select.occupancy_mode' else true }}
+
+  action:
+    # stop any playing media players
+    - choose:
+        - conditions: "{{ expand('group.media_players')|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list|count > 0 }}"
+          sequence:
+            - service: media_player.media_stop
+              data:
+                entity_id: "{{ expand('group.media_players')|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|join(',') }}"
+
+    # if alarm keep media players turned on to play alert
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: triggered
+
+    - service: media_player.turn_off
+      entity_id: all
+
+    # only run if assistant relay addon running
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: sensor.assistant_relay_status
+              state: 'on'
+
+          sequence:
+            # delay turning off TV if night mode #OPTION
+            - choose:
+                - conditions: "{{ trigger.entity_id == 'input_select.occupancy_mode' and is_state('input_select.occupancy_mode','Night') }}"
+                  sequence:
+                    - delay:
+                        minutes: 60
+
+            # turn of livingroom TV with assistant relay
+            - service: rest_command.assistant_relay
+              data:
+                command: "Turn off the Living Room TV"

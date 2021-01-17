@@ -1,0 +1,139 @@
+#######################################################################################################################
+## Alarm - Garage Motion
+#######################################################################################################################
+- id: alarm_garage_motion
+  alias: "[Alarm] Garage Motion"
+  description: Send notifications w/snapshots when garage motion dectected and alarm triggered.
+  initial_state: true
+  mode: single
+  trigger:
+    # run when the alarm is warning/triggered and there is motion in the garage
+    - platform: template
+      value_template: >
+        {{ states('alarm_control_panel.house') in ['warning','triggered']
+            and (is_state('binary_sensor.garage_motion','on') or is_state('binary_sensor.garage_door_open','on')) }}
+
+  action:
+    - repeat:
+        sequence:
+          # create and store security camera snapshot filenames
+          - service: input_text.set_value
+            data:
+              entity_id: "input_text.{{ 'side_drive_snapshot' ~ repeat.index }}"
+              value: "/alarm_snapshots/side_drive_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg"
+
+          - service: input_text.set_value
+            data:
+              entity_id: "input_text.{{ 'side_door_snapshot' ~ repeat.index }}"
+              value: "/alarm_snapshots/side_door_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg"
+
+          - service: input_text.set_value
+            data:
+              entity_id: "input_text.{{ 'back_house_snapshot' ~ repeat.index }}"
+              value: "/alarm_snapshots/back_house_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg"
+
+          - service: input_text.set_value
+            data:
+              entity_id: "input_text.{{ 'garage_inside_snapshot' ~ repeat.index }}"
+              value: "/alarm_snapshots/garage_inside_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg"
+
+          # create camera snapshots
+          - service: camera.snapshot
+            data:
+              entity_id: camera.lorex_nvr_mediaprofile_channel1_substream1
+              filename: "/config/www{{ states('input_text.side_drive_snapshot' ~ repeat.index) }}"
+
+          - service: camera.snapshot
+            data:
+              entity_id: camera.lorex_nvr_mediaprofile_channel2_substream1
+              filename: "/config/www{{ states('input_text.side_door_snapshot' ~ repeat.index) }}"
+
+          - service: camera.snapshot
+            data:
+              entity_id: camera.lorex_nvr_mediaprofile_channel11_substream1
+              filename: "/config/www{{ states('input_text.back_house_snapshot' ~ repeat.index) }}"
+
+          - service: camera.snapshot
+            data:
+              entity_id: camera.lorex_nvr_mediaprofile_channel12_substream1
+              filename: "/config/www{{ states('input_text.garage_inside_snapshot' ~ repeat.index) }}"
+
+          # wait for alarm to be triggered, stop if timeout, buffer to allow alarm to trigger
+          - wait_template: "{{ is_state('alarm_control_panel.house','triggered') }}"
+            timeout:
+              seconds: >
+                {% if is_state('alarm_control_panel.house','warning') %}
+                  {{ 5 + (states.alarm_control_panel.house.attributes['states'][state_attr('alarm_control_panel.house','arm_state')]['warning_time'])|int }}
+                {% else %}
+                  60
+                {% endif %}
+            continue_on_timeout: false
+
+          - choose:
+              - conditions: "{{ repeat.first }}"
+                sequence:
+                  - service: browser_mod.navigate
+                    data:
+                      navigation_path: /lovelace/alarm
+                      deviceID: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='attributes.deviceID')|list }}"
+
+                  - service: browser_mod.popup
+                    data:
+                      deviceID: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='attributes.deviceID')|list }}"
+                      title: Garage Motion
+                      large: true
+                      card: !include /config/lovelace/include/picture_glance/garage_inside_picture_glance.yaml
+
+                  # only run if assistant relay addon running
+                  - choose:
+                      - conditions:
+                          - condition: state
+                            entity_id: sensor.assistant_relay_status
+                            state: 'on'
+
+                        sequence:
+                          # turn of livingroom TV with assistant relay
+                          - service: rest_command.assistant_relay
+                            data:
+                              command: "Show Garage Inside Camera on Living Room TV"
+
+            default:
+              # allow new snapshots to be created because alarm triggered wait template will be skipped
+              - delay:
+                  seconds: 60
+
+          # send email notification, send to work also if at work
+          - service: >
+              {% if is_state('person.jason','Work') %} notify.jason_email_work
+              {% else %} notify.jason_email
+              {% endif %}
+            data:
+              title: Garage Motion Alert!
+              message: "Motion was detected in the garage at {{ as_timestamp(now())|timestamp_custom('%I:%M%p',true) }}."
+              data:
+                  images:
+                    - "/config/www{{ states('input_text.side_drive_snapshot' ~ repeat.index) }}"
+                    - "/config/www{{ states('input_text.side_door_snapshot' ~ repeat.index) }}"
+                    - "/config/www{{ states('input_text.back_house_snapshot' ~ repeat.index) }}"
+                    - "/config/www{{ states('input_text.garage_inside_snapshot' ~ repeat.index) }}"
+
+          - service: persistent_notification.create
+            data:
+              title: Garage Motion Alert!
+              notification_id: garage_motion_alarm
+              message: |
+                ![image](/local{{ states('input_text.side_drive_snapshot' ~ repeat.index) }})
+
+                ![image](/local{{ states('input_text.side_door_snapshot' ~ repeat.index) }})
+
+                ![image](/local{{ states('input_text.back_house_snapshot' ~ repeat.index) }})
+
+                ![image](/local{{ states('input_text.garage_inside_snapshot' ~ repeat.index) }})
+
+          # seconds between motion alerts (plus delay)
+          - delay:
+              seconds: 60
+
+        until:
+          - condition: template
+            value_template: "{{ not states('alarm_control_panel.house') in ['warning','triggered'] or repeat.index > 2 }}"

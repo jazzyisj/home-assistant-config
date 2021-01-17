@@ -1,0 +1,86 @@
+#######################################################################################################################
+## Alarm - Pending
+#######################################################################################################################
+- id: alarm_pending
+  alias: "[Alarm] Pending"
+  description: Start timer, play announcement when alarm is pending.
+  initial_state: true
+  mode: single
+  variables:
+    pending_time: "{{ (states.alarm_control_panel.house.attributes['states'][state_attr('alarm_control_panel.house','arm_state')]['pending_time'] )|int }}"
+
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to: pending
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_automation
+      state: 'on'
+
+  action:
+    - service: timer.start
+      data:
+        entity_id: timer.alarm_pending
+        duration:
+          seconds: "{{ pending_time }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.light_automation
+              state: 'on'
+
+          sequence:
+            - service: scene.create
+              data:
+                scene_id: alarm_pending_lights_restore
+                entities:
+                  light.kitchen_potlights:
+                    state: "{{ states('light.kitchen_potlights') }}"
+                    brightness: "{{ state_attr('light.kitchen_potlights','brightness') }}"
+                  light.dining_room_potlights:
+                    state: "{{ states('light.dining_room_potlights') }}"
+                    brightness: "{{ state_attr('light.dining_room_potlights','brightness') }}"
+                  light.side_entrance_light:
+                    state: "{{ states('light.side_entrance_light') }}"
+                    brightness: "{{ state_attr('light.side_entrance_light','brightness') }}"
+                  light.upstairs_hallway_potlights:
+                    state: "{{ states('light.upstairs_hallway_potlights') }}"
+                    brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness') }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.occupancy_announcements
+              state: 'on'
+
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.tts_play
+                variables:
+                  play_message: "The alarm is now being armed in {{ state_attr('alarm_control_panel.house','arm_state')|replace('armed_','') }} mode."
+                  ignore_away: true
+
+    - service: browser_mod.toast
+      data:
+        duration: 30000
+        message: "The alarm is now being armed in {{ state_attr('alarm_control_panel.house','arm_state')|replace('armed_','') }} mode."
+
+    - wait_template: "{{ not is_state('alarm_control_panel.house','pending') }}"
+      timeout:
+        seconds: "{{ pending_time }}"
+      continue_on_timeout: true
+
+    # check to see if alarm was disarmed
+    - condition: state
+      entity_id: alarm_control_panel.house
+      state: disarmed
+
+    - service: script.turn_on
+      data:
+        entity_id: script.activate_scene
+        variables:
+          scene: scene.alarm_pending_lights_restore

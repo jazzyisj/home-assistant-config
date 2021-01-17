@@ -1,0 +1,328 @@
+#######################################################################################################################
+## Package - Google Calendar  # use schedule category
+#######################################################################################################################
+homeassistant:
+  customize:
+    alert.schedule_calendar_empty:
+      icon: mdi:calendar-alert
+      category: schedule
+
+    calendar.garbage:
+      friendly_name: Garbage
+      icon: mdi:trash-can
+    calendar.recycle:
+      friendly_name: Recycle
+      icon: mdi:recycle
+    calendar.yardwaste:
+      friendly_name: Yard Waste
+      icon: mdi:pine-tree
+    calendar.work_holiday:
+      friendly_name: Work Holiday
+      icon: mdi:calendar-heart
+
+google:
+  client_id: !secret GOOGLECAL_CLIENTID
+  client_secret: !secret GOOGLECAL_SECRET
+  track_new_calendar: false
+
+binary_sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## Google Calendar Connected
+#######################################################################################################################
+      google_calendar_connected:
+        friendly_name: Google Calendar
+        unique_id: google_calendar_connected
+        icon_template: "{{ 'mdi:calendar' if is_state('binary_sensor.google_calendar_connected','on') else 'mdi:alert-circle' }}"
+        device_class: connectivity
+        value_template: >
+          {{ not states('calendar.days')|lower in ['unknown','unavailable','none']
+              and not states('calendar.afternoons')|lower in ['unknown','unavailable','none']
+              and not states('calendar.work_holiday')|lower in ['unknown','unavailable','none']
+              and not states('calendar.garbage')|lower in ['unknown','unavailable','none']
+              and not states('calendar.recycle')|lower in ['unknown','unavailable','none']
+              and not states('calendar.yardwaste')|lower in ['unknown','unavailable','none'] }}
+
+      google_calendar_connected_alert:
+        friendly_name: Calendar
+        unique_id: google_calendar_connected_alert
+        icon_template: mdi:calendar
+        value_template: "{{ is_state('binary_sensor.google_calendar_connected','off') and is_state('binary_sensor.alerts_enabled','on') }}"
+
+#######################################################################################################################
+## Calendar Alert
+#######################################################################################################################
+      calendar_empty_alert:
+        unique_id: calendar_empty_alert
+        value_template: >
+          {{ (state_attr('calendar.garbage','start_time')|lower in ['unknown','unavailable','none']
+              or state_attr('calendar.recycle','start_time')|lower in ['unknown','unavailable','none']
+              or state_attr('calendar.yardwaste','start_time')|lower in ['unknown','unavailable','none']
+              or state_attr('calendar.days','start_time')|lower in ['unknown','unavailable','none']
+              or state_attr('calendar.afternoons','start_time')|lower in ['unknown','unavailable','none']
+              or state_attr('calendar.work_holiday','start_time')|lower in ['unknown','unavailable','none'])
+                and is_state('binary_sensor.alerts_enabled','on') }}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Garbage Day Tomorrow Sensor
+#######################################################################################################################
+      garbage_tomorrow:
+        friendly_name: Garbage Tomorrow
+        unique_id: garbage_tomorrow
+        icon_template: mdi:trash-can
+        value_template: >
+          {% set start = as_timestamp(state_attr('calendar.garbage','start_time'))|float %}
+          {% set now = as_timestamp(strptime(states('sensor.date_time'), "%Y-%m-%d, %H:%M" ))|float %}
+          {{ start - now < 86400 and start - now > 0  if is_state('binary_sensor.alerts_enabled','on') else false }}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Recycle Day Tomorrow Sensor
+#######################################################################################################################
+      recycle_tomorrow:
+        friendly_name: Recycle Tomorrow
+        unique_id: recycle_tomorrow
+        icon_template: mdi:recycle
+        value_template: >
+          {% set start = as_timestamp(state_attr('calendar.recycle','start_time'))|float %}
+          {% set now = as_timestamp(strptime(states('sensor.date_time'), "%Y-%m-%d, %H:%M" ))|float %}
+          {{ start - now < 86400 and start - now > 0  if is_state('binary_sensor.alerts_enabled','on') else false }}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Yard Waste Day Tomorrow Sensor
+#######################################################################################################################
+      yardwaste_tomorrow:
+        friendly_name: Yardwaste Tomorrow
+        unique_id: yardwaste_tomorrow
+        icon_template: mdi:pine-tree
+        value_template: >
+          {% set start = as_timestamp(state_attr('calendar.yardwaste','start_time'))|float %}
+          {% set now = as_timestamp(strptime(states('sensor.date_time'), "%Y-%m-%d, %H:%M" ))|float %}
+          {{ start - now < 86400 and start - now > 0  if is_state('binary_sensor.alerts_enabled','on') else false }}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Work Holiday Tomorrow
+## - sensor to determine if tomorrow is a work hoiday based on google calendar events
+#NOTE - consecutive day holidays MUST BE ENTERED AS ONE EVENT in the google calendar
+## - this will not trigger if today is holiday and tomorrow is also holiday using a separate event
+## - because it can only read end time for current active eent
+## - more than 24 hours until start time then tomorrow is NOT a holiday
+## - less than 24 hours until start time but start time has not past (>0) then tomorrow IS a holiday
+## - start time has passed, but more than 24 hours until end time - tomorrow is still a holiday
+#######################################################################################################################
+      holiday_tomorrow:
+        friendly_name: Holiday Tomorrow
+        unique_id: holiday_tomorrow
+        icon_template: mdi:calendar-heart
+        value_template: >
+          {% set start = as_timestamp(state_attr('calendar.work_holiday','start_time')) %}
+          {% set end = as_timestamp(state_attr('calendar.work_holiday','end_time')) %}
+          {% set now = as_timestamp(now()) %}
+          {{ (start - now < 0 and end - now > 86400) or (start - now > 0 and start - now < 86400) }}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## Current Shift
+## - if both days and afternoons = off, no shift scheduled = None
+## - if calendar not connected, shift = unknown -> default to days
+#######################################################################################################################
+      current_shift:
+        friendly_name: Current Shift
+        unique_id: current_shift
+        icon_template: >
+          {% if is_state('input_boolean.shift_override','on') %} mdi:calendar-alert
+          {% else %}
+            {% if is_state('sensor.current_shift','Days') %} mdi:alpha-d-circle
+            {% elif is_state('sensor.current_shift','Afternoons') %} mdi:alpha-a-circle
+            {% else %} mdi:calendar-alert
+            {% endif %}
+          {% endif %}
+        value_template: "{{ states('input_select.shift_selection') }}"
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Tomorrow Shift
+## - checks for next days/afternoons calandar event to be less than 24 hours away
+## - if current shift is unknown, none then tomorrow shift is none
+#######################################################################################################################
+      tomorrow_shift:
+        friendly_name: Tomorrow Shift
+        unique_id: tomorrow_shift
+        icon_template: >
+          {% if is_state('input_boolean.shift_override','on') %} mdi:calendar-alert
+          {% else %}
+            {% if is_state('sensor.tomorrow_shift','Days') %} mdi:alpha-d-circle
+            {% elif is_state('sensor.tomorrow_shift','Afternoons') %} mdi:alpha-a-circle
+            {% else %} mdi:calendar-alert
+            {% endif %}
+          {% endif %}
+        value_template: >
+          {% if is_state('input_boolean.shift_override','on') %}{{ states('input_select.shift_selection') }}
+          {% elif is_state('sensor.current_shift','Off') %} Off
+          {% elif as_timestamp(state_attr('calendar.days','start_time'))|float
+            - as_timestamp(strptime( states('sensor.date_time'),"%Y-%m-%d, %H:%M" ))|float < 0  %} Days
+          {% elif as_timestamp( state_attr('calendar.afternoons','start_time'))|float
+            - as_timestamp( strptime(states('sensor.date_time'),"%Y-%m-%d, %H:%M" ))|float < 0  %} Afternoons
+          {% else %}{{ states('sensor.current_shift') }}
+          {% endif %}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Work Holiday
+## display date of next work holiday calendar event
+#######################################################################################################################
+      work_holiday:
+        friendly_name: Next Work Holiday
+        unique_id: work_holiday
+        icon_template: mdi:calendar-heart
+        value_template: >
+          {% if states('calendar.work_holiday') in ['off','unknown','unavailable','none'] %} Off
+          {% else %}{{ 'Today' if is_state('calendar.work_holiday','on') else as_timestamp(state_attr('calendar.work_holiday','start_time'))|timestamp_custom('%a, %b %d',true) }}
+          {% endif %}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Garbage Day
+## display date of next garbage day calendar event
+#######################################################################################################################
+      garbage_day:
+        friendly_name: Next Garbage Day
+        unique_id: garbage_day
+        icon_template: mdi:trash-can
+        value_template: >
+          {% if states('calendar.garbage') in ['off','unknown','unavailable','none'] %} Off
+          {% else %}{{ 'Today' if is_state('calendar.garbage','on') else as_timestamp(state_attr('calendar.garbage','start_time'))|timestamp_custom('%a, %b %d',true) }}
+          {% endif %}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Recycle Day
+## display date of next recycle day calendar event
+#######################################################################################################################
+      recycle_day:
+        friendly_name: Next Recycle Day
+        unique_id: recycle_day
+        icon_template: mdi:recycle
+        value_template: >
+          {% if states('calendar.recycle') in ['off','unknown','unavailable','none'] %} Off
+          {% else %}{{ 'Today' if is_state('calendar.recycle','on') else as_timestamp(state_attr('calendar.recycle','start_time'))|timestamp_custom('%a, %b %d',true) }}
+          {% endif %}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+#######################################################################################################################
+## Yard Waste Day
+## display date of next yard waste day calendar event
+#######################################################################################################################
+      yardwaste_day:
+        friendly_name: Next Yardwaste Day
+        unique_id: yardwaste_day
+        icon_template: mdi:pine-tree
+        value_template: >
+          {% if states('calendar.yardwaste') in ['off','unknown','unavailable','none'] %} Off
+          {% else %}{{ 'Today' if is_state('calendar.yardwaste','on') else as_timestamp(state_attr('calendar.yardwaste','start_time'))|timestamp_custom('%a, %b %d',true) }}
+          {% endif %}
+        availability_template: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
+
+alert:
+#######################################################################################################################
+## Alert - Calendar Empty
+#######################################################################################################################
+  schedule_calendar_empty:
+    name: Calendar Empty
+    title: &empty_calendar_title Calendar Empty Alert
+    message: &empty_calendar_msg |
+      {% if state_attr('calendar.garbage','start_time')|lower in ['unknown','unavailable','none'] %}The Garbage Calendar has no future events scheduled!{% endif %}
+      {% if state_attr('calendar.recycle','start_time')|lower in ['unknown','unavailable','none'] %}The Recycle Calendar has no future events scheduled!{% endif %}
+      {% if state_attr('calendar.yardwaste','start_time')|lower in ['unknown','unavailable','none'] %}The Yardwaste Calendar has no future events scheduled!{% endif %}
+      {% if state_attr('calendar.days','start_time')|lower in ['unknown','unavailable','none'] %}Days - Work Calendar has no future events scheduled!{% endif %}
+      {% if state_attr('calendar.afternoons','start_time')|lower in ['unknown','unavailable','none'] %}Afternoons - Work Calendar has no future events scheduled!{% endif %}
+      {% if state_attr('calendar.work_holiday','start_time')|lower in ['unknown','unavailable','none'] %}The Work Holiday Calendar has no future events scheduled!{% endif %}
+    entity_id: binary_sensor.calendar_empty_alert
+    state: 'on'
+    repeat: 720
+    can_acknowledge: true
+    skip_first: false
+    notifiers: mobile_app_jphone
+    data:
+      tag: &empty_calendar_tag
+      group: System
+      channel: Alert
+      importance: high
+      vibrationPattern: '200, 200, 200, 200, 200, 200, 200'
+      ledColor: !secret WARNING_COLOR
+      priority: high
+      ttl: 0
+      timeout: 1440
+      persistent: false
+      sticky: false
+      clickAction: /lovelace/schedule
+      color: !secret WARNING_COLOR
+      icon_url: !secret OFFLINE_ICON
+      actions:
+        - action: pause_calendar_empty_alert
+          title: Pause
+
+automation:
+#######################################################################################################################
+## Schedule - Calendar Empty
+#######################################################################################################################
+  - id: schedule_calendar_empty_alert
+    alias: "[Climate] Emergency Heat Alert"
+    description: Create notification when calendar empty.
+    initial_state: true
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.calendar_empty_alert
+        to: 'on'
+
+    action:
+      - service: persistent_notification.create
+        data:
+          title: *empty_calendar_title
+          message: *empty_calendar_msg
+          notification_id: calendar_empty_alert
+
+#######################################################################################################################
+## Schedule - Close Calendar Empty Notifications
+#######################################################################################################################
+  - id: schedule_close_calendar_empty_notifications
+    alias: "[Schedule] Close Calendar Empty Notifications"
+    description: Dismiss notifications on all devices.
+    initial_state: true
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: alert.schedule_calendar_empty
+        to:
+          - idle
+          - 'off'
+
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: calendar_empty_alert
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_calendar_empty_alert
+
+    action:
+      - service: script.close_notifications
+        data:
+          target: mobile_app_jphone
+          category: weather
+          tag: calendar_empty_alert
+          pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_calendar_empty_alert' }}{% endif %}"
+
+      - delay:
+          seconds: 180 # prevent recursive triggers

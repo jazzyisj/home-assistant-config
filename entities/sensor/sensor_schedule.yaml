@@ -23,21 +23,26 @@
         {% set aft = states('input_datetime.afternoons_waketime')[0:5] %}
         {% set wkd = states('input_datetime.weekend_waketime')[0:5] %}
         {% set gst = states('input_datetime.guest_waketime')[0:5] %}
-        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') %}{% set wake = gst %}
+
+        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_morning','on') %}
+          {% set wake = gst %}
         {% else %}
-          {% if is_state('binary_sensor.work_today','on') %}{% set wake = aft if is_state('sensor.current_shift','Afternoons') else day %}
-          {% else %}{% set wake = wkd %}
+          {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on')%}
+              {% set wake = aft if is_state('sensor.current_shift','Afternoons') else day %}
+          {% elif is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','on')%}
+              {% set wake = wkd %}
+          {% else %} {% set wake = 'Off' %}
           {% endif %}
         {% endif %}
-        {{ wake if alm == 'Off' else [alm,wake]|min }}
+        {{ wake if alm == 'Off' else wake if wake == 'Off' else [alm,wake]|min }}
 
     waketime_today_display:
       friendly_name: Wake Time Today
       unique_id: waketime_today_display
       icon_template: mdi:white-balance-sunny
       value_template: >
-          {{ states('sensor.waketime_today') if states('sensor.waketime_today')|lower in ['off','unknown','unavailable','none']
-              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_today'))|timestamp_custom('%_I:%M %p') }}
+        {{ states('sensor.waketime_today') if states('sensor.waketime_today') in ['Off','unknown','unavailable','none']
+            else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_today'))|timestamp_custom('%-I:%M %p') }}
 
 #######################################################################################################################
 ## Waketime Tomorrow
@@ -47,32 +52,26 @@
     waketime_tomorrow:
       friendly_name: Waketime Tomorrow
       unique_id: waketime_tomorrow
-      icon_template: >
-        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') %} mdi:weather-sunset-up
-        {% elif is_state('binary_sensor.work_tomorrow','on') %}
-          {% if is_state('sensor.tomorrow_shift','Days') %} mdi:alpha-d-circle
-          {% elif is_state('sensor.tomorrow_shift','Afternoons') %} mdi:alpha-a-circle
-          {% else %} mdi:alert-circle
-          {% endif %}
-        {% else %} mdi:weather-sunset-up
-        {% endif %}
+      icon_template: mdi:weather-sunset-up
       value_template: >
-        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') %}
+        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_morning','on') %}
           {{ states('input_datetime.guest_waketime')[0:5] }}
         {% else %}
-          {% if states('sensor.time') < states('sensor.bedtime_today') < '12:00' %}
-            {% if is_state('binary_sensor.work_today','on') %}
+          {% if is_state('sensor.bedtime_today','Off') or states('sensor.time') < states('sensor.bedtime_today') < '12:00' %}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on') %}
               {% if is_state('sensor.current_shift','Afternoons') %}{{ states('input_datetime.afternoons_waketime')[0:5] }}
               {% else %}{{ states('input_datetime.days_waketime')[0:5] }}
               {% endif %}
-            {% else %}{{ states('input_datetime.weekend_waketime')[0:5] }}
+            {% elif is_state('input_boolean.weekend_morning','on')%}{{ states('input_datetime.weekend_waketime')[0:5] }}
+            {% else %} Off
             {% endif %}
           {% else %}
-            {% if is_state('binary_sensor.work_tomorrow','on') %}
+            {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_morning','on') %}
               {% if is_state('sensor.tomorrow_shift','Afternoons') %}{{ states('input_datetime.afternoons_waketime')[0:5] }}
               {% else %}{{ states('input_datetime.days_waketime')[0:5] }}
               {% endif %}
-            {% else %}{{ states('input_datetime.weekend_waketime')[0:5] }}
+            {% elif is_state('input_boolean.weekend_morning','on') %}{{ states('input_datetime.weekend_waketime')[0:5] }}
+            {% else %} Off
             {% endif %}
           {% endif %}
         {% endif %}
@@ -80,10 +79,10 @@
     waketime_tomorrow_display:
       friendly_name: Wake Time Today
       unique_id: waketime_tomorrow_display
-      icon_template: mdi:white-balance-sunny
+      icon_template: mdi:weather-sunset-up
       value_template: >
-          {{ states('sensor.waketime_tomorrow') if states('sensor.waketime_tomorrow')|lower in ['off','unknown','unavailable','none']
-              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_tomorrow'))|timestamp_custom('%_I:%M %p') }}
+        {{ states('sensor.waketime_tomorrow') if states('sensor.waketime_tomorrow') in ['Off','unknown','unavailable','none']
+            else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_tomorrow'))|timestamp_custom('%-I:%M %p') }}
 
 #######################################################################################################################
 ## Bedtime Today
@@ -93,138 +92,47 @@
     bedtime_today:
       friendly_name: Bedtime Today
       unique_id: bedtime_today
-      icon_template: >
-        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') %} mdi:bed-outline
-        {% elif is_state('binary_sensor.work_tomorrow','on') %}
-          {% if is_state('sensor.tomorrow_shift','Days') %} mdi:alpha-d-box
-          {% elif is_state('sensor.tomorrow_shift','Afternoons') %} mdi:alpha-a-box
-          {% else %} mdi:alert-box
-          {% endif %}
-        {% else %}
-          mdi:bed
-        {% endif %}
+      icon_template: mdi:bed
       value_template: >
         {% set day = states('input_datetime.days_bedtime')[0:5] %}
         {% set aft = states('input_datetime.afternoons_bedtime')[0:5] %}
         {% set wkd = states('input_datetime.weekend_bedtime')[0:5] %}
         {% set bed = [day,aft,wkd]|reject('>','12:00')|max if [day,aft,wkd]|min < '12:00' else [day,aft,wkd]|max %}
-        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') %}
+        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_night','on') %}
           {{ states('input_datetime.guest_bedtime')[0:5] }}
         {% else %}
           {% if is_state('sensor.current_shift','Afternoons') and (states('sensor.time') < bed) %}
-            {{ aft if is_state('binary_sensor.work_today','on') else wkd }}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_night','on') %} {{ aft }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
           {% elif is_state('sensor.tomorrow_shift','Afternoons') %}
-            {{ aft if is_state('binary_sensor.work_tomorrow','on') else wkd }}
+            {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_night','on') %} {{ aft }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
           {% elif is_state('sensor.current_shift','Days') and (states('sensor.time') < bed) %}
-            {{ day if is_state('binary_sensor.work_today','on') else wkd }}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_night','on') %} {{ day }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
           {% elif is_state('sensor.tomorrow_shift','Days') %}
-            {{ day if is_state('binary_sensor.work_tomorrow','on') else wkd }}
+            {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_night','on') %} {{ day }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
           {% else %}
-            {{ wkd if is_state('input_boolean.work_schedule','off') else day }}
+            {% if is_state('input_boolean.work_schedule','off') and is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% elif is_state('input_boolean.workday_night','on') %} {{ day }}
+            {% else %} Off
+            {% endif %}
           {% endif %}
         {% endif %}
 
     bedtime_today_display:
       friendly_name: Bedtime Today
       unique_id: bedtime_today_display
-      icon_template: >
-        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') %} mdi:bed-outline
-        {% elif is_state('binary_sensor.work_tomorrow','on') %}
-          {% if is_state('sensor.tomorrow_shift','Days') %} mdi:alpha-d-box
-          {% elif is_state('sensor.tomorrow_shift','Afternoons') %} mdi:alpha-a-box
-          {% else %} mdi:alert-box
-          {% endif %}
-        {% else %}
-          mdi:bed
-        {% endif %}
+      icon_template: mdi:bed
       value_template: >
           {{ states('sensor.bedtime_today') if states('sensor.bedtime_today')|lower in ['off','unknown','unavailable','none']
-              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|timestamp_custom('%_I:%M %p') }}
-
-#######################################################################################################################
-## Current Shift
-## - if both days and afternoons = off, no shift scheduled = None
-## - if calendar not connected, shift = unknown -> default to days
-#######################################################################################################################
-    current_shift:
-      friendly_name: Current Shift
-      unique_id: current_shift
-      icon_template: >-
-        {% if is_state('input_boolean.shift_override','on') %} mdi:calendar-alert
-        {% else %}
-          {% if is_state('sensor.current_shift','Days') %} mdi:alpha-d-circle
-          {% elif is_state('sensor.current_shift','Afternoons') %} mdi:alpha-a-circle
-          {% else %} mdi:calendar-alert
-          {% endif %}
-        {% endif %}
-      value_template: "{{ states('input_select.shift_selection') }}"
-
-#######################################################################################################################
-## Tomorrow Shift
-## - checks for next days/afternoons calandar event to be less than 24 hours away
-## - if current shift is unknown, none then tomorrow shift is none
-#######################################################################################################################
-    tomorrow_shift:
-      friendly_name: Tomorrow Shift
-      unique_id: tomorrow_shift
-      icon_template: >-
-        {% if is_state('input_boolean.shift_override','on') %} mdi:calendar-alert
-        {% else %}
-          {% if is_state('sensor.tomorrow_shift','Days') %} mdi:alpha-d-circle
-          {% elif is_state('sensor.tomorrow_shift','Afternoons') %} mdi:alpha-a-circle
-          {% else %} mdi:calendar-alert
-          {% endif %}
-        {% endif %}
-      value_template: >
-        {% if is_state('input_boolean.shift_override','on') %}{{ states('input_select.shift_selection') }}
-        {% elif is_state('sensor.current_shift','Not Set') %} Not Set
-        {% elif as_timestamp( state_attr('calendar.days','start_time'))|float
-           - as_timestamp( strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M" ))|float < 0  %} Days
-        {% elif as_timestamp( state_attr('calendar.afternoons','start_time'))|float
-           - as_timestamp( strptime( states('sensor.date_time'), "%Y-%m-%d, %H:%M" ))|float < 0  %} Afternoons
-        {% else %}{{ states('sensor.current_shift') }}
-        {% endif %}
-
-#######################################################################################################################
-## Work Holiday
-## display date of next work holiday calendar event
-#######################################################################################################################
-    work_holiday:
-      friendly_name: Next Work Holiday
-      unique_id: work_holiday
-      icon_template: mdi:calendar-heart
-      value_template: "{{ 'Today' if is_state('calendar.work_holiday','on') else as_timestamp(state_attr('calendar.work_holiday','start_time'))|timestamp_custom('%a, %b %d',true) }}"
-      availability_template: "{{ states('calendar.work_holiday') not in ['unknown','unavailable','none'] }}"
-
-#######################################################################################################################
-## Garbage Day
-## display date of next garbage day calendar event
-#######################################################################################################################
-    garbage_day:
-      friendly_name: Next Garbage Day
-      unique_id: garbage_day
-      icon_template: mdi:trash-can
-      value_template: "{{ 'Today' if is_state('calendar.garbage','on') else as_timestamp(state_attr('calendar.garbage','start_time'))|timestamp_custom('%a, %b %d',true) }}"
-      availability_template: "{{ states('calendar.garbage') not in ['unknown','unavailable','none'] }}"
-
-#######################################################################################################################
-## Recycle Day
-## display date of next recycle day calendar event
-#######################################################################################################################
-    recycle_day:
-      friendly_name: Next Recycle Day
-      unique_id: recycle_day
-      icon_template: mdi:recycle
-      value_template: "{{ 'Today' if is_state('calendar.recycle','on') else as_timestamp(state_attr('calendar.recycle','start_time'))|timestamp_custom('%a, %b %d',true) }}"
-      availability_template: "{{ states('calendar.recycle') not in ['unknown','unavailable','none'] }}"
-
-#######################################################################################################################
-## Yard Waste Day
-## display date of next yard waste day calendar event
-#######################################################################################################################
-    yardwaste_day:
-      friendly_name: Next Yardwaste Day
-      unique_id: yardwaste_day
-      icon_template: mdi:pine-tree
-      value_template: "{{ 'Today' if is_state('calendar.yardwaste','on') else as_timestamp(state_attr('calendar.yardwaste','start_time'))|timestamp_custom('%a, %b %d',true) }}"
-      availability_template: "{{ states('calendar.yardwaste') not in ['unknown','unavailable','none'] }}"
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|timestamp_custom('%-I:%M %p') }}

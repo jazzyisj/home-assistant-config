@@ -1,0 +1,43 @@
+#######################################################################################################################
+## Spotify - Volume Change
+## - media player expects float value, input_number is percent (/100)
+## - if night/quiet mode check volume level, reset volume if necessary
+#######################################################################################################################
+- id: spotify_volume_change
+  alias: "[Spotify] Volume Change"
+  description: Change media player volume when spotify volume control changed.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - input_number.spotify_volume
+        - input_boolean.volume_override
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.spotify_on
+      state: 'on'
+
+    # only run if the new set volume is not already equal to the media player volume
+    - condition: template
+      value_template: "{{ '%0.2f'|format(state_attr(states('sensor.spotify_media_player'),'volume_level')|float) != '%0.2f'|format(states('input_number.spotify_volume')|float/100) }}"
+
+  action:
+    # reset volume if set value > night/quiet mode value unless override on
+    - service: input_number.set_value
+      data:
+        entity_id: input_number.spotify_volume
+        value: >
+          {% set spotify = states('input_number.spotify_volume')|int %}
+          {% set quiet = states('input_number.media_volume_quiet')|int %}
+          {% if is_state('input_boolean.volume_override','on') %}{{ spotify }}
+          {% elif is_state('binary_sensor.quiet_hours','on') and spotify > quiet %}{{ quiet }}
+          {% else %}{{ spotify }}
+          {% endif %}
+
+    # set media player volume to input_number value
+    - service: media_player.volume_set
+      data:
+        entity_id: "{{ states('sensor.spotify_media_player') }}"
+        volume_level: " {{ states('input_number.spotify_volume')|float/100 }}"

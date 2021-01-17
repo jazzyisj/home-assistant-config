@@ -1,0 +1,132 @@
+#######################################################################################################################
+## Light - Upstairs Hallway Potlights LED
+#######################################################################################################################
+- id: light_upstairs_hallway_potlights_led
+  alias: "[Light] Upstairs Hallway Potlights LED"
+  description: "Renotify LED."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.upstairs_hallway_potlights
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: zwave.upstairs_hallway_potlights
+      state: ready
+
+
+  action:
+    - service: zwave.set_config_parameter
+      data:
+        node_id: "{{ state_attr('zwave.upstairs_hallway_potlights','node_id')|int }}"
+        parameter: 16
+        size: 4
+        value: !include /config/include/template/led_alarm_state.yaml
+
+#######################################################################################################################
+## Light - Upstairs Hallway Potlights Auto On
+#######################################################################################################################
+- id: light_upstairs_hallway_potlights_auto_on
+  alias: "[Light] Upstairs Hallway Potlights Auto On"
+  description: "Turn on lights."
+  initial_state: true
+  mode: single
+  variables:
+    current: "{{ state_attr('light.upstairs_hallway_potlights','brightness')|int }}"
+    default: 90
+    quiet: 10
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.auto_light_on
+      to: 'on'
+
+    - platform: state
+      entity_id: binary_sensor.quiet_hours
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      for:
+        seconds: 5 # allow light scripts to start
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.light_automation
+        - binary_sensor.auto_light_on
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
+
+    - condition: template
+      value_template: "{{ current > quiet if trigger.entity_id == 'binary_sensor.quiet_hours' else current < default }}"
+
+    - condition: state
+      entity_id: binary_sensor.light_scene_active
+      state: 'off'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.upstairs_hallway_potlights
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Upstairs Hallway Potlights Auto Off
+#######################################################################################################################
+- id: light_upstairs_hallway_potlights_auto_off
+  alias: "[Light] Upstairs Hallway Potlights Auto Off"
+  description: "Turn off lights."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.auto_light_on
+      to: 'off'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+        - Night
+      for:
+        minutes: 5 # allow timer to cancel, occupant to leave
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: binary_sensor.light_scene_active
+      state: 'off'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
+  action:
+    - service: light.turn_off
+      entity_id: light.upstairs_hallway_potlights

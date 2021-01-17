@@ -1,0 +1,129 @@
+#######################################################################################################################
+## Presence - Someone Almost Home
+#######################################################################################################################
+- id: presence_someone_almost_home
+  alias: "[Presence] Someone Almost Home"
+  description: Send notification to disarm alarm when almost home.
+  initial_state: true
+  mode: parallel
+  max: 5
+  variables:
+    person: >
+      {% if trigger.entity_id in ['person.jason','input_boolean.jason_almost_home'] %} jason
+      {% elif trigger.entity_id in ['person.sheri','input_boolean.sheri_almost_home'] %} sheri
+      {% endif %}
+    previous_alarm: "{{ states('alarm_control_panel.house') }}"
+  trigger:
+    - platform: zone
+      entity_id:
+        - person.jason
+        - person.sheri
+      zone: zone.almost_home
+      event: enter
+
+    - platform: state
+      entity_id:
+        - input_boolean.jason_almost_home
+        - input_boolean.sheri_almost_home
+      to: 'x' #OPTION for testing - will cause recursive trigger if left active
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.presence_automation
+      state: 'on'
+
+  action:
+    - service: input_boolean.turn_on
+      data:
+        entity_id: >
+          {% if person == 'jason' %} input_boolean.jason_almost_home
+          {% elif person == 'sheri' %} input_boolean.sheri_almost_home
+          {% endif %}
+
+    - service: script.arrived_home_notification
+      data:
+        person: "{{ person }}"
+
+    # wait 5 minutes then turn booleans back off
+    #NOTE this is max time that disarm alarm actions from notification will work
+    - delay:
+        minutes: 5
+
+    - service: input_boolean.turn_off
+      data:
+        entity_id: >
+          {% if person == 'jason' %} input_boolean.jason_almost_home
+          {% elif person == 'sheri' %} input_boolean.sheri_almost_home
+          {% endif %}
+
+    - condition: and
+      conditions:
+        - condition: state
+          entity_id: input_boolean.alarm_auto_arming
+          state: 'on'
+
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: disarmed
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.someone_home
+              state: 'on'
+
+          sequence:
+            - choose:
+                - conditions: "{{ not previous_alarm == 'disarmed' }}"
+                  sequence:
+                    - delay:
+                        minutes: 15
+
+                    - service: "{{ 'script.arm_alarm_night' if is_state('occupancy_mode','Night') else 'script.arm_alarm_home' }}"
+
+      default:
+        - service: script.arm_alarm_away
+
+#######################################################################################################################
+## Presence - Close Someone Almost Home Notifications
+#######################################################################################################################
+- id: presence_close_someone_almost_home_notifications
+  alias: "[Presence] Close Someone Almost Home Notifications"
+  description: Dismiss notification on all devices when closed on one.
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_cleared
+      event_data:
+        tag: someone_almost_home
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: almost_home_open_garage
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disarm_alarm_jphone
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disarm_alarm_sphone
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: panic_alarm
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile
+        tag: someone_almost_home
+
+    - delay:
+        seconds: 180 # prevent recursive triggers

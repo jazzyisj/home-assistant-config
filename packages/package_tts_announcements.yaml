@@ -76,52 +76,6 @@ variable:
       icon: mdi:account-voice
     restore: true
 
-  active_media_player_tts: # used to include tts media player override
-    value: none
-    attributes:
-      friendly_name: "Active TTS Media Player"
-      icon: mdi:radio
-    restore: true
-
-#######################################################################################################################
-## TTS Speaker Volumes (float) - media player reset volume #NEW_MEDIA_PLAYER
-#######################################################################################################################
-  tts_living_room_speaker:
-    value: 0
-    restore: false
-
-  tts_dining_room_display:
-    value: 0
-    restore: false
-
-  tts_bedroom_display:
-    value: 0
-    restore: false
-
-  tts_bathroom_speaker:
-    value: 0
-    restore: false
-
-  tts_laundry_room_speaker:
-    value: 0
-    restore: false
-
-  tts_garage_speaker:
-    value: 0
-    restore: false
-
-  tts_living_room_tv:
-    value: 0
-    restore: false
-
-  tts_bedroom_tv:
-    value: 0
-    restore: false
-
-  tts_deck_tv:
-    value: 0
-    restore: false
-
 input_boolean:
 #######################################################################################################################
 ## Announcements Enabled
@@ -137,6 +91,9 @@ input_boolean:
     name: TTS Announcement Playing
     initial: false
     icon: mdi:account-voice
+
+input_text:
+  active_media_player_tts:
 
 input_select:
 #######################################################################################################################
@@ -171,6 +128,20 @@ input_select:
     name: TTS Alert Media Player
     icon: mdi:speaker-wireless
     options: *announcement_players
+
+  tts_cloud_voice:
+    name: Nabu Casa Cloud Voice
+    icon: mdi:account-voice
+    options:
+      - English (Australia) en-AU Female
+      - English (Australia) en-AU Male
+      - English (Canada) en-CA Female
+      - English (India) en-IN Female
+      - English (Ireland) en-IE Female
+      - English (United Kingdom) en-GB Female
+      - English (United Kingdom) en-GB Male
+      - English (United States) en-US Male
+      - English (United States) en-US Female
 
 #######################################################################################################################
 ## TTS Service
@@ -221,6 +192,37 @@ input_number:
     step: 5
     unit_of_measurement: '%'
 
+#######################################################################################################################
+## TTS Speaker Volumes (float) - media player reset volume #NEW_MEDIA_PLAYER
+#######################################################################################################################
+  tts_living_room_speaker:
+    min: 0
+    max: 100
+  tts_dining_room_display:
+    min: 0
+    max: 100
+  tts_bedroom_display:
+    min: 0
+    max: 100
+  tts_bathroom_speaker:
+    min: 0
+    max: 100
+  tts_laundry_room_speaker:
+    min: 0
+    max: 100
+  tts_garage_speaker:
+    min: 0
+    max: 100
+  tts_living_room_tv:
+    min: 0
+    max: 100
+  tts_bedroom_tv:
+    min: 0
+    max: 100
+  tts_deck_tv:
+    min: 0
+    max: 100
+
 binary_sensor:
 #######################################################################################################################
 ## Template Binary Sensors
@@ -239,12 +241,9 @@ binary_sensor:
         icon_template: mdi:account-voice
         delay_off:
           seconds: 5
-        value_template: "{{ is_state('input_boolean.tts_playing','on') }}"
+        value_template: "{{ is_state('input_boolean.tts_playing','on') or is_state('script.tts_play','on') }}"
 
 sensor:
-#######################################################################################################################
-## Template Sensors
-#######################################################################################################################
   - platform: template
     sensors:
 #######################################################################################################################
@@ -280,676 +279,3 @@ group:
       - media_player.laundry_room_speaker
       - media_player.bathroom_speaker
       - media_player.garage_speaker
-
-script:
-#######################################################################################################################
-## TTS Announcement
-#######################################################################################################################
-  tts_announcement:
-    alias: "TTS Announcement"
-    description: "Queue announcement message for TTS."
-    mode: queued
-    max: 10
-    fields:
-      play_message:
-        description: "String - message to play."
-        example: "This is a test message."
-      tts_override:
-        description: "Override service to use for TTS.  (broadcast, nabu_casa, google_cloud, google_tts, polly,)"
-        example: 'polly'
-      media_player:
-        description: "Override default media player."
-        example: 'media_player.broadcast_speakers'
-      min_volume:
-        description: "Percent - override volume level"
-        example: 50
-      quiet_play:
-        description: "Play announcement during quiet hours."
-        example: true
-      ignore_away:
-        description: "Play announcement when nobody home."
-        example: true
-      save_message:
-        description: "Save message to play when home or after alarm."
-        example: true
-      alert:
-        description: "Message is an alert (overrides tts, media player, and volume)."
-        example: true
-    variables:
-      tts_service: >
-        {% if alert %} nabu_casa
-        {% elif tts_override is defined %}{{ tts_override }}
-        {% else %}
-          {% if is_state('input_select.tts_service','Nabu Casa') %} nabu_casa
-          {% elif is_state('input_select.tts_service','Google Cloud') %} google_cloud
-          {% elif is_state('input_select.tts_service','Amazon Polly') %} polly
-          {% elif is_state('input_select.tts_service','Broadcast') %} broadcast
-          {% else %} google_say
-          {% endif %}
-        {% endif %}
-      tts_mp: >
-         {% if alert %}{{ expand('group.media_players')|selectattr('name','eq',states('input_select.tts_media_player_alert'))|map(attribute='entity_id')|join(',') }}
-         {% elif media_player is defined %}{{ media_player }}
-         {% else %}{{ states('sensor.tts_media_player') }}
-         {% endif %}
-      tts_group: "{{ tts_mp in state_attr('group.google_speaker_groups','entity_id') }}"
-      tts_volume: >
-        {% if alert %}{{ states('input_number.tts_volume_alert')|int/100|float }}
-        {% elif is_state('input_select.occupancy_mode','Night') %}
-          {{ min_volume|int/100|float if min_volume is defined and (min_volume|int > states('input_number.tts_volume_night')|int)
-              else states('input_number.tts_volume_night')|int/100|float }}
-        {% elif is_state('binary_sensor.quiet_hours','on') %}
-          {{ min_volume|int/100|float if min_volume is defined and (min_volume|int > states('input_number.tts_volume_quiet')|int)
-              else states('input_number.tts_volume_quiet')|int/100|float }}
-        {% else %}
-          {{ min_volume|int/100|float if min_volume is defined and (min_volume|int > states('input_number.tts_volume')|int)
-              else states('input_number.tts_volume')|int/100|float }}
-        {% endif %}
-      tts_mute: >
-        {{ is_state('input_boolean.tts_enabled','off')
-            or is_state('input_boolean.mute_all','on')
-            or (is_state('alarm_control_panel.house','triggered') and not alert)
-            or (is_state('binary_sensor.quiet_hours','on') and not quiet_play)
-            or (is_state('binary_sensor.someone_home','off') and not ignore_away)
-            or tts_mp == 'None'
-            or tts_vol == 0 }}
-    sequence:
-      - service: browser_mod.toast
-        data:
-          message: "{{ play_message }}"
-          duration: 30000
-
-      # save message if nobody home and message flagged or house alarm has been triggered
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: "{{ (is_state('binary_sensor.someone_home','off') and save_message) or is_state('alarm_control_panel.house','triggered') }}"
-
-            sequence:
-              - service: script.turn_on
-                data:
-                  entity_id: script.tts_save_message
-                  variables:
-                    play_message: "{{ play_message }}"
-
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.supplemental_logging
-                state: 'on'
-
-            sequence:
-              - service: system_log.write
-                data:
-                  message: |
-
-                    ** TTS MESSAGE **
-                    TTS Service: {{ tts_override }}
-                    Media Player: {{ media_player }}
-                    Min Volume: {{ min_volume }}
-                    Quiet Play: {{ quiet_play }}
-                    Ignore Away: {{ ignore_away }}
-                    Save: {{save_message}}
-                    tts_service:{{ tts_service }}
-                    tts_mp: {{ tts_mp }}
-                    tts_volume: {{ tts_volume }}
-                    tts_mute: {{ tts_mute }}
-                    alert: {{ alert }}
-                    Message: {{ '\n' ~  play_message ~ '\n' }}
-                  level: critical
-
-      - condition: template
-        value_template: "{{ not tts_mute }}"
-
-      # turning off binary sensor after annoucement is delayed to allow another message to start without running this block again
-      - choose:
-          - conditions:
-              - condition: or
-                conditions:
-                  - condition: state
-                    entity_id: binary_sensor.tts_playing
-                    state: 'off'
-
-                  - condition: template
-                    value_template: "{{ tts_mp != states('sensor.tts_media_player') or tts_service == 'broadcast'}}"
-
-            sequence:
-              - choose:
-                  - conditions:
-                      - condition: or
-                        conditions:
-                          # if media player/relay unavailable send failed message, check individual media players if speaker group
-                          - condition: template
-                            value_template: >
-                              {% if tts_group %}
-                                {% set found = namespace(value=0) %}
-                                {% for entity in state_attr('group.' ~ tts_mp.split('.')[1], 'entity_id') %}
-                                  {% if states(entity) in ['unknown','unavailable','none'] %}
-                                    {% set found.value = 1 %}
-                                  {% endif %}
-                                {% endfor %}
-                                {{ found.value|int > 0 }}
-                              {% else %}
-                                {{ states(tts_mp) in ['','unknown','unavailable','none'] }}
-                              {% endif %}
-
-                          # assistant relay not available for broadcast tts
-                          - condition: template
-                            value_template: "{{ tts_service == 'broadcast' and states('sensor.assistant_relay_status')|lower in ['off','unknown','unavailable','none'] }}"
-
-                    sequence:
-                      - service: script.turn_on
-                        data:
-                          entity_id: script.tts_play_failed
-                          variables:
-                            tts_override: "{{ tts_override }}"
-                            media_player: "{{ media_player }}"
-                            min_volume: "{{ min_volume }}"
-                            quiet_play: "{{ quiet_play }}"
-                            ignore_away: "{{ ignore_away }}"
-                            save_message: "{{ save_message }}"
-                            tts_service: "{{ tts_service }}"
-                            tts_mp: "{{ tts_mp }}"
-                            tts_volume: "{{ tts_volume }}"
-                            tts_mute: "{{ tts_mute }}"
-                            alert: "{{ alert }}"
-                            relay: "{{ states('sensor.assistant_relay_status') }}"
-                            play_message: |
-                              {% if tts_service == 'broadcast' and states('sensor.assistant_relay_status')|lower in ['off','unknown','unavailable','none'] %}
-                                ** TTS ERROR - ASSISTANT RELAY NOT AVAILABLE **
-                              {% else %}
-                                ** TTS ERROR - MEDIA PLAYER UNAVAILABLE **
-                              {% endif %}
-                              {{ play_message }}
-
-                default:
-                  # if spotify playing on any tts media player turn restart boolean on
-                  - choose:
-                      - conditions:
-                          - !include /config/include/template/tts_spotify_playing_condition_template.yaml
-                        sequence:
-                          - service: input_boolean.turn_on
-                            entity_id: input_boolean.spotify_restart
-
-                  # turn boolean on to start announcement queue
-                  - service: input_boolean.turn_on
-                    entity_id: input_boolean.tts_playing
-
-                  - choose:
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ tts_service != 'broadcast' }}"
-
-                        sequence:
-                          # save all media player volumes to restore after tts
-                          - service: script.save_media_player_volumes
-                            data:
-                              media_player: all
-                              source: tts_on
-
-                          # lower all media player volumes for tts
-                          - service: script.set_media_player_volumes
-                            data:
-                              media_player: all
-                              source: tts_on
-
-                          # mute tts media player volumes to prevent google bloops
-                          - service: script.set_media_player_volumes
-                            data:
-                              media_player: "{{ tts_mp }}"
-                              source: mute
-
-                          # pause announcment media player or any media players in announcement media player speaker group if playing
-                          - choose:
-                            - conditions:
-                                - condition: template
-                                  value_template: "{{ expand('group.' ~ tts_mp.split('.')[1] )|selectattr('state','eq','playing')|list|count > 0 if tts_group else is_state(tts_mp,'playing') }}"
-
-                              sequence:
-                                - service: media_player.media_pause
-                                  data:
-                                    entity_id: "{{ expand('group.' ~ tts_mp.split('.')[1])|selectattr('state','eq','playing')|map(attribute='entity_id')|join(',') if tts_group else tts_mp }}"
-
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: binary_sensor.tts_playing
-                state: 'on'
-
-            sequence:
-              - choose:
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ tts_service == 'broadcast' }}"
-
-                    sequence:
-                      - service: rest_command.assistant_broadcast
-                        data:
-                          command: "{{ play_message }}"
-
-                default:
-                  - choose:
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ tts_service == 'nabu_casa' }}"
-
-                        sequence:
-                          - service: tts.cloud_say
-                            data:
-                              entity_id: "{{ tts_mp }}"
-                              message:  "{{ play_message }}"
-                              options:
-                                gender: female
-                              language: en-US
-
-                    default:
-                      - service: >
-                          {% if tts_service == 'google_cloud' %} tts.google_cloud_say
-                          {% elif tts_service == 'polly' %} tts.amazon_polly_say
-                          {% else %} tts.google_say
-                          {% endif %}
-                        data:
-                          entity_id: "{{ tts_mp }}"
-                          message: "{{ play_message }}"
-
-                  # if speaker group this sets volumes for each speaker in group
-                  - service: media_player.volume_set
-                    data:
-                      entity_id: "{{ expand('group.' ~ tts_mp.split('.')[1])|map(attribute='entity_id')|join(',') if tts_group else tts_mp }}"
-                      volume_level: "{{ tts_volume }}"
-
-                  - wait_template: "{{ is_state(tts_mp,'playing') }}"
-                    timeout:
-                      seconds: 60
-                    continue_on_timeout: true
-
-                  # message failed script if announcement is not playing after wait timeout
-                  - choose:
-                      - conditions: "{{ not is_state(tts_mp,'playing') }}"
-
-                        sequence:
-                          - service: script.turn_on
-                            data:
-                              entity_id: script.tts_play_failed
-                              variables:
-                                tts_override: "{{ tts_override }}"
-                                media_player: "{{ media_player }}"
-                                min_volume: "{{ min_volume }}"
-                                quiet_play: "{{ quiet_play }}"
-                                ignore_away: "{{ ignore_away }}"
-                                save_message: "{{ save_message }}"
-                                tts_service: "{{ tts_service }}"
-                                tts_mp: "{{ tts_mp }}"
-                                tts_volume: "{{ tts_volume }}"
-                                tts_mute: "{{ tts_mute }}"
-                                alert: "{{ alert }}"
-                                relay: "{{ states('sensor.assistant_relay_status') }}"
-                                play_message: "** TTS ERROR - TTS MESSAGE PLAY FAILED ** {{ '\n' ~ play_message }}"
-
-                    default:
-                      - service: variable.set_variable
-                        data:
-                          variable: active_media_player_tts
-                          value: "{{ tts_mp }}"
-
-                      - wait_template: "{{ not is_state(tts_mp,'playing') }}"
-                        timeout:
-                          seconds: 120  #NOTE this is effectively the max tts message time
-                        continue_on_timeout: true
-
-      - service: input_boolean.turn_off
-        entity_id: input_boolean.tts_playing
-
-##################################################################################################
-# Save TTS Message
-##################################################################################################
-  tts_save_message:
-    alias: "Save TTS Message"
-    description: "Store select tts messages when nobody is home, or alarm is triggered."
-    mode: queued
-    max: 5
-    fields:
-      play_message:
-        description: "Message to be played."
-        example: 'This is the message!'
-    sequence:
-      - service: variable.set_variable
-        data:
-          variable: tts_saved_messages
-          value: "{{ states('variable.tts_saved_messages')|int + 1 }}"
-          attributes: >
-            {%- set count = namespace(value=0) -%}
-            {%- set found = namespace(value=0) -%}
-            {%- set msg = namespace(value='') -%}
-
-            {%- for attr in states.variable.tts_saved_messages.attributes -%}
-              {%- set count.value = count.value|int + 1 %}
-              {%- if state_attr('variable.tts_saved_messages',attr).split('@')[0]|trim != play_message %}
-                {% set msg.value = msg.value ~ '"msg' ~ count.value ~ '":"' ~ (state_attr('variable.tts_saved_messages',attr)) ~ '"' ~ ',' %}
-              {%- else -%}
-                {%- set found.value = count.value -%}
-              {%- endif -%}
-            {%- endfor -%}
-
-            {%- if found.value|int > 0 -%}
-              {%- set msg.value = '"msg' ~ count.value|int ~ '":"' ~ play_message ~ '@' ~ as_timestamp( now() )|timestamp_custom('%_I:%M %p',true) ~ '"' -%}
-            {%- elif count.value|int > 0 -%}
-              {%- set count.value = count.value|int + 1 %}
-              {%- set msg.value = msg.value ~ '"msg' ~ count.value ~ '":"' ~ play_message ~ '@' ~ as_timestamp( now() )|timestamp_custom('%_I:%M %p',true) ~ '"' -%}
-            {% else %}
-                {%- set msg.value = '"msg1":"' ~ play_message ~ '@' ~ as_timestamp( now() )|timestamp_custom('%_I:%M %p',true) ~ '"' -%}
-            {%- endif -%}
-            {{ '{ ' ~ msg.value ~ ' }' }}
-          replace_attributes: >
-            {%- set found = namespace(value=0) -%}
-            {%- for attr in states.variable.tts_saved_messages.attributes -%}
-              {%- if play_message == state_attr('variable.tts_saved_messages',attr).split('@')[0]|trim %}{%- set found.value = 1 -%}{%- endif -%}
-            {%- endfor -%}
-            {{ true if found.value|int == 0 else false }}
-
-##################################################################################################
-# Play Saved Messages
-##################################################################################################
-  tts_play_saved_messages:
-    alias: "Play Saved Messages"
-    description: "Play stored messages when somebody comes home, or after alarm is triggered."
-    mode: single
-    variables:
-      msgs: "{{ states.variable.tts_saved_messages.attributes|list|length }}"
-      min_vol: "{{ 20 if states('sensor.tts_media_player') in state_attr('group.google_speaker_groups','entity_id') else 30 }}"
-    sequence:
-      - choose:
-          - conditions: "{{ msgs > 0 }}"
-            sequence:
-              - service: script.turn_on
-                data:
-                  entity_id: script.tts_announcement
-                  variables:
-                    play_message: "There are {{ msgs }} messages waiting for you,."
-                    quiet_play: true
-                    min_volume: "{{ min_vol }}"
-
-              - delay:
-                  seconds: 1
-
-              - repeat:
-                  count: "{{ msgs }}"
-                  sequence:
-                    - service: script.turn_on
-                      data:
-                        entity_id: script.tts_announcement
-                        variables:
-                          play_message: "{{ state_attr('variable.tts_saved_messages','msg' ~ repeat.index) }}"
-                          quiet_play: true
-                          min_volume: "{{ min_vol }}"
-
-        default:
-          - service: script.tts_announcement
-            data:
-              play_message: "There are no messages waiting for you."
-              min_volume: "{{ min_vol }}"
-
-      - service: variable.set_variable
-        data:
-          variable: tts_saved_messages
-          value: '0'
-          replace_attributes: true
-
-#######################################################################################################################
-## TTS Play Failed
-#######################################################################################################################
-  tts_play_failed:
-    alias: "Message Play Failed"
-    description: "Turn off announcement queue, send notification."
-    mode: single
-    fields:
-      play_message:
-        description: "String - message to play."
-        example: "This is a test message."
-      tts_override:
-        description: "Override service to use for TTS.  (broadcast, nabu_casa, google_cloud, google_tts, polly,)"
-        example: polly
-      media_player:
-        description: "Override default media player."
-        example: media_player.broadcast_speakers
-      min_volume:
-        description: "Percent - override volume level"
-        example: 50
-      quiet_play:
-        description: "Play announcement during quiet hours."
-        example: true
-      ignore_away:
-        description: "Play announcement when nobody home."
-        example: true
-      save_message:
-        description: "Save message to play when home or after alarm."
-        example: true
-      alert:
-        description: "Message is an alert (overrides tts, media player, and volume)."
-        example: true
-      relay:
-        description: "Google Assistant Relay state."
-        example: 'on'
-    sequence:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_boolean.supplemental_logging
-                state: 'on'
-
-            sequence:
-              - service: system_log.write
-                data:
-                  message: |
-
-                    ** TTS MESSAGE FAILED **
-                    TTS Service: {{ tts_override }}
-                    Media Player: {{ media_player }}
-                    Min Volume: {{ min_volume }}
-                    Quiet Play: {{ quiet_play }}
-                    Ignore Away: {{ ignore_away }}
-                    Save: {{save_message}}
-                    tts_service:{{ tts_service }}
-                    tts_mp: {{ tts_mp }}
-                    tts_volume: {{ tts_volume }}
-                    tts_mute: {{ tts_mute }}
-                    alert: {{ alert }}
-                    relay: {{ relay }}
-                    Message: {{ '\n' ~  play_message ~ '\n' }}
-                  level: critical
-
-      - service: browser_mod.toast
-        data:
-          duration: 30000
-          message: "{{ play_message }}"
-
-      - condition: state
-        entity_id: binary_sensor.alerts_enabled
-        state: 'on'
-
-      - service: !include /config/include/template/notify_jason_template.yaml
-        data:
-          title: "Announcement Play Failed"
-          message: |
-            An announcement has failed to play!
-            Message: {{ play_message }}
-          data:
-            actions:
-              - action: close_tts_play_failed
-                title: Close
-            tag: tts_play_failed
-            timestamp: "{{ as_timestamp(now()) }}" #push
-            priority: normal
-            renotify: false #push
-            ttl: 3600
-            silent: false #push
-            requireInteraction: false #push
-            sticky: false #app
-            url: /lovelace/media #push
-            clickAction: /lovelace/media
-            color: !secret NOTIFY_COLOR #app
-            icon: !secret ALERT_ICON #push
-            badge: !secret ALERT_BADGE #push
-
-automation:
-#######################################################################################################################
-## TTS - Queue Finished - so we can turn queue off manually or after set time
-#######################################################################################################################
-  - id: tts_queue_finished
-    alias: "[TTS] Queue Finished"
-    description: "Turn off announcement boolean, restore media player volumes."
-    initial_state: true
-    mode: single
-    max_exceeded: silent
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.tts_playing
-        to: 'off'
-
-      # run when announcement playing sensor has been on for a long time (failsafe - queue stuck on)
-      - platform: state
-        entity_id: binary_sensor.tts_playing
-        to: 'on'
-        for:
-          seconds: 150  # this time value is longest announcement queue will ever run
-
-    action:
-      # wait until media player stops so we don't get a volume jump when volumes are restored
-      - wait_template: "{{ not is_state(states('variable.active_media_player_tts'),'playing') }}"
-        timeout:
-          seconds: 5
-        continue_on_timeout: true
-
-      - service: script.set_media_player_volumes
-        data:
-          media_player: all
-          source: tts_off
-
-      - service: variable.set_variable
-        data:
-          variable: active_media_player_tts
-          value: cleared
-
-      # turn off announcement playing boolean (req if triggered by msg queue timeout)
-      - service: homeassistant.turn_off
-        entity_id: input_boolean.tts_playing
-
-#######################################################################################################################
-##  TTS Volume Check
-## - ensure night <= quiet <= announcement volume so we don' get unexpected volume jumps
-#######################################################################################################################
-  - id: tts_volume_check
-    alias: "[TTS] Volume Check"
-    description: "Keep quiet hours volume settings stay in sync."
-    initial_state: true
-    mode: queued
-    max: 10
-    trigger:
-      - platform: state
-        entity_id:
-          - input_number.tts_volume_quiet
-          - input_number.tts_volume_night
-          - input_number.tts_volume
-
-    action:
-      - choose:
-          - conditions:
-              - condition: template
-                value_template: "{{ trigger.entity_id == 'input_number.tts_volume_quiet' }}"
-
-            sequence:
-              # adjust announcement volume if required
-              - service: input_number.set_value
-                data:
-                  entity_id: input_number.tts_volume
-                  value: >
-                    {{ states('input_number.tts_volume_quiet')|float
-                        if states('input_number.tts_volume')|int < states('input_number.tts_volume_quiet')|int
-                        else states('input_number.tts_volume')|float }}
-
-              # adjust night volume if required
-              - service: input_number.set_value
-                data:
-                  entity_id: input_number.tts_volume_night
-                  value: >
-                    {{ states('input_number.tts_volume_quiet')|float
-                        if states('input_number.tts_volume_night')|int > states('input_number.tts_volume_quiet')|int
-                        else states('input_number.tts_volume_night')|float }}
-
-          - conditions:
-              - condition: template
-                value_template: "{{ trigger.entity_id == 'input_number.tts_volume_night' }}"
-
-            sequence:
-              # adjust announcement volume if required
-              - service: input_number.set_value
-                data:
-                  entity_id: input_number.tts_volume
-                  value: >
-                    {{ states('input_number.tts_volume_night')|float
-                        if states('input_number.tts_volume')|int < states('input_number.tts_volume_night')|int
-                        else  states('input_number.tts_volume')|float }}
-
-              # adjust quiet hours volume if required
-              - service: input_number.set_value
-                data:
-                  entity_id: input_number.tts_volume_quiet
-                  value: >
-                    {{ states('input_number.tts_volume_night')|float
-                      if states('input_number.tts_volume_quiet')|int < states('input_number.tts_volume_night')|int
-                      else  states('input_number.tts_volume_quiet')|float }}
-
-          - conditions:
-              - condition: template
-                value_template: "{{ trigger.entity_id == 'input_number.tts_volume' }}"
-
-            sequence:
-              # adjust quiet hours volume if required
-              - service: input_number.set_value
-                data:
-                  entity_id: input_number.tts_volume_quiet
-                  value: >
-                    {{ states('input_number.tts_volume')|float
-                        if states('input_number.tts_volume_quiet')|int > states('input_number.tts_volume')|int
-                        else states('input_number.tts_volume_quiet')|float }}
-
-              # adjust night hours volume if required
-              - service: input_number.set_value
-                data:
-                  entity_id: input_number.tts_volume_night
-                  value: >
-                    {{ states('input_number.tts_volume')|float
-                        if states('input_number.tts_volume_night')|int > states('input_number.tts_volume')|int
-                        else states('input_number.tts_volume_night')|float }}
-
-#######################################################################################################################
-## TTS - Close Play Failed Notifications
-#######################################################################################################################
-  - id: tts_close_play_failed_notifications
-    alias: "[TTS] Close Play Failed Notifications"
-    description: "Dismiss notifications on all devices."
-    initial_state: true
-    mode: single
-    max_exceeded: silent
-    trigger:
-      - platform: event
-        event_type: html5_notification.closed
-        event_data:
-          tag: tts_play_failed
-
-      #BUG html5 closed event doesn't work if notification is in tray
-      - platform: event
-        event_type: html5_notification.clicked
-        event_data:
-          action: close_tts_play_failed
-
-      - platform: event
-        event_type: mobile_app_notification_action
-        event_data:
-          action: close_tts_play_failed
-
-    action:
-      - service: script.close_notifications
-        data:
-          target: mobile_app_jphone
-          tag: tts_play_failed

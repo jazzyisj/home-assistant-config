@@ -1,0 +1,70 @@
+#######################################################################################################################
+## Alarm Clock - Snooze On
+#######################################################################################################################
+- id: alarm_clock_snooze_on
+  alias: "[Alarm Clock] Snooze On"
+  description: "Pause media player and start snooze timer when snooze turned on."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: input_boolean.alarm_clock_snooze
+      to: 'on'
+
+    # run when startup complete to restart snooze timers
+    - platform: state
+      entity_id: binary_sensor.startup_complete
+      to: 'on'
+
+    - platform: event
+      event_type: html5_notification.clicked
+      event_data:
+        action: snooze_alarm_clock
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: snooze_alarm_clock
+
+  condition:
+    # if trigger is startup snooze boolean must be on
+    - condition: template
+      value_template: "{{ is_state('input_boolean.alarm_clock_snooze','on') if trigger.entity_id == 'binary_sensor.startup_complete' else true }}"
+
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.alarm_clock_active
+              state: 'off'
+
+          sequence:
+            - service: browser_mod.toast
+              data:
+                message: "No active alarm clock. Snooze turned off."
+                duration: 30000
+
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.alarm_clock_snooze
+
+      default:
+        - service: timer.start
+          data:
+            entity_id: timer.alarm_clock_snooze
+            duration:
+              minutes:  "{{ states('input_number.alarm_clock_snooze_time')|int }}"
+
+        - choose:
+          - conditions: "{{ is_state(states('sensor.alarm_clock_media_player'),'playing') }}"
+
+            sequence:
+              # turn off automation to prevent trigger when media player paused
+              - service: automation.turn_off
+                entity_id: automation.alarm_clock_detect_snooze
+
+              - service:  media_player.media_pause
+                data:
+                  entity_id: "{{ states('sensor.alarm_clock_media_player') }}"
+
+              - service: automation.turn_on
+                entity_id: automation.alarm_clock_detect_snooze

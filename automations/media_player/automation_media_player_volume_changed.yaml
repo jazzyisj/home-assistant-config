@@ -1,0 +1,118 @@
+#######################################################################################################################
+## Media Player Volume Changed
+## - media player is float, input_number is percent
+## - if alarm speaker group volume changed it will trigger individual media player volume changes
+#NOTE volume changes aren't picked up when media player is off state - no fix
+#######################################################################################################################
+- id: media_player_volume_changed
+  alias: "[Media Player] Volume Changed"
+  description: "Change stored volume when media player volume changes."
+  initial_state: true
+  mode: queued
+  max: 20
+  trigger:
+    - platform: state
+      entity_id: !include /config/include/entities/media_player_entities_single.yaml
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.media_player_automation
+      state: 'on'
+
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: triggered
+
+    # media player states change during restart
+    - condition: state
+      entity_id: binary_sensor.startup_complete
+      state: 'on'
+
+    # only run if to_state is not off or volume will be set to 0
+    - condition: template
+      value_template: >
+        {{ trigger.from_state.state not in ['off','unknown','unavailable','none']
+            and trigger.to_state.state not in ['off','unknown','unavailable','none'] }}
+
+    # only run if the volume has changed on trigger entity (to_state != from_state) and != saved volume
+    - condition: template
+      value_template: >
+        {% set new_vol = '%0.2f'|format(trigger.to_state.attributes.volume_level|float*100)|float %}
+        {{ new_vol != '%0.2f'|format(trigger.from_state.attributes.volume_level|float*100)|float
+            and new_vol != states('input_number.' ~ trigger.entity_id.split('.')[1] ~ '_volume') }}
+
+    # trigger is not radio media player if radio is on
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.radio_on','off') %} true
+        {% else %}
+          {% set player = states('sensor.radio_media_player') %}
+          {% if trigger.entity_id == player %} false
+          {% elif player in state_attr('group.google_speaker_groups','entity_id') %}
+            {% set found = namespace(value=0) %}
+            {% for item in state_attr('group.' ~ player.split('.')[1],'entity_id') %}
+              {% if trigger.entity_id == item %}{% set found.value = 1 %}{% endif %}
+            {% endfor %}
+            {{ found.value|int == 0 }}
+          {% else %} on
+          {% endif %}
+        {% endif %}
+
+    # trigger is not spotify media player if spotify is on
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.spotify_active','off') %} true
+        {% else %}
+          {% set player = states('sensor.spotify_media_player') %}
+          {% if trigger.entity_id == player %} false
+          {% elif player in state_attr('group.google_speaker_groups','entity_id') %}
+            {% set found = namespace(value=0) %}
+            {% for item in state_attr('group.' ~ player.split('.')[1],'entity_id') %}
+              {% if trigger.entity_id == item %}{% set found.value = 1 %}{% endif %}
+            {% endfor %}
+            {{ found.value|int == 0 }}
+          {% else %} on
+          {% endif %}
+        {% endif %}
+
+    # trigger is not alarm clock media player if alarm clock is on
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.alarm_clock_active','off') %} true
+        {% else %}
+          {% set player = states('sensor.alarm_clock_media_player') %}
+          {% if trigger.entity_id == player %} false
+          {% elif player in state_attr('group.google_speaker_groups','entity_id') %}
+            {% set found = namespace(value=0) %}
+            {% for item in state_attr('group.' ~ player.split('.')[1],'entity_id') %}
+              {% if trigger.entity_id == item %}{% set found.value = 1 %}{% endif %}
+            {% endfor %}
+            {{ found.value|int == 0 }}
+          {% else %} on
+          {% endif %}
+        {% endif %}
+
+    # trigger is not annoucement media player if announcement/alert playing
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.tts_playing','off') %} true
+        {% else %}
+          {% set player = states('sensor.tts_media_player') %}
+          {% if trigger.entity_id == player %} false
+          {% elif player in state_attr('group.google_speaker_groups','entity_id') %}
+            {% set found = namespace(value=0) %}
+            {% for item in state_attr('group.' ~ player.split('.')[1],'entity_id') %}
+              {% if trigger.entity_id == item %}{% set found.value = 1 %}{% endif %}
+            {% endfor %}
+            {{ found.value|int == 0 }}
+          {% else %} on
+          {% endif %}
+        {% endif %}
+
+  action:
+    - service: input_number.set_value
+      data:
+        entity_id: "input_number.{{ trigger.entity_id.split('.')[1] }}_volume"
+        value: "{{ '%0.2f'|format(state_attr(trigger.to_state.entity_id,'volume_level')|float*100)|float }}"

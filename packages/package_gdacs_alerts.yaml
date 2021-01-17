@@ -1,0 +1,156 @@
+#######################################################################################################################
+## Package - GDACS Alerts
+## use weather category
+#######################################################################################################################
+homeassistant:
+  customize:
+    alert.weather_gdacs_alert:
+      friendly_name: GDACS
+      icon: mdi:pulse
+      category: weather
+
+zone:
+#######################################################################################################################
+## GDACS Alert Zone
+#######################################################################################################################
+  name: GDACS Alert
+  icon: mdi:alert
+  latitude: 42.30807001467753
+  longitude: -82.92180673210581
+  radius: 500000
+  passive: true
+
+input_boolean:
+#######################################################################################################################
+## Display GDACS Alerts
+## - used to control gdacs alert display on UI
+#######################################################################################################################
+  display_gdacs_alerts:
+    name: Display GDACS Alerts
+    icon: mdi:pulse
+    initial: true
+
+binary_sensor:
+  - platform: template
+    sensors:
+#######################################################################################################################
+## GDACS Alert
+#######################################################################################################################
+      gdacs_alert_active:
+        friendly_name: GDACS Alert Active
+        unique_id: gdacs_alert_active
+        icon_template: mdi:pulse
+        value_template: "{{ states('sensor.gdacs_alerts')|int > 0 }}"
+
+alert:
+#######################################################################################################################
+## Alert - GDACS Alert
+#######################################################################################################################
+  weather_gdacs_alert:
+    name: "GDACS Alert"
+    title: "GDACS Alert"
+    message: "GDACS alert is active."
+    entity_id: binary_sensor.gdacs_alert_active
+    state: 'on'
+    repeat: 1440
+    can_acknowledge: true
+    skip_first: true
+    notifiers: jason
+    data:
+      tag: gdacs_alert
+      group: Alert
+      channel: General
+      importance: high
+      vibrationPattern: '200, 200, 200, 200, 200, 200, 200'
+      ledColor: !secret WARNING_COLOR
+      priority: high
+      ttl: 0
+      timeout: 3600
+      persistent: false
+      sticky: false
+      clickAction: /lovelace/weather
+      color: !secret WARNING_COLOR
+      icon_url: !secret ASTHMA_ICON
+      image: !secret ASTHMA_IMAGE
+      actions:
+        - action: pause_gdacs_alert
+          title: Pause
+        - action: close_gdacs_alert
+          title: Close
+
+      # additional parameters for html5 push
+      timestamp: "{{ as_timestamp(now()) }}"
+      renotify: true
+      silent: true
+      requireInteraction: false
+      url: /lovelace/weather
+      icon: !secret ASTHMA_ICON
+      badge: !secret ASTHMA_BADGE #IMAGE
+
+automation:
+#######################################################################################################################
+## Weather - GDACS Zone Alert
+#######################################################################################################################
+  - id: weather_gdacs_zone_alert
+    alias: "[Weather] GDACS Zone Alert"
+    description: "Active alert notification when entering gdacs alert zone."
+    initial_state: true
+    mode: parallel
+    trigger:
+      platform: geo_location
+      source: gdacs
+      zone: zone.gdacs_alert
+      event: enter
+
+    condition:
+      condition: numeric_state
+      entity_id: sensor.gdacs_alerts
+      above: '0'
+
+    action:
+      - service: notify.mobile_app_jphone #ISSUE how dow we determine who set off alert to send to right phone?
+        data:
+          title: Active GDACS Alerts
+          message: >
+              {% set gdacs_alerts = states.geo_location|selectattr('attributes.source','eq','gdacs')|map(attribute='attributes.description')|join('<br>') %}
+              {{ gdacs_alerts }}
+          data:
+            subject: There are active GDACS alerts in this zone.
+            tag: gdacs_zone_alert
+            group: Alert
+            channel: Alert
+            importance: max
+            vibrationPattern: '100, 100, 100'
+            ledColor: !secret CRITICAL_COLOR
+            priority: high
+            ttl: 0
+            timeout: 3600
+            persistent: false
+            sticky: false
+            clickAction: /lovelace/weather
+            color: !secret CRITICAL_COLOR
+            icon_url: !secret ALERT_ICON
+
+#######################################################################################################################
+## Weather - Close GDACS Zone Alert Notifications
+#######################################################################################################################
+  - id: weather_close_gdacs_zone_alert_notifications
+    alias: "[Weather] Close GDACS Zone Alert Notifications"
+    description: "Dismiss notifications on all devices."
+    initial_state: true
+    mode: single
+    max_exceeded: silent
+    trigger:
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: gdacs_zone_alert
+
+    action:
+      - service: script.close_notifications
+        data:
+          target: mobile_app_jphone
+          tag: gdacs_zone_alert
+
+      - delay:
+          seconds: 180 # prevent recursive triggers

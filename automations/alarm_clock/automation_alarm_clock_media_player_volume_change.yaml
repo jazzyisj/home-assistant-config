@@ -1,0 +1,56 @@
+#######################################################################################################################
+## Alarm Clock - Media Player Volume Change
+## - media player is decimal value, input_number is percent
+#######################################################################################################################
+- id: alarm_clock_media_player_volume_change
+  alias: "[Alarm Clock] Media Player Volume Change"
+  description: "Change volume on alarm clock control when volume on media player changed."
+  initial_state: true
+  mode: queued
+  max: 5
+  trigger:
+    - platform: state
+      entity_id: !include /config/include/entities/media_player_entities_single.yaml
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.alarm_clock_active
+      state: 'on'
+
+    - condition: state
+      entity_id: script.alarm_clock_play
+      state: 'off'
+
+    - !include /config/include/template/alarm_clock_media_player_condition.yaml
+    - !include /config/include/template/alarm_clock_tts_media_player_condition.yaml
+
+    # only run if the volume has changed on trigger entity
+    - condition: template
+      value_template: >
+          {{ '%0.2f'|format(state_attr(trigger.from_state.entity_id,'volume_level')|float)
+               != '%0.2f'|format(state_attr(trigger.to_state.entity_id,'volume_level')|float) }}
+
+    # only run if trigger state is not off or volume will be set to 0
+    - condition: template
+      value_template: "{{ not states(trigger.to_state.state) in ['off','unknown','unavailable','none'] }}"
+
+    # only run if the media player volume is not equal to the alarm clock volume
+    - condition: template
+      value_template: >
+          {{ '%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float)
+               != '%0.2f'|format(states('input_number.alarm_clock_volume')|float/100) }}
+
+  action:
+    # turn off volume automation to prevent recursive calls
+    - service: automation.turn_off
+      entity_id: automation.alarm_clock_volume_change
+
+    # set alarm clock volume input number to trigger media player volume level
+    # media player volume float *100 format float to zero decimal for percent value
+    - service: input_number.set_value
+      data:
+        entity_id: input_number.alarm_clock_volume
+        value: "{{ '%0.0f'|format(state_attr(trigger.entity_id,'volume_level')|float*100 ) }}"
+
+    - service: automation.turn_on
+      entity_id: automation.alarm_clock_volume_change

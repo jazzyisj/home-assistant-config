@@ -1,0 +1,202 @@
+#######################################################################################################################
+## Alarm - Warning
+#######################################################################################################################
+- id: alarm_warning
+  alias: "[Alarm] Warning"
+  description: Start timer, play announcement when alarm is warning.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to: warning
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_automation
+      state: 'on'
+
+  action:
+    - service: input_boolean.turn_on
+      entity_id: input_boolean.alarm_warning
+
+    # start alarm warning timer to the alarm warning time
+    - service: timer.start
+      data:
+        entity_id: timer.alarm_warning
+        duration:
+          seconds: "{{ (states.alarm_control_panel.house.attributes['states'][state_attr('alarm_control_panel.house','arm_state')]['warning_time'])|int }}"
+
+    # set the value for active alarm message for tts, display in UI
+    - service: input_text.set_value
+      data:
+        entity_id: input_text.current_alarm
+        value: "{{ states[states.alarm_control_panel.house.attributes.changed_by.split('.')[0]][ states.alarm_control_panel.house.attributes.changed_by.split('.')[1]].name }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.alerts_enabled
+              state: 'on'
+
+          sequence:
+            - service: notify.alarm
+              data:
+                title: House Alarm Warning
+                message: "Sensor: {{ states('input_text.current_alarm') }}"
+                data:
+                  tag: alarm_warning
+                  group: Alarm
+                  channel: Alert
+                  importance: max
+                  timeout: 300
+                  persistent: true
+                  clickAction: /lovelace/alarm
+                  color: !secret WARNING_COLOR
+                  icon_url: !secret ALARM_ICON
+                  actions:
+                    - title: Disarm
+                      action: disarm_alarm_override #TEMP move to button on phone desktop must be unlocked
+                    - title: Cameras
+                      action: URI
+                      uri: app://com.flir.consumer.flir.lorexcloud
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.light_automation
+              state: 'on'
+
+          sequence:
+            - service: scene.create
+              data:
+                scene_id: alarm_warning_lights_restore
+                entities:
+                  light.kitchen_potlights:
+                    state: "{{ states('light.kitchen_potlights') }}"
+                    brightness: "{{ state_attr('light.kitchen_potlights','brightness') }}"
+                  light.dining_room_potlights:
+                    state: "{{ states('light.dining_room_potlights') }}"
+                    brightness: "{{ state_attr('light.dining_room_potlights','brightness') }}"
+                  light.side_entrance_light:
+                    state: "{{ states('light.side_entrance_light') }}"
+                    brightness: "{{ state_attr('light.side_entrance_light','brightness') }}"
+                  light.upstairs_hallway_potlights:
+                    state: "{{ states('light.upstairs_hallway_potlights') }}"
+                    brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness') }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.media_player_automation
+              state: 'on'
+
+          sequence:
+            - service: script.pause_media_players_speaker
+
+            - service: script.save_media_player_volumes
+              data:
+                source: house_alarm_on
+
+            - service: script.set_media_player_volumes
+              data:
+                source: house_alarm_on
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.occupancy_announcements
+              state: 'on'
+
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.tts_play
+                variables:
+                  play_message: "Warning! The alarm has been triggered by the {{ states('input_text.current_alarm') }} sensor. Disarm the system or the alarm will sound."
+                  quiet_play: true
+                  ignore_away: true
+                  min_volume: "{{ 30 if states('sensor.tts_media_player') in state_attr('group.google_speaker_groups','entity_id') else 50 }}"
+
+      default:
+        - service: browser_mod.toast
+          data:
+            duration: 30000
+            message: "Warning! The alarm has been triggered by the {{ states('input_text.current_alarm') }} sensor. Disarm the system or the alarm will sound."
+
+#######################################################################################################################
+## Alarm - Warning Lights Restore
+#######################################################################################################################
+- id: alarm_warning_lights_restore
+  alias: "[Alarm] Warning Lights Restore"
+  description: Turn off alarm warning lights when alarm is disarmed.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to: disarmed
+      from: warning
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_automation
+        - input_boolean.light_automation
+      state: 'on'
+
+  action:
+    - choose:
+        - conditions:
+            # lights will be turned off if previous mode was night, away etc. so turn a couple on if it's dark out
+            - condition: template
+              value_template: >
+                {{ is_state('binary_sensor.auto_light_on','on') and is_state('binary_sensor.someone_home','on')
+                    and states('input_select.previous_occupancy_mode') in ['Night','Away','Vacation','Override'] }}
+
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.activate_scene
+                variables:
+                  scene: scene.night_lights
+
+      default:
+        - service: script.turn_on
+          data:
+            entity_id: script.activate_scene
+            variables:
+              scene: scene.alarm_warning_lights_restore
+
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.alarm_warning
+
+#######################################################################################################################
+## Alarm - Close Warning Notifications
+#######################################################################################################################
+- id: alarm_close_warning_notifications
+  alias: "[Alarm] Close Device Locked Notifications"
+  description: Dismiss notifications on all devices.
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.house
+      to:
+        - disarmed
+        - triggered
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile
+        tag: alarm_warning
+
+    - service: script.close_notifications
+      data:
+        target: mobile
+        tag: alarm_device_locked
+
+    - delay:
+        seconds: 180 # prevent recursive triggers

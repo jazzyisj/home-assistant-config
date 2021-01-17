@@ -1,0 +1,113 @@
+#######################################################################################################################
+## Climate - Emergency Heat Alert
+#######################################################################################################################
+- id: climate_emergency_heat_alert
+  alias: "[Climate] Emergency Heat Alert"
+  description: "Play announcement when alert turns on."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alert.climate_emergency_heat
+      to: 'on'
+
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "Thermostat Emergency Heat"
+        message: "Indoor Temperature: {{ states('sensor.upstairs_thermostat_temperature') }}°."
+        notification_id: emergency_heat
+
+    - repeat:
+        sequence:
+          - service: script.tts_play
+            data:
+              play_message: "The HVAC emergency heat has been activated.  The indoor temperature is {{ '%0.0f'|format(states('sensor.upstairs_thermostat_temperature')|float) }} degrees."
+              quiet_play: true
+              save_message: true
+              min_volume: "{{ 50 if states('sensor.tts_media_player') in state_attr('group.google_speaker_groups','entity_id') else 60 }}"
+
+          - wait_template: "{{ not is_state('alert.climate_indoor_high_humidity','on') }}"
+            timeout:
+              hours: 1
+            continue_on_timeout: true
+
+        until:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: alert.climate_emergency_heat
+                state: 'on'
+
+#######################################################################################################################
+## Climate - Close Emergency Heat Notifications
+#######################################################################################################################
+- id: climate_close_emergency_heat_notifications
+  alias: "[Climate] Close Emergency Heat Notifications"
+  description: "Dismiss notifications on all devices."
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alert.climate_emergency_heat
+      to:
+        - idle
+        - 'off'
+
+    #BUG from_state of dismissed persistent notifcations is unknown, use state_changed event
+    - platform: event
+      event_type: state_changed
+      event_data:
+        entity_id: persistent_notification.emergency_heat
+
+    - platform: event
+      event_type: html5_notification.closed
+      event_data:
+        tag: emergency_heat
+
+    #BUG html5 closed event doesn't work if notification is in tray
+    - platform: event
+      event_type: html5_notification.clicked
+      event_data:
+        action: close_emergency_heat
+
+    - platform: event
+      event_type: html5_notification.clicked
+      event_data:
+        action: pause_emergency_heat
+
+    - platform: event
+      event_type: mobile_app_notification_cleared
+      event_data:
+        tag: emergency_heat
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: close_emergency_heat
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_emergency_heat
+
+  condition:
+    #BUGFIX conditions required as workaround for unknown persistent notification state
+    - condition: or
+      conditions:
+        - "{% if trigger.entity_id is defined %}{{ trigger.entity_id == 'alert.climate_emergency_heat' and states('alert.climate_emergency_heat') in ['idle','off'] }}{% endif %}"
+        - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'emergency_heat' }}{% endif %}"
+        - "{% if trigger.event is defined %}{{ trigger.event.data['action'] in ['close_emergency_heat','pause_emergency_heat'] }}{% endif %}"
+        - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.emergency_heat','notifying') }}{% endif %}"
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile_app_jphone
+        category: climate
+        tag: emergency_heat
+        pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_emergency_heat' }}{% endif %}"
+
+    - delay:
+        seconds: 180 # prevent recursive triggers

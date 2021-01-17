@@ -1,0 +1,186 @@
+#######################################################################################################################
+## Schedule - Bedtime
+#######################################################################################################################
+- id: schedule_bedtime
+  alias: "[Schedule] Bedtime"
+  description: "Run bed time routine."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: template
+      value_template: "{{ is_state('sensor.time',states('sensor.bedtime_today')) }}"
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.schedule_automation
+        - binary_sensor.someone_home
+      state: 'on'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
+
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: triggered
+
+    # only run if workday/weekend/guest night enabled
+    #NOTE default to house waketime for work today/tomorrow if waketime_today is Off
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.owner_home','off') %}{{ is_state('input_boolean.guest_night','on') }}
+        {% elif states('sensor.time') > (states('sensor.waketime_today') if is_state('sensor.waketime_today','Off') else states('input_datetime.house_waketime')[0:5]) %}
+          {{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_tomorrow','on') else is_state('input_boolean.weekend_night','on') }}
+        {% else %}{{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_today','on') else is_state('input_boolean.weekend_night','on') }}
+        {% endif %}
+
+  action:
+    - service: script.scene_bedtime
+
+#######################################################################################################################
+## Schedule - Turn On Bedtime Delayed
+#######################################################################################################################
+- id: schedule_turn_on_bedtime_delayed
+  alias: "[Schedule] Turn On Bedtime Delayed"
+  description: "Turn on bedtime delayed boolean."
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: bedtime_delayed
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.someone_home
+      state: 'on'
+
+  action:
+    - service: input_boolean.turn_on
+      entity_id: input_boolean.bedtime_delayed
+
+#######################################################################################################################
+## Schedule - Bedtime Delayed
+#######################################################################################################################
+- id: schedule_bedtime_delayed
+  alias: "[Schedule] Bedtime Delayed"
+  description: "Bedtime delayed was changed."
+  initial_state: true
+  mode: queued
+  trigger:
+    - platform: state
+      entity_id: input_boolean.bedtime_delayed
+
+  condition:
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: triggered
+
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.bedtime_delayed
+              state: 'on'
+
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state:
+                - Night
+                - Away
+                - Vacation
+
+          sequence:
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.bedtime_delayed
+
+            - service: browser_mod.toast
+              data:
+                message: "The house is in {{ states('input_select.occupancy_mode') }} mode! - Bedtime delay has been turned off."
+                duration: 30000
+
+      default:
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.bedtime_delayed
+                  state: 'off'
+
+              sequence:
+                - choose:
+                    - conditions:
+                        # time is after bedtime but not night mode
+                        - condition: state
+                          entity_id: binary_sensor.bedtime_active
+                          state: 'on'
+
+                      sequence:
+                        - service: script.scene_bedtime
+
+                  default:
+                    - service: browser_mod.toast
+                      data:
+                        message: "Bedtime delay has been turned off."
+                        duration: 30000
+
+          default:
+            # don't play if scene scripts running
+            - condition: state
+              entity_id:
+                - script.scene_company
+                - script.scene_movie
+              state: 'off'
+
+            - service: script.turn_on
+              data:
+                entity_id: script.tts_play
+                variables:
+                  play_message: |
+                    {%- set minutes = states('input_number.stay_awake_delay')|int -%}
+                    {%- if is_state('binary_sensor.bedtime_active','on') -%}
+                      I'll touch base again in {{ minutes }} {{ 'minute ' if minutes == 1 else 'minutes ' -}}
+                      to see if you're ready to go to bed yet.
+                    {%- else -%}
+                      It looks like you've elected to stay up past your bedtime.
+                      I'll check up on you about {{ minutes }} {{ 'minute ' if minutes == 1 else 'minutes ' -}}
+                      after your scheduled bedtime to see if you've come to your senses.
+                    {%- endif -%}
+                  quiet_play: true
+
+#######################################################################################################################
+## Schedule - Close Bedtime Notifications
+#######################################################################################################################
+- id: schedule_close_bedtime_notifications
+  alias: "[Schedule] Close Bedtime Notifications"
+  description: "Dismiss notifications on all devices."
+  initial_state: true
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_cleared
+      event_data:
+        tag: bedtime_notice
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: bedtime_delayed
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile
+        tag: bedtime_notice
+
+    - delay:
+        seconds: 180 # prevent recursive triggers

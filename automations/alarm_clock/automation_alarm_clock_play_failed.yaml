@@ -1,0 +1,73 @@
+#######################################################################################################################
+## Alarm Clock - Play Failed
+#######################################################################################################################
+- id: alarm_clock_play_failed
+  alias: "[Alarm Clock] Play Failed"
+  description: "Play announcement, reset alarm clock when failed."
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: input_boolean.alarm_clock_failed
+      to: 'on'
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.alarm_clock_active
+      state: 'on'
+
+  action:
+    - service: script.turn_on
+      data:
+        entity_id: script.tts_play
+        variables:
+          play_message: |
+            Attention!
+            A scheduled alarm clock has failed to play.
+            Again, a scheduled alarm clock has failed to play.
+          quiet_play: true
+          min_volume: "{{ 50 if states('sensor.tts_media_player') in state_attr('group.google_speaker_groups','entity_id') else 70 }}"
+
+    - service: script.alarm_clock_stop
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.alerts_enabled
+              state: 'on'
+
+          sequence:
+            # delay to allow occupant to reset radio before notification
+            - delay:
+                minutes: 5
+
+            - condition: state
+              entity_id: input_boolean.alarm_clock_failed
+              state: 'on'
+
+            - service: notify.mobile_app_jphone
+              data:
+                title: Alarm Clock Error
+                message: The alarm clock has failed to play!
+                data:
+                  tag: alarm_clock_play_failed
+                  group: General
+                  channel: Alert
+                  importance: max
+                  vibrationPattern: '200, 100, 200, 100, 200, 100, 400'
+                  ledColor: !secret CRITICAL_COLOR
+                  priority: high
+                  ttl: 0
+                  timeout: 3600
+                  persistent: false
+                  sticky: false
+                  clickAction: /lovelace/schedule
+                  color: !secret CRITICAL_COLOR
+                  icon_url: !secret ALERT_ICON
+
+    # delay before resetting alarm status
+    - delay:
+        hours: 1
+
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.alarm_clock_failed

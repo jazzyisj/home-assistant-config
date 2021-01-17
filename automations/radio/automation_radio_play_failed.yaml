@@ -1,0 +1,95 @@
+#######################################################################################################################
+## Radio - Play Failed
+#######################################################################################################################
+- id: radio_play_failed
+  alias: "[Radio] Play Failed"
+  description: Play announcement, reset alarm clock when failed.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: input_boolean.radio_failed
+      to: 'on'
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.radio_on
+      state: 'on'
+
+  action:
+    - service: script.radio_stop
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.alerts_enabled
+              state: 'on'
+
+          sequence:
+            # delay to allow occupant to reset radio before notification
+            - delay:
+                minutes: 5
+
+            - condition: state
+              entity_id: input_boolean.radio_failed
+              state: 'on'
+
+            - service: notify.mobile_app_jphone
+              data:
+                title: &radiofail_title "Radio Play Failed"
+                message: &radiofail_message "{{ play_message }}"
+                data:
+                  tag: &radiofail_tag tts_play_failed
+                  group: System
+                  channel: General
+                  importance: default
+                  vibrationPattern: '100, 100, 100'
+                  ledColor: !secret WARNING_COLOR
+                  priority: &radiofail_priority high
+                  ttl: &radiofail_ttl 0
+                  timeout: 3600
+                  persistent: false
+                  sticky: false
+                  clickAction: &radiofail_url /lovelace/media
+                  color: !secret WARNING_COLOR
+                  icon_url: &radiofail_icon !secret ALERT_ICON
+                  image: &radiofail_image !secret RADIO_ALERT_IMAGE
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: binary_sensor.jason_home
+                      state: 'on'
+
+                    - condition: state
+                      entity_id: input_select.occupancy_mode
+                      state: Home
+
+                  sequence:
+                    - service: notify.push
+                      data:
+                        title: *radiofail_title
+                        message: *radiofail_message
+                        target: jlaptop
+                        data:
+                          tag: *radiofail_tag
+                          timestamp: "{{ as_timestamp(now()) }}"
+                          priority: *radiofail_priority
+                          ttl: *radiofail_ttl
+                          renotify: true
+                          silent: true
+                          requireInteraction: false
+                          url: *radiofail_url
+                          image: !secret RADIO_ALERT_IMAGE
+                          icon: *radiofail_icon
+                          badge: !secret ALERT_BADGE
+                          actions:
+                            - title: Close
+                              action: close_radio_play_failed
+
+    # delay before resetting alarm status
+    - delay:
+        hours: 1
+
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.radio_failed
