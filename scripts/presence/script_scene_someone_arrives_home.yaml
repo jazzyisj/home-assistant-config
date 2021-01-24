@@ -1,0 +1,178 @@
+#######################################################################################################################
+## Someone Arrives Home
+#NOTE script separate so we can turn off with scene_reset
+#######################################################################################################################
+scene_someone_arrives_home:
+  alias: Someone Arrives Home
+  description: Turn on lights, set occupancy mode to home/guest, play morning radio/weather.
+  icon: mdi:home-account
+  mode: parallel
+  fields:
+    person:
+      description: Person who arrives home
+      example: jason
+    first_home:
+      description: Person arriving is first person home (nobody else home).
+      example: true
+  sequence:
+    - choose:
+        - conditions:
+            # gps didn't register almost home so send alarm disarm notification here
+            - condition: template
+              value_template: >
+                {% if person == 'Jason' %}{{ is_state('input_boolean.jason_almost_home','off') }}
+                {% elif person == 'Sheri' %}{{ is_state('input_boolean.sheri_almost_home','off') }}
+                {% else %} false
+                {% endif %}
+
+          sequence:
+            - service: script.arrived_home_notification
+              data:
+                person: "{{ person }}"
+
+    # clear last_person_to_arrive so last_changed attribute gets updated if even if set value doesn't change
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.last_person_to_arrive
+        option: cleared
+
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.last_person_to_arrive
+        option: "{{ person|title }}"
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ person in ['Jason','Sheri'] }}"
+
+          sequence:
+            - service_template: >
+                {% if person == 'Jason' %} notify.mobile_app_jphone
+                {% elif person == 'Sheri' %} notify.mobile_app_sphone
+                {% endif %}
+              data:
+                message: request_location_update
+
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ person != 'guest' }}"
+
+          sequence:
+            # update traffic sensors to ensure time to home is zeroed out
+            # required because traffic updates don't run when home
+            - service: script.update_traffic_sensors
+
+    # not in conditions so variables are set
+    - condition: state
+      entity_id: input_boolean.presence_automation
+      state: 'on'
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.alarm_triggered
+              state: 'on'
+
+          sequence:
+            - condition: state
+              entity_id: alarm_control_panel.house
+              state: disarmed
+
+            # start alarm triggered timer if it's not already running
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: timer.alarm_triggered_reset
+                      state: idle
+
+                  sequence:
+                    - service: timer.start
+                      entity_id: timer.alarm_triggered_reset
+
+    # if already in selected mode, state won't change, occupancy automations won't trigger
+    - service: input_select.select_option
+      data:
+        entity_id: input_select.occupancy_mode
+        option: >
+          {% if is_state('input_select.occupancy_mode','Night') %} Night
+          {% elif is_state('binary_sensor.owner_home','on') %} Home
+          {% else %} Guest
+          {% endif %}
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.occupancy_announcements
+              state: 'on'
+
+          sequence:
+            - service: script.tts_play
+              data:
+                play_message: |
+                  {%- if person in ['Jason','Sheri'] -%} {{ person|title }} is home.
+                  {%- else -%} A guest has arrived.
+                  {%- endif -%}
+
+            # wait until person is inside house, then welcome them home, play saved messages etc.
+            - wait_template: > #VIRTUAL
+                {{ is_state('binary_sensor.virtual_front_door','on')
+                    or is_state('binary_sensor.virtual_pack_door','on')
+                    or is_state('binary_sensor.virtual_side_door','on') }}
+              timeout:
+                minutes: 5
+              continue_on_timeout: true
+
+            - service: script.tts_play
+              data:
+                play_message: >
+                  Welcome
+                  {%- if person in ['Jason','Sheri'] %} home {{ person }}.
+                  {%- else %} to our home.
+                  {%- endif -%}
+
+      default:
+        # wait until person is inside house, then welcome them home, play saved messages etc.
+        - wait_template: > #VIRTUAL
+            {{ is_state('binary_sensor.virtual_front_door','on')
+                or is_state('binary_sensor.virtual_pack_door','on')
+                or is_state('binary_sensor.virtual_side_door','on') }}
+          timeout:
+            minutes: 5
+          continue_on_timeout: true
+
+    # before owner check so msgs play for guest
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ first_home }}"
+
+            - condition: numeric_state
+              entity_id: variable.tts_saved_messages
+              above: 0
+
+          sequence:
+            - service: script.tts_play_saved_messages
+
+    - wait_template: "{{ is_state('script.tts_play_saved_messages','off') }}"
+      timeout:
+        minutes: 5
+      continue_on_timeout: true # radio might shut back off
+
+    - condition: template
+      value_template: "{{ first_home }}"
+
+    - condition: template
+      value_template: >
+        {{ (person == 'Jason' and is_state('input_boolean.media_preset_enabled_jason','on'))
+          or (person == 'Sheri' and is_state('input_boolean.media_preset_enabled_sheri','on')) }}
+
+    - condition: state
+      entity_id: binary_sensor.quiet_hours
+      state: 'off'
+
+    - service: script.turn_on
+      data:
+        entity_id: script.media_preset_play
+        variables:
+          preset: "{{ person|lower }}"

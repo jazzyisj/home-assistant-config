@@ -1,0 +1,87 @@
+#######################################################################################################################
+## Commute - Work Commute Jason Alert
+#######################################################################################################################
+- id: commute_work_commute_jason_alert
+  alias: "[Commute] Work Commute Jason Alert"
+  description: Play announcement when alert turns on.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alert.work_commute_jason
+      to: 'on'
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.schedule_automation
+      state: 'on'
+
+  action:
+    - repeat:
+        sequence:
+          - service: browser_mod.popup
+            data:
+              deviceID: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='attributes.deviceID')|list }}"
+              title: Work Commute Traffic
+              large: true
+              card: !include /config/lovelace/include/card/traffic_map.yaml
+
+          - service: script.turn_on
+            data:
+              entity_id: script.tts_play
+              variables:
+                play_message: |
+                  Attention!
+                  Jason, you should leave for work before {{ states('sensor.leave_home_time_jason') }} today!
+                  Your current commute time to work is {{ state_attr('sensor.jason_time_to_work','duration_in_traffic')
+                    if not states('sensor.jason_time_to_work') == 'unknown' else 'expected to be longer than usual'}}.
+                quiet_play: true
+                min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'speaker_group',true) else 70 }}"
+
+          # wait for alert to turned off/dismissed
+          - wait_template: "{{ not is_state('alert.work_commute_jason','on') }}"
+            timeout:
+              minutes: 5
+
+        until:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: alert.work_commute_jason
+                state: 'on'
+                
+#######################################################################################################################
+## Commute - Close Jason Work Commute Notifications
+#######################################################################################################################
+- id: commute_close_jason_work_commute_notifications
+  alias: "[Commute] Close Jason Work Commute Notifications"
+  description: Dismiss notifications on all devices.
+  initial_state: true
+  mode: single
+  #max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alert.work_commute_jason
+      to:
+        - idle
+        - 'off'
+
+    - platform: event
+      event_type: mobile_app_notification_cleared
+      event_data:
+        tag: work_commute_jason
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_work_commute_jason
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile_app_jphone
+        tag: work_commute_jason
+        pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_work_commute_jason' }}{% endif %}"
+
+    - delay:
+        seconds: 180 # prevent recursive triggers                

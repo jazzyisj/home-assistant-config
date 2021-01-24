@@ -1,0 +1,88 @@
+#######################################################################################################################
+## Commute - Leave Home Sheri Alert
+#######################################################################################################################
+- id: commute_leave_home_sheri_alert
+  alias: "[Commute] Leave Home Sheri Alert"
+  description: Play announcement when alert turns on.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alert.leave_home_sheri
+      to: 'on'
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.schedule_automation
+        - input_boolean.commute_alerts
+      state: 'on'
+
+    # don't duplicate jason commute alert
+    - condition: state
+      entity_id: binary_sensor.leave_home_jason_alert
+      state: 'off'
+
+  action:
+    - repeat:
+        sequence:
+          - service: script.turn_on
+            data:
+              entity_id: script.tts_play
+              variables:
+                play_message: |
+                  Attention! Sheri!
+                  It is {{ as_timestamp(now())|timestamp_custom('%-I:%M %p',true) }}!
+                  You should have already left for work!  Your current commute time to work is {{ state_attr('sensor.sheri_time_to_work','duration_in_traffic')
+                    if not states('sensor.sheri_time_to_work') == 'unknown' else ' not currently available.'}}.
+                quiet_play: true
+                min_volume: "{{ 40 if is_state_attr(states('sensor.tts_media_player'),'speaker_group',true) else 50 }}"
+
+          # wait for alert to turned off/dismissed
+          - wait_template: "{{ not is_state('alert.leave_home_sheri','on') }}"
+            timeout:
+              minutes: 5
+            continue_on_timeout: true
+
+        until:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: alert.leave_home_sheri
+                state: 'on'
+                
+#######################################################################################################################
+## Commute - Close Leave Home Sheri Notifications
+#######################################################################################################################
+- id: commute_close_leave_home_sheri_notifications
+  alias: "[Commute] Close Leave Home Sheri Notifications"
+  description: Dismiss notifications on all devices.
+  initial_state: true
+  mode: single
+  #max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alert.leave_home_sheri
+      to:
+        - idle
+        - 'off'
+
+    - platform: event
+      event_type: mobile_app_notification_cleared
+      event_data:
+        tag: leave_home_sheri
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_leave_home_sheri
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile_app_sphone
+        tag: leave_home_sheri
+        pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_leave_home_sheri' }}{% endif %}"
+
+    - delay:
+        seconds: 180 # prevent recursive triggers                

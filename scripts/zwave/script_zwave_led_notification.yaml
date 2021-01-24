@@ -1,0 +1,206 @@
+##################################################################################################
+## ZWave LED Notification
+##################################################################################################
+zwave_led_notification:
+  alias: ZWave LED Notification
+  description: Set LED notifications.
+  icon: mdi:home-lightbulb-outline
+  mode: queued
+  max: 5
+  fields:
+    trigger:
+      description: Trigger for notification.
+      example: binary_sensor.garage_door_open
+  variables:
+    alert_type: reset
+    led_entities: none
+    entity: none
+  sequence:
+    - variables:
+        alert_type: >
+          {% if trigger == 'alarm_control_panel.house' %} alarm
+          {% elif trigger in ['binary_sensor.jason_home','binary_sensor.sheri_home','input_boolean.guest_home',' proximity.jhome',' proximity.shome'] %} presence
+          {% elif trigger == 'binary_sensor.weather_alert_active_led' %} weather
+          {% elif trigger == 'binary_sensor.garage_door_open' %} garage
+          {% elif trigger == 'garage_warning' %} garage_warning
+          {% elif trigger == 'garage_offline' %} garage_offline
+          {% else %} reset
+          {% endif %}
+        led_entities: >
+          {% if alert_type == 'reset' %}
+            {{ states.zwave|selectattr('attributes.notify_led','eq',true)|map(attribute='entity_id')|list }}
+          {% elif alert_type in ['alarm','garage_warning'] %}
+            {{ states.zwave|selectattr('attributes.notify_led','eq',true)|map(attribute='entity_id')|list
+              if is_state('alarm_control_panel.house','triggered') or is_state('input_boolean.alarm_triggered','on')
+                else states.zwave|selectattr('attributes.led_group','eq','alarm')|map(attribute='entity_id')|list }}
+          {% else %}{{ states.zwave|selectattr('attributes.led_group','eq',alert_type)|map(attribute='entity_id')|list }}
+          {% endif %}
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ alert_type == 'alarm' }}"
+
+          sequence:
+            - condition: template
+              value_template: "{{ is_state('input_boolean.alarm_temp_override','off') }}"
+
+            - repeat:
+                while:
+                  - condition: template
+                    value_template: "{{ repeat.index <= led_entities|count }}"
+
+                sequence:
+                  - variables:
+                      entity: "{{ led_entities[repeat.index-1] }}"
+
+                  # error if zwave entity not in ready state
+                  - condition: template
+                    value_template: "{{ is_state(entity,'ready') }}"
+
+                  - service: zwave.set_config_parameter
+                    data:
+                      node_id: "{{ state_attr(entity,'node_id')|int }}"
+                      parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                      size: 4
+                      value: !include /config/include/template/led_alarm_state.yaml
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: alarm_control_panel.house
+                      state: triggered
+
+                  sequence:
+                    - wait_template: "{{ not is_state('alarm_control_panel.house','triggered') }}"
+                      timeout:
+                        seconds: "{{ (states.alarm_control_panel.house.attributes['states'][state_attr('alarm_control_panel.house','arm_state')]['trigger_time'] )|int }}"
+                      continue_on_timeout: false # alarm still triggered, don't reset notifications
+
+            # this only matters when no pending/warning, state changes restart automation
+              default:
+                - delay:
+                    minutes: 2
+
+            # clear alarm triggered leds
+            - service: script.zwave_led_reset
+
+            # reset entities to just alarm group (req if alarm was triggered)
+            - variables:
+                led_entities: "{{ states.zwave|selectattr('attributes.led_group','eq','alarm')|map(attribute='entity_id')|list }}"
+
+            - repeat:
+                while:
+                  - condition: template
+                    value_template: "{{ repeat.index <= led_entities|count }}"
+
+                sequence:
+                  - variables:
+                      entity: "{{ led_entities[repeat.index-1] }}"
+
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ is_state(entity,'ready') }}"
+
+                        sequence:
+                          - service: zwave.set_config_parameter
+                            data:
+                              node_id: "{{ state_attr(entity,'node_id')|int }}"
+                              parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                              size: 4
+                              value: !include /config/include/template/led_alarm_state.yaml
+
+      default:
+        - repeat:
+            while:
+              - condition: template
+                value_template: "{{ repeat.index <= led_entities|count }}"
+
+            sequence:
+              - variables:
+                  entity: "{{ led_entities[repeat.index-1] }}"
+
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ is_state(entity,'ready') }}"
+
+                    sequence:
+                      - choose:
+                          - conditions: "{{ alert_type == 'alarm' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: !include /config/include/template/led_alarm_state.yaml
+
+                          - conditions: "{{ alert_type == 'presence' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: >
+                                    {% set q = is_state('binary_sensor.quiet_hours','on') %}
+                                    {% if is_state('alarm_control_panel.house','triggered') %} 67046143 {# color: 255 , brightness 10, duration forever, fastblink #}
+                                    {% elif is_state('input_boolean.alarm_triggered','on') %}{{ 33491711 if q else 33489663 }} {# color: 255 , brightness 2/10, duration forever, solid #}
+                                    {% elif trigger.entity_id == 'binary_sensor.jason_home' %}{{ 37816964 if q else 37814914 }} {# color: 130 , brightness 2/4, duration 5m, chase #}
+                                    {% elif trigger.entity_id == 'binary_sensor.sheri_home' %}{{ 37815426 if q else 37814989 }} {# color: 205 , brightness 2/4, duration 5m, chase #}
+                                    {% elif trigger.entity_id == 'input_boolean.guest_home' %}{{ 37815311 if q else 37814799 }} {# color: 15 , brightness 2/4, duration 5m, chase #}
+                                    {% elif trigger.entity_id == 'proximity.jhome' %}{{ 88802434 if q else 88801922 }} {# color: 130 , brightness 2/4, duration 15m, pulse #}
+                                    {% elif trigger.entity_id == 'proximity.shome' %}{{ 88802509 if q else 88801997 }} {# color: 205 , brightness 2/4, duration 15m, pulse #}
+                                    {% else %} 16714241 {# clear notification #}
+                                    {% endif %}
+
+                          - conditions: "{{ alert_type == 'weather' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: !include /config/include/template/led_weather_alert.yaml
+
+                          - conditions: "{{ alert_type == 'garage' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: >
+                                    {% if is_state('alarm_control_panel.house','triggered') %} 67046143 {# color: 255 , brightness 10, duration forever, fastblink #}
+                                    {% elif is_state('input_boolean.alarm_triggered','on') %} 33491711 {# color: 255 , brightness 10, duration forever, solid #}
+                                    {% elif is_state('binary_sensor.garage_door_open','on') %}{{ 83821096 if is_state('binary_sensor.quiet_hours','on') else 83822120 }} {# color: 40 , brightness 2/6, duration forever, slowblink #}
+                                    {% else %} 16714241 {# clear notification #}
+                                    {% endif %}
+
+                          - conditions: "{{ alert_type == 'garage_warning' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: 54397465 # color: 25 , brightness 10, duration 2 min, fastblink
+
+                          - conditions: "{{ alert_type == 'garage_offline' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: 71109135 # color: 15 , brightness 10, duration 1 min, slowblink
+
+                          - conditions: "{{ alert_type == 'reset' }}"
+                            sequence:
+                              - service: zwave.set_config_parameter
+                                data:
+                                  node_id: "{{ state_attr(entity,'node_id')|int }}"
+                                  parameter: "{{ 8 if is_state_attr(entity,'attributes.type','switch') else 16 }}"
+                                  size: 4
+                                  value: 16714241  # clear notification

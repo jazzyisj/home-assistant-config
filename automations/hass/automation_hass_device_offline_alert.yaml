@@ -1,0 +1,79 @@
+#######################################################################################################################
+## Hass - Device Offline Alert
+#######################################################################################################################
+- id: hass_device_offline_alert
+  alias: "[Hass] Device Offline Alert"
+  description: Create persistent notification when offline devices sensor changes.
+  initial_state: true
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: alert.device_offline
+      to: 'on'
+
+  action:
+    - service: persistent_notification.create
+      data:
+        title: Device Offline
+        message: >
+          {%- if states.sensor.offline_devices.attributes.entities is defined -%}
+            {%- if states('sensor.offline_devices')|int == 0 -%}
+              No offline devices.
+            {%- else -%}
+              {%- for device in state_attr('sensor.offline_devices','entities') -%}
+              - {{ state_attr(device,'friendly_name')}}{%- if not loop.last -%}{{ '\n' }}{%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+          {%- endif -%}
+        notification_id: device_offline
+
+#######################################################################################################################
+## Hass - Close Device Offline Notifications
+#######################################################################################################################
+- id: hass_close_device_offline_notifications
+  alias: "[Hass] Close Device Offline Notifications"
+  description: Dismiss notifications on all devices.
+  initial_state: true
+  mode: single
+  #max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alert.device_offline
+      to:
+        - idle
+        - 'off'
+
+    #BUG from_state of dismissed persistent notifcations is unknown, use state_changed event
+    - platform: event
+      event_type: state_changed
+      event_data:
+        entity_id: persistent_notification.device_offline
+
+    - platform: event
+      event_type: mobile_app_notification_cleared
+      event_data:
+        tag: device_offline
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_device_offline
+
+  condition:
+    #BUGFIX conditions required as workaround for unknown persistent notification state
+    - condition: or
+      conditions:
+        - "{% if trigger.entity_id is defined %}{{ trigger.entity_id == 'alert.device_offline' and states('alert.device_offline') in ['idle','off'] }}{% endif %}"
+        - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'device_offline' }}{% endif %}"
+        - "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_device_offline' }}{% endif %}"
+        - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.device_offline','notifying') }}{% endif %}"
+
+  action:
+    - service: script.close_notifications
+      data:
+        target: mobile_app_jphone
+        tag: device_offline
+        pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_device_offline' }}{% endif %}"
+
+    - delay:
+        seconds: 180 # prevent recursive triggers

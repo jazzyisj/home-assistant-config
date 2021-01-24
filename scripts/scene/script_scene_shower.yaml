@@ -1,0 +1,181 @@
+##################################################################################################
+# Start Shower
+##################################################################################################
+start_shower:
+  alias: Start Shower
+  description: Turn on shower lights, start spotify shower playlist.
+  icon: mdi:shower-head
+  mode: restart
+  sequence:
+    - service: fan.turn_on
+      data:
+        entity_id: fan.upstairs_bathroom_fan
+        speed: high
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.light_automation
+              state: 'on'
+
+          sequence:
+            - service: light.turn_on
+              data:
+                entity_id: light.upstairs_bathroom_vanity_rgb_light
+                profile: warm_max
+
+            - service: light.turn_on
+              data:
+                entity_id: light.upstairs_bathroom_shower_light
+                profile: warm_max
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.media_preset_enabled_shower
+              state: 'on'
+
+            - condition: not
+              conditions:
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Night
+
+          sequence:
+            - choose:
+                # radio/spotify already playing in bathroom on so just adjust volume
+                - conditions:
+                    - condition: or
+                      conditions:
+                        - condition: and
+                          conditions:
+                            - condition: state
+                              entity_id: input_boolean.radio_on
+                              state: 'on'
+
+                            - condition: or
+                              conditions:
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.bathroom_speaker
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.all_speakers
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.music_speakers
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.broadcast_speakers
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.quiet_speakers
+
+                        - condition: and
+                          conditions:
+                            - condition: state
+                              entity_id: input_boolean.spotify_on
+                              state: 'on'
+
+                            - condition: or
+                              conditions:
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.bathroom_speaker
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.all_speakers
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.music_speakers
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.broadcast_speakers
+
+                                - condition: state
+                                  entity_id: sensor.radio_media_player
+                                  state: media_player.quiet_speakers
+
+                  sequence:
+                    - service: media_player.volume_set
+                      data:
+                        entity_id: media_player.bathroom_speaker
+                        volume_level: >
+                          {{ states('input_number.media_quiet_volume')|float/100 if is_state('binary_sensor.quiet_hours','on')
+                              else states('input_number.media_preset_volume_shower')|float/100 }}
+
+              default:
+                - service: script.media_preset_play
+                  data:
+                    preset: shower
+
+    # delay to keep bathrom light motion off from running
+    - delay:
+        minutes: 30
+
+##################################################################################################
+# Stop Shower
+##################################################################################################
+stop_shower:
+  alias: Stop Shower
+  description: Turn off shower lights, stop spotify.
+  mode: restart
+  sequence:
+    # turn start_shower script off (could be running - delay)
+    - service: script.turn_off
+      entity_id: script.start_shower
+
+    # if radio media player is bathroom speaker, turn it off
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: sensor.radio_media_player
+              state: media_player.bathroom_speaker
+
+            - condition: state
+              entity_id: media_player.bathroom_speaker
+              state:
+                - playing
+                - paused
+
+          sequence:
+            - service: media_player.media_stop
+              entity_id: media_player.bathroom_speaker
+
+      # else radio is on different media player (group) so just reset volume
+      default:
+        - condition: state
+          entity_id: input_boolean.radio_on
+          state: 'on'
+
+        # reset bathroom speaker volume to main radio volume
+        - service: media_player.volume_set
+          data:
+            entity_id: media_player.bathroom_speaker
+            volume_level: "{{ states('input_number.radio_volume')|float / 100 }}"
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.light_automation
+              state: 'on'
+
+          sequence:
+            # turn vanity light to default settings, stays on until no motion turns it off
+            - service: light.turn_on
+              data:
+                entity_id: light.upstairs_bathroom_vanity_rgb_light
+                profile: warm
+                transition: 2
+
+            - service: light.turn_off
+              data:
+                entity_id: light.upstairs_bathroom_shower_light
+                transition: 2

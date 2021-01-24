@@ -1,0 +1,115 @@
+#######################################################################################################################
+## Weather - NOAA Alerts Weather Alert
+## attr: event_type, event_severity, urgency, headline, description, instruction
+## event_severity values: Extreme, Severe, Moderate, Minor, Unknown
+## urgency: Immediate, Expected, Future, Past, Unknown
+#######################################################################################################################
+- id: weather_noaa_alerts_weather_alert
+  alias: "[Weather] NOAA Alerts Weather Alert"
+  description: Display weather alert on UI play alert/announcement for severe alerts.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: sensor.noaa_alerts_miz076
+
+    - platform: state
+      entity_id: binary_sensor.startup_complete
+      to: 'on'
+
+  condition:
+    - condition: state
+      entity_id: binary_sensor.startup_complete
+      state: 'on'
+
+  action:
+    # clear alert severity if no active alerts
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: numeric_state
+                  entity_id: sensor.noaa_alerts_miz076
+                  below: 1
+
+                - condition: template
+                  value_template: "{{ states('sensor.noaa_alerts_miz076')|lower in ['unknown','unavailable','none'] }}"
+
+          sequence:
+            - service: input_text.set_value
+              data:
+                entity_id: input_text.previous_noaa_alert_severity
+                value: cleared
+
+            - service: input_text.set_value
+              data:
+                entity_id: input_text.current_noaa_alert_severity
+                value: cleared
+
+      default:
+        # set previous alert severity (from current_noaa_alert_severity)
+        - service: input_text.set_value
+          data:
+            entity_id: input_text.previous_noaa_alert_severity
+            value: "{{ states('input_text.current_noaa_alert_severity')|lower }}"
+
+        # set current alert severity from alert
+        - service: input_text.set_value
+          data:
+            entity_id: input_text.current_noaa_alert_severity
+            value: >
+              {% if states.sensor.noaa_alerts_miz076.attributes.alerts[0] is defined %}{{states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity|lower }}
+              {% else %}{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower }}
+              {% endif %}
+
+        # only run if new alert is extreme or more severe than current alert
+        - condition: template
+          value_template: >
+            {% set p = states('input_text.previous_noaa_alert_severity') %}
+            {% set c = states('input_text.current_noaa_alert_severity')%}
+            {% if is_state('sensor.noaa_severe_weather_alert','on') %} true
+            {% else %}
+              {{ p == 'severe' and c in ['extreme']
+                  or p == 'moderate' and c in ['extreme','severe']
+                  or p == 'minor' and c in ['extreme','severe','moderate']
+                  or p in ['cleared','unknown','unavailable','none']
+                    and c in ['extreme','severe','moderate','minor'] }}
+            {% endif %}
+
+        - service: input_boolean.turn_on
+          entity_id: input_boolean.display_weather_alerts
+
+        # play as alert if extreme severity otherwise play as an announcement, quiet play if severe, moderate
+        - service: script.tts_play
+          data:
+            play_message: |
+              {%- set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
+              {%- set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
+              {%- set headline = states.sensor.noaa_alerts_miz076.attributes.alerts[0].parameters.NWSheadline %}
+              {%- set severity = states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity %}
+              {%- set inst = states.sensor.noaa_alerts_miz076.attributes.alerts[0].instruction %}
+              {%- set start = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].onset)|timestamp_custom('%_I:%M %p, %A',true) %}
+              {%- set until = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].expires)|timestamp_custom('%_I:%M %p, %A',true) %}
+              Attention!,
+              The National Weather Service has issued a {{ severity }} weather {{ type }}.
+              There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if until != None }}.
+              {{ headline[0] ~ '.' if headline != None }}
+              {{ inst ~ '.' if inst != None }}
+            quiet_play: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower in ['extreme','severe'] }}"
+            alert: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower == 'extreme' }}"
+
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: sensor.noaa_severe_weather_alert
+                  state: 'on' #TEST
+                  # attribute: condition
+                  # state: tornado
+
+              sequence:
+                - service: browser_mod.popup
+                  data:
+                    title: Emergency
+                    deviceID: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='attributes.deviceID')|list }}"
+                    large: true
+                    card: !include /config/lovelace/include/picture_entity/emergency_card.yaml

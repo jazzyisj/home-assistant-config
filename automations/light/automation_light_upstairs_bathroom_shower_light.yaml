@@ -1,0 +1,111 @@
+#######################################################################################################################
+## Light - Upstairs Bathroom Shower Light LED
+#######################################################################################################################
+- id: light_upstairs_bathroom_shower_light_led
+  alias: "[Light] Upstairs Bathroom Shower Light LED"
+  description: Emergency LED notification.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.upstairs_bathroom_shower_light
+
+    - platform: state
+      entity_id: binary_sensor.emergency_active
+
+  condition:
+    - condition: state
+      entity_id: zwave.upstairs_bathroom_shower_light
+      state: ready
+
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.emergency_active
+              state: 'on'
+
+          sequence:
+            - service: zwave.set_config_parameter
+              data:
+                node_id: "{{ state_attr('zwave.upstairs_bathroom_shower_light','node_id')|int }}"
+                parameter: 16
+                size: 4
+                value: 67046143 # color: 255 , brightness 10, duration forever, fastblink
+
+      default:
+        - service: zwave.set_config_parameter
+          data:
+            node_id: "{{ state_attr('zwave.upstairs_bathroom_shower_light','node_id')|int }}"
+            parameter: 16
+            size: 4
+            value: 16714241  # clear notification
+
+#######################################################################################################################
+## Light - Upstairs Bathroom Shower Light Auto Off
+#######################################################################################################################
+- id: light_upstairs_bathroom_shower_light_auto_off
+  alias: "[Light] Upstairs Bathroom Shower Light Auto Off"
+  description: "Turn off bathroom shower light."
+  initial_state: true
+  mode: single
+  trigger:
+    # specify from state, unknown at startup
+    - platform: state
+      entity_id: binary_sensor.upstairs_bathroom_motion
+      to: 'off'
+      from: 'on'
+      for:
+        minutes: 5
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+        - Night
+      for:
+        minutes: 5 # allow timer to cancel, occupant to leave
+
+    # req if motion/timer expire during restart
+    - platform: state
+      entity_id: binary_sensor.startup_complete
+      to: 'on'
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.upstairs_bathroom_shower_light
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: timer.upstairs_bathroom_shower_light
+      state:  idle
+
+    - condition: state
+      entity_id: binary_sensor.upstairs_bathroom_motion
+      state: 'off'
+
+    # req if motion/timer expire during restart
+    - condition: state
+      entity_id: binary_sensor.startup_complete
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - binary_sensor.emergency_active
+        - input_boolean.alarm_triggered
+      state: 'off'
+
+  action:
+    - service: light.turn_off
+      data:
+        entity_id: light.upstairs_bathroom_shower_light
+        transition: 1
