@@ -4,7 +4,7 @@
 #######################################################################################################################
 homeassistant:
   customize:
-    alert.system_low_battery:
+    alert.low_battery:
       friendly_name: Low Battery
       icon: mdi:battery-alert
       category: system
@@ -27,45 +27,6 @@ group:
       - sensor.downstairs_nest_protect_battery_health
       - sensor.upstairs_nest_protect_battery_health
 
-alert:
-#######################################################################################################################
-## System - Low Battery
-#NOTE just playing with a different technique for message loop
-#######################################################################################################################
-  system_low_battery:
-    name: Low Battery
-    title: Low Battery Alert
-    message: >
-      {%- set ns = namespace(message='') -%}
-      {%- set t = states('input_number.battery_alert_threshold')|int -%}
-      {%- set b = states.zwave|selectattr('attributes.battery_level','defined')
-          |rejectattr('state','!=','ready')|selectattr('attributes.battery_level','>=',t) -%}
-      {%- for i in b -%}
-        {%- set ns.m = ns.m ~ '- ' ~ i.name ~ ' (' ~ '%0.0f'|format(i.attributes.battery_level|float)|string ~ '%)<br/>' -%}
-      {%- endfor -%}
-      {%- set nb = expand('group.nest_batteries')|selectattr('state','eq','Replace') -%}
-      {%- for i in nb -%}{%- set ns.m = ns.m ~ '- ' ~ i.name ~ '<br/>' -%}{%- endfor -%}
-      {{ ns.m }}
-    entity_id: binary_sensor.low_battery_alert
-    state: 'on'
-    repeat: 1440
-    can_acknowledge: true
-    skip_first: false
-    notifiers: mobile_app_jphone
-    data:
-      tag: low_battery
-      group: System
-      channel: Alert
-      importance: high
-      timeout: 86400
-      clickAction: /lovelace/system
-      color: !secret WARNING_COLOR
-      icon_url: !secret BATTERY_ICON
-      image: !secret BATTERY_IMAGE
-      actions:
-        - action: pause_low_battery
-          title: Pause
-
 #######################################################################################################################
 ## Low Battery Sensor
 #######################################################################################################################
@@ -84,104 +45,38 @@ binary_sensor:
                         |selectattr('attributes.battery_level','<=', states('input_number.battery_alert_threshold')|int)
                         |map(attribute='entity_id')|list|count > 0) }}
 
-automation:
+alert:
 #######################################################################################################################
-## System - Low Battery Alert
+## System - Low Battery
+#NOTE just playing with a different technique for message loop
 #######################################################################################################################
-  - id: system_low_battery_alert
-    alias: "[System] Low Battery Alert"
-    description: Create notification when alert turns on.
-    initial_state: true
-    mode: single
-    trigger:
-      - platform: state
-        entity_id: alert.system_low_battery
-        to: 'on'
-
-    condition:
-      - condition: state
-        entity_id: input_boolean.system_automation
-        state: 'on'
-
-    action:
-      - repeat:
-          sequence:
-            - service: persistent_notification.create
-              data:
-                title: Low Battery Alert
-                message: >
-                  {%- set ns = namespace(message='The battery level of the following device(s) is low:\n') -%}
-                  {%- set t = states('input_number.battery_alert_threshold')|int -%}
-                  {%- set b = states.zwave|selectattr('attributes.battery_level','defined')
-                      |rejectattr('state','!=','ready')|selectattr('attributes.battery_level','>=',t) -%}
-                  {%- for i in b -%}
-                    {%- set ns.m = ns.m ~ '- ' ~ i.name ~ ' (' ~ '%0.0f'|format(i.attributes.battery_level|float)|string ~ '%)\n' -%}
-                  {%- endfor -%}
-                  {%- set nb = expand('group.nest_batteries')|selectattr('state','eq','Replace') -%}
-                  {%- for i in nb -%}{%- set ns.m = ns.m ~ '- ' ~ i.name ~ '\n' -%}{%- endfor -%}
-                  {{ ns.m }}
-                notification_id: low_battery
-
-            # wait for alert to turned off/dismissed
-            - wait_template: "{{ not is_state('alert.system_low_battery','on') }}"
-              timeout:
-                days: 1
-
-          until:
-            - condition: not
-              conditions:
-                - condition: state
-                  entity_id: alert.system_low_battery
-                  state: 'on'
-
-#######################################################################################################################
-## System - Close Low Battery Notifications
-#######################################################################################################################
-  - id: system_close_low_battery_notifications
-    alias: "[System] Close Low Battery Notifications"
-    description: Dismiss notifications on all devices.
-    initial_state: true
-    mode: single
-    max_exceeded: silent
-    trigger:
-      - platform: state
-        entity_id: alert.system_low_battery
-        to:
-          - idle
-          - 'off'
-
-      #BUG from_state of dismissed persistent notifcations is unknown, use state_changed event
-      - platform: event
-        event_type: state_changed
-        event_data:
-          entity_id: persistent_notification.low_battery
-
-      - platform: event
-        event_type: mobile_app_notification_cleared
-        event_data:
-          tag: low_battery
-
-      - platform: event
-        event_type: mobile_app_notification_action
-        event_data:
-          action: pause_low_battery
-
-    condition:
-      #BUGFIX conditions required as workaround for unknown persistent notification state
-      - condition: or
-        conditions:
-          - "{% if trigger.entity_id is defined %}{{ trigger.entity_id == 'alert.system_low_battery' and states('alert.system_low_battery') in ['idle','off'] }}{% endif %}"
-          - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'low_battery' }}{% endif %}"
-          - "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_low_battery' }}{% endif %}"
-          - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.low_battery','notifying') }}{% endif %}"
-
-    action:
-      - service: script.close_notifications
-        data:
-          target: mobile_app_jphone
-          category: system
-          tag: low_battery
-          pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_low_battery' }}{% endif %}"
-
-      - delay:
-          seconds: 180 # prevent recursive triggers
+  low_battery:
+    name: Low Battery
+    title: Low Battery Alert
+    message: >
+      {%- set ns = namespace(message='') -%}
+      {%- set t = states('input_number.battery_alert_threshold')|int -%}
+      {%- set b = states.zwave|selectattr('attributes.battery_level','defined')
+          |rejectattr('state','!=','ready')|selectattr('attributes.battery_level','>=',t) -%}
+      {%- for i in b -%}
+        {%- set ns.m = ns.m ~ '- ' ~ i.name ~ ' (' ~ '%0.0f'|format(i.attributes.battery_level|float)|string ~ '%)<br/>' -%}
+      {%- endfor -%}
+      {%- set nb = expand('group.nest_batteries')|selectattr('state','eq','Replace') -%}
+      {%- for i in nb -%}{%- set ns.m = ns.m ~ '- ' ~ i.name ~ '<br/>' -%}{%- endfor -%}
+      {{ ns.m }}
+    entity_id: binary_sensor.low_battery_alert
+    state: 'on'
+    repeat: 1440
+    notifiers: mobile_app_jphone
+    data:
+      tag: low_battery
+      group: System
+      channel: Alert
+      importance: max
+      clickAction: /lovelace/system
+      color: !secret WARNING_COLOR
+      icon_url: !secret BATTERY_ICON
+      image: !secret BATTERY_IMAGE
+      actions:
+        - action: pause_low_battery
+          title: Pause

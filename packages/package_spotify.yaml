@@ -33,8 +33,11 @@ input_boolean:
     name: Spotify Repeat
     icon: mdi:progress-question
 
-input_text:
-  active_spotify_player:
+  spotify_failed:
+    initial: false
+
+input_text: #NOTE use input text so we can store cleared value
+  active_media_player_spotify:
 
 input_select:
   spotify_media_player:
@@ -55,44 +58,6 @@ input_number:
     min: 0
     max: 100
     step: 5
-
-sensor:
-#######################################################################################################################
-## Spotcast Sensor
-#######################################################################################################################
-  - platform: spotcast
-
-  - platform: template
-    sensors:
-#######################################################################################################################
-## Spotify Media Player
-#NOTE - this is only populated if Spotify is playing
-#######################################################################################################################
-      spotify_media_player:
-        friendly_name: Spotify Media Player
-        unique_id: spotify_media_player
-        icon_template: mdi:spotify
-        value_template: >
-          {% if expand('group.google_speaker_groups')|selectattr('attributes.app_name','eq','Spotify')
-              |map(attribute='entity_id')|list|count > 0 %}
-             {{ expand('group.google_speaker_groups')|selectattr('attributes.app_name','eq','Spotify')
-                |map(attribute='entity_id')|join(',') }}
-          {% else %}
-            {{ expand('group.media_players_single')|selectattr('attributes.app_name','eq','Spotify')
-                |map(attribute='entity_id')|join(',') }}
-          {% endif %}
-
-#######################################################################################################################
-## Spotcast Device
-#NOTE - this is only populated if Spotify is playing
-#######################################################################################################################
-      spotify_spotcast_device:
-        friendly_name: Spotcast Device
-        unique_id: spotify_spotcast_device
-        icon_template: mdi:spotify
-        value_template: "{{ expand('group.media_players')|selectattr('entity_id','eq',states('sensor.spotify_media_player'))|map(attribute='name')|join(',') }}"
-
-# entity_id: "{{ expand('group.media_players_single')|selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|list }}
 
 binary_sensor:
   - platform: template
@@ -117,14 +82,50 @@ binary_sensor:
 
 #######################################################################################################################
 ## Spotify Active
+#NOTE used to detect spotify starting from spotcast/app
 #######################################################################################################################
       spotify_active:
         friendly_name: Spotify Active
         unique_id: spotify_active
         icon_template: mdi:spotify
         delay_off:
-          seconds: 5 # avoid triggering UI state switching between songs
-        value_template: "{{ states(states('sensor.spotify_media_player')) in ['playing','paused'] }}"
+          seconds: 5 # prevent triggering automations when switching players, playlists
+        value_template: "{{ states(states('input_text.active_media_player_spotify')) in ['playing','paused'] }}"
         availability_template: "{{ is_state('binary_sensor.spotify_connected','on') }}"
+
+sensor:
+#######################################################################################################################
+## Spotcast Sensor
+#######################################################################################################################
+  - platform: spotcast
+
+  - platform: template
+    sensors:
+#######################################################################################################################
+## Spotify Media Player - entity_id of spotify media player
+#NOTE only populated while Spotify is playing
+#######################################################################################################################
+      spotify_media_player:
+        friendly_name: Spotify Media Player
+        unique_id: spotify_media_player
+        icon_template: mdi:spotify
+        value_template: >
+          {% set group = states.media_player|selectattr('attributes.speaker_group','eq',true)|selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|list %}
+          {% set single = expand('group.media_players_single')|selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|list %}
+          {% if group|count > 0 %}{{ group[0] }}
+          {% else %}{{ single[0] }}
+          {% endif %}
+
+#######################################################################################################################
+## Spotcast Device - name of spotify media player
+#NOTE use input_text.active_media_player_spotify or spotcast error in auto_resume (spotify not playing - sensor blank)
+#######################################################################################################################
+      spotify_device_name:
+        friendly_name: Spotcast Device
+        unique_id: spotify_device_name
+        icon_template: mdi:spotify
+        value_template: >
+          {{ expand('group.media_players')|selectattr('entity_id','eq',states('input_text.active_media_player_spotify'))|map(attribute='name')|join(',') }}
+
 
 

@@ -1,23 +1,29 @@
 # Home Assistant Configuration
 
-This is my Home Assistant (Hassio) configuration, updated to v0.114.2
+This is my Home Assistant (Hassio) configuration, updated to v2021.1.5
 
 ###TAGS USED IN CODE
 
-    #TODO
+    #VERIFY
     #TEST
     #TEMP
-    #BUG
-    #BUGFIX
-    #DEPRACTED
-    #VERIFY
-    #DELETE
     #ISSUE
-    #DISABLED
-    #OPTION
-    #NOTE
-    #IMAGE
+    #DELETE
+    #DEPRACATED
+    #IDEA
     #STYLE
+    #IMAGE
+    #OPTION
+    #HVAC_FAN
+    #SWIPE
+    #VIRTUAL
+    #ZWAVE
+    #UNLOCKED
+    #OPEN
+    #TIMER
+    #NOTIFY
+    #BLOOP
+    #NOTE
     #NEW_LIGHT
     #NEW_CEILING_FAN
     #NEW_VENT_FAN

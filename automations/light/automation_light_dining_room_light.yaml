@@ -1,39 +1,52 @@
 #######################################################################################################################
 ## Light - Dining Room Light LED
-#NOTE mointors state of RGB light but controls master light LED
 #######################################################################################################################
 - id: light_dining_room_light_led
   alias: "[Light] Dining Room Light LED"
-  description: "Renotify LED."
+  description: Renotify LED.
   initial_state: true
   mode: restart
   trigger:
     - platform: state
-      entity_id: light.dining_room_rgb_light
+      entity_id: light.dining_room_light
+
+    - platform: state
+      entity_id: binary_sensor.emergency_active
 
   condition:
-    - condition: state
-      entity_id: input_boolean.alarm_automation
-      state: 'on'
-
     - condition: state
       entity_id: zwave.dining_room_light
       state: ready
 
   action:
-    - service: zwave.set_config_parameter
-      data:
-        node_id: "{{ state_attr('zwave.dining_room_light','node_id')|int }}"
-        parameter: 16
-        size: 4
-        value: !include /config/include/template/led_weather_alert.yaml
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.emergency_active
+              state: 'on'
+
+          sequence:
+            - service: zwave.set_config_parameter
+              data:
+                node_id: "{{ state_attr('zwave.dining_room_light','node_id')|int }}"
+                parameter: 16
+                size: 4
+                value: 67046143 # color: 255 , brightness 10, duration forever, fastblink
+
+      default:
+        - service: zwave.set_config_parameter
+          data:
+            node_id: "{{ state_attr('zwave.dining_room_light','node_id')|int }}"
+            parameter: 16
+            size: 4
+            value: !include /config/include/template/led_weather_alert.yaml
 
 #######################################################################################################################
 ## Light - Dining Room Light Nobody Home
 #######################################################################################################################
 - id: light_dining_room_light_nobody_home
   alias: "[Light] Dining Room Light Nobody Home"
-  description: "Turn light on when nobody is home."
+  description: Turn light on when nobody is home.
   initial_state: true
   mode: single
   variables:
@@ -54,15 +67,17 @@
 
   condition:
     - condition: state
-      entity_id: input_boolean.alarm_triggered
-      state: 'off'
-
-    - condition: state
       entity_id:
         - input_boolean.light_automation
         - input_boolean.presence_automation
         - binary_sensor.auto_light_on
       state: 'on'
+
+    - condition: state
+      entity_id:
+        - binary_sensor.emergency_active
+        - input_boolean.alarm_triggered
+      state: 'off'
 
     - condition: state
       entity_id: input_select.occupancy_mode
@@ -81,7 +96,7 @@
 #######################################################################################################################
 - id: light_dining_room_light_auto_on
   alias: "[Light] Dining Room Light Auto On"
-  description: "Turn on lights."
+  description: Turn on lights.
   initial_state: true
   mode: single
   variables:
@@ -126,6 +141,16 @@
         {% endif %}
 
     - condition: state
+      entity_id:
+        - binary_sensor.emergency_active
+        - input_boolean.alarm_triggered
+      state: 'off'
+
+    - condition: state
+      entity_id: binary_sensor.light_scene_active
+      state: 'off'
+
+    - condition: state
       entity_id: input_select.occupancy_mode
       state:
         - Home
@@ -148,14 +173,6 @@
     - condition: template
       value_template: "{{ is_state('alarm_control_panel.house','warning') or (current > quiet if trigger.entity_id == 'binary_sensor.quiet_hours' else current < default) }}"
 
-    - condition: state
-      entity_id: binary_sensor.light_scene_active
-      state: 'off'
-
-    - condition: state
-      entity_id: input_boolean.alarm_triggered
-      state: 'off'
-
   action:
     - service: light.turn_on
       data:
@@ -167,7 +184,7 @@
 #######################################################################################################################
 - id: light_dining_room_light_auto_off
   alias: "[Light] Dining Room Light Auto Off"
-  description: "Turn off lights."
+  description: Turn off lights.
   initial_state: true
   mode: single
   trigger:
@@ -195,11 +212,13 @@
       value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
 
     - condition: state
-      entity_id: binary_sensor.light_scene_active
+      entity_id:
+        - binary_sensor.emergency_active
+        - input_boolean.alarm_triggered
       state: 'off'
-
+      
     - condition: state
-      entity_id: input_boolean.alarm_triggered
+      entity_id: binary_sensor.light_scene_active
       state: 'off'
 
   action:

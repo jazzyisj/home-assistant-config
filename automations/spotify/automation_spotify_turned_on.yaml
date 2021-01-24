@@ -3,15 +3,15 @@
 #######################################################################################################################
 - id: spotify_turned_on
   alias: "[Spotify] Turned On"
-  description: "Play spotify with current settings."
+  description: Play spotify with current settings.
   initial_state: true
   mode: single
-  max_exceeded: silent
+  #max_exceeded: silent
   trigger:
     - platform: state
       entity_id:
         - input_boolean.spotify_on
-        - binary_sensor.spotify_active
+        - binary_sensor.spotify_active # picks up when started by script, spotcast
       to: 'on'
 
     - platform: state
@@ -19,81 +19,34 @@
       to: 'on'
 
   condition:
+    # run at startup if spotify boolean/sensor is on
     - condition: template
       value_template: >
         {{ is_state('input_boolean.spotify_on','on') or is_state('binary_sensor.spotify_active','on')
             if trigger.entity_id == 'binary_sensor.startup_complete' else true }}
 
   action:
-    # turn off radio if spotify playing on a radio media player
     - choose:
         - conditions:
-            - !include /config/include/template/spotify_radio_player_condition.yaml
-
-          sequence:
-            - service: input_boolean.turn_off
-              entity_id: input_boolean.radio_on
-
-            # wait for radio media players to turn off before starting spotify
-            - wait_template: "{{ states(states('sensor.radio_media_player')) in ['off','idle','unavailable','unknown'] }}"
-              timeout:
-                seconds: 15
-              continue_on_timeout: true
-
-    - choose:
-        # spotify already started somewhere else, just turn on boolean
-        - conditions:
+            # spotify already running - turn on boolean
             - condition: state
               entity_id: binary_sensor.spotify_active
               state: 'on'
 
           sequence:
-            # prevent recursive call
-            - service: automation.turn_off
-              data:
-                entity_id: automation.spotify_turned_on
-                stop_actions: false
-
             - service: input_boolean.turn_on
               entity_id: input_boolean.spotify_on
 
-            - service: automation.turn_on
-              entity_id: automation.spotify_turned_on
-
       default:
-        - service: script.set_media_player_volumes
+        - service: script.turn_on
           data:
-            media_player: "{{ states('sensor.spotify_media_player') }}"
-            source: radio_on
-
-        - service: spotcast.start
-          data:
-            device_name: >
-              {% if is_state('binary_sensor.spotify_active','on') %}{{ states('sensor.spotify_spotcast_device') }}
-              {% else %}{{ states('input_select.spotify_media_player') }}
-              {% endif %}
-            uri: >
-              {% set pl = states('input_select.spotify_playlist') %}
-              {% if pl == 'Shower Songs' %} spotify:playlist:37i9dQZF1DWSqmBTGDYngZ
-              {% elif pl == 'All Out 60s' %} spotify:playlist:37i9dQZF1DXaKIA8E7WcJj
-              {% elif pl == 'All Out 80s' %} spotify:playlist:37i9dQZF1DX4UtSsGT1Sbe
-              {% endif %}
-            random_song: "{{ is_state('input_boolean.spotify_random','on') }}"
-            repeat: "{{ is_state('input_boolean.spotify_repeat','on') }}"
-            shuffle: "{{ is_state('input_boolean.spotify_shuffle','on') }}"
-            force_playback: true
-            start_volume: "{{ states('input_number.spotify_volume')|float }}"
-
-        - wait_template: "{{ not is_state('sensor.spotify_media_player','') }}"
-          timeout:
-            seconds: 60
-          continue_on_timeout: false
-
-    - service: input_text.set_value
-      data:
-        entity_id: input_text.active_spotify_player
-        value: "{{ states('sensor.spotify_media_player') }}"
-
-
+            entity_id: script.spotify_play
+            variables:
+              playlist: "{{ states('input_select.spotify_playlist') }}"
+              device: "{{ states('input_select.spotify_media_player') }}"
+              volume: "{{ states('input_number.spotify_volume')|float }}"
+              random: "{{ is_state('input_boolean.spotify_random','on') }}"
+              shuffle: "{{ is_state('input_boolean.spotify_shuffle','on') }}"
+              repeat: "{{ is_state('input_boolean.spotify_repeat','on') }}"
 
 

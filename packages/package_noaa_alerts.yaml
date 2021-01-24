@@ -4,7 +4,7 @@
 #######################################################################################################################
 homeassistant:
   customize:
-    alert.weather_noaa_alert:
+    alert.noaa_weather_alert:
       friendly_name: NOAA Alert
       icon: mdi:weather-hurricane
       category: weather
@@ -12,43 +12,6 @@ homeassistant:
 input_text:
   current_noaa_alert_severity:
   previous_noaa_alert_severity:
-
-alert:
-  weather_noaa_alert:
-    name: NOAA Weather Alert
-    title: NOAA Weather Alert
-    message: |
-      {% set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
-      {% set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
-      {% set headline = states.sensor.noaa_alerts_miz076.attributes.alerts[0].parameters.NWSheadline %}
-      {% set severity = states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity %}
-      {% set inst = states.sensor.noaa_alerts_miz076.attributes.alerts[0].instruction %}
-      {% set start = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].onset)|timestamp_custom('%_I:%M %p, %A',true) %}
-      {% set until = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].expires)|timestamp_custom('%_I:%M %p, %A',true) %}
-      The National Weather Service has issued a {{ severity }} weather {{ type }}.
-      There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if until != None }}.
-      {{ headline[0] ~ '.' if headline != None }}
-      {{ inst ~ '.' if inst != None }}
-    entity_id: binary_sensor.noaa_alert_active
-    state: 'on'
-    repeat: 720
-    can_acknowledge: false
-    skip_first: false
-    notifiers: jason
-    data:
-      tag: noaa_alert
-      group: Alert
-      channel: Alert
-      importance: high
-      timeout: 86400
-      clickAction: /lovelace/weather
-      color: !secret WEATHER_COLOR
-      icon_url: !secret STORM_ICON
-
-sensor:
-  - platform: noaa_alerts
-    zoneid: MIZ076
-    #OPTION zoneid: MIC163
 
 binary_sensor:
   - platform: template
@@ -59,7 +22,7 @@ binary_sensor:
       noaa_connected:
         friendly_name: NOAA
         unique_id: noaa_connected
-        icon_template: "{{ 'mdi:weather-hurricane' if is_state('binary_sensor.noaa_connected','on') else 'mdi:cellphone-off' }}"
+        icon_template: "{{ 'mdi:weather-hurricane' if is_state('binary_sensor.noaa_connected','on') else 'mdi:alert-circle' }}"
         device_class: connectivity
         value_template: "{{ not states('sensor.noaa_alerts_miz076')|lower in ['unknown','unavailable','none'] }}"
 
@@ -80,176 +43,66 @@ binary_sensor:
         value_template: "{{ states('sensor.noaa_alerts_miz076')|int > 0 }}"
         availability_template: "{{ is_state('binary_sensor.noaa_connected','on') }}"
 
-automation:
+sensor:
+  - platform: noaa_alerts
+    zoneid: MIZ076
+    #OPTION zoneid: MIC163
+
+  - platform: template
+    sensors:
 #######################################################################################################################
-## NOAA Alert
-## attr: event_type, event_severity, urgency, headline, description, instruction
-## event_severity values: Extreme, Severe, Moderate, Minor, Unknown
-## urgency: Immediate, Expected, Future, Past, Unknown
+## NOAA Severe Weather Alert
+#IDEA get list of noaa conditions for array
 #######################################################################################################################
-  - id: noaa_alerts_weather_alert
-    alias: "[NOAA Alerts] Weather Alert"
-    description: Display weather alert on UI play alert/announcement for severe alerts.
-    initial_state: true
-    mode: restart
-    trigger:
-      - platform: state
-        entity_id: sensor.noaa_alerts_miz076
+      noaa_severe_weather_alert: #VERIFY #TEST this is turning on for all these and/or warning severity for menu button
+        unique_id: noaa_severe_weather_alert
+        value_template: >
+          {% set conditions = ['blowing snow','extreme cold','wind','rainfall','winter storm','snow squall','hail','freezing rain','snowfall','blizzard','tornado','storm surge','wreckhouse wind'] %}
+          {% set found = namespace(value=0) %}
+          {% for condition in conditions %}
+            {% if condition in state_attr('sensor.dark_sky_alerts','title_0')|lower %}{% set found.value = 1 %}{% endif %}
+          {% endfor %}
+          {{ 'on' if state_attr('sensor.noaa_alerts_miz076','event_severity')|lower in ['extreme','severe'] or found.value == 1 else 'off' }}
+        attribute_templates:
+          condition: >
+            {% set conditions = ['blowing snow','extreme cold','wind','rainfall','winter storm','snow squall','hail','freezing rain','snowfall','blizzard','tornado','storm surge','wreckhouse wind'] %}
+            {% set found = namespace() %}
+            {% for condition in conditions %}
+              {% if condition in state_attr('sensor.dark_sky_alerts','title_0')|lower %}{% set found.value = conditions[loop.index0] %}{% endif %}
+            {% endfor %}
+            {{ found.value|title if found.value != '' else 'No' }} Warning
+        availability_template: "{{ states('sensor.dark_sky_alerts')|lower not in ['unknown','unavailable','none'] }}"
 
-      - platform: state
-        entity_id: binary_sensor.startup_complete
-        to: 'on'
-
-    condition:
-      - condition: state
-        entity_id: binary_sensor.startup_complete
-        state: 'on'
-
-    action:
-      # clear alert severity if no active alerts
-      - choose:
-          - conditions:
-              - condition: numeric_state
-                entity_id: sensor.noaa_alerts_miz076
-                below: 1
-
-            sequence:
-              - service: input_text.set_value
-                data:
-                  entity_id: input_text.previous_noaa_alert_severity
-                  value: cleared
-
-              - service: input_text.set_value
-                data:
-                  entity_id: input_text.current_noaa_alert_severity
-                  value: cleared
-
-        default:
-          # set previous alert severity (from current_noaa_alert_severity)
-          - service: input_text.set_value
-            data:
-              entity_id: input_text.previous_noaa_alert_severity
-              value: "{{ states('input_text.current_noaa_alert_severity')|lower }}"
-
-          # set current alert severity from alert
-          - service: input_text.set_value
-            data:
-              entity_id: input_text.current_noaa_alert_severity
-              value: >
-                {% if states.sensor.noaa_alerts_miz076.attributes.alerts[0] is defined %}{{states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity|lower }}
-                {% else %}{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower }}
-                {% endif %}
-
-          # only run if new alert is extreme or more severe than current alert
-          - condition: template
-            value_template: >
-              {% set p = states('input_text.previous_noaa_alert_severity') %}
-              {% set c = states('input_text.current_noaa_alert_severity')%}
-              {% if 'tornado' in state_attr('sensor.dark_sky_alerts','title_0')|lower %} true
-              {% else %}
-                {{ p == 'severe' and c in ['extreme']
-                    or p == 'moderate' and c in ['extreme','severe']
-                    or p == 'minor' and c in ['extreme','severe','moderate']
-                    or p in ['cleared','unknown','unavailable','none']
-                      and c in ['extreme','severe','moderate','minor'] }}
-              {% endif %}
-
-          - service: input_boolean.turn_on
-            entity_id: input_boolean.display_weather_alerts
-
-          # play as alert if extreme severity otherwise play as an announcement, quiet play if severe, moderate
-          - service: script.tts_play
-            data:
-              play_message: |
-                {%- set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
-                {%- set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
-                {%- set headline = states.sensor.noaa_alerts_miz076.attributes.alerts[0].parameters.NWSheadline %}
-                {%- set severity = states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity %}
-                {%- set inst = states.sensor.noaa_alerts_miz076.attributes.alerts[0].instruction %}
-                {%- set start = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].onset)|timestamp_custom('%_I:%M %p, %A',true) %}
-                {%- set until = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].expires)|timestamp_custom('%_I:%M %p, %A',true) %}
-                Attention!,
-                The National Weather Service has issued a {{ severity }} weather {{ type }}.
-                There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if until != None }}.
-                {{ headline[0] ~ '.' if headline != None }}
-                {{ inst ~ '.' if inst != None }}
-              quiet_play: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower in ['extreme','severe'] }}"
-              alert: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower == 'extreme' }}"
-
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: sensor.dark_sky_severe_weather_alert #TODO noaa sensor
-                    attribute: condition
-                    state: tornado
-
-                sequence:
-                  - service: browser_mod.popup
-                    data:
-                      title: Emergency
-                      deviceID: all
-                      large: true
-                      card: !include /config/lovelace/include/card/emergency_card.yaml
-
-#######################################################################################################################
-## NOAA - NOAA Alerts Expired
-#######################################################################################################################
-  - id: weather_noaa_alerts_expired
-    alias: "[Weather] NOAA Alerts Expired"
-    description: Close all NOAA alert notifications, reset severity values.
-    initial_state: true
-    mode: single
-    max_exceeded: silent
-    trigger:
-      - platform: state
-        entity_id: binary_sensor.noaa_alert_active
-        to: 'off'
-
-    action:
-      - service: input_text.set_value
-        data:
-          entity_id: input_text.current_noaa_alert_severity
-          value: cleared
-
-      - service: input_text.set_value
-        data:
-          entity_id: input_text.previous_noaa_alert_severity
-          value: cleared
-
-      - service: script.close_notifications
-        data:
-          target: mobile
-          tag: noaa_alert
-
-      - delay:
-          seconds: 180 # prevent recursive triggers
-
-#######################################################################################################################
-## NOAA Alerts Reset Weather Alert
-#######################################################################################################################
-  - id: noaa_alerts_reset_weather_alert
-    alias: "[NOAA Alerts] Reset Weather Alert"
-    description: Reset weather alert severity so weather alerts replay.
-    initial_state: true
-    mode: restart
-    trigger:
-      - platform: state
-        entity_id: input_select.occupancy_mode
-        to: Home
-        for:
-          minutes: 30
-
-    action:
-      - service: input_text.set_value
-        data:
-          entity_id: input_text.current_noaa_alert_severity
-          value: cleared
-
-      - service: input_text.set_value
-        data:
-          entity_id: input_text.previous_noaa_alert_severity
-          value: cleared
-
+alert:
+  noaa_weather_alert:
+    name: NOAA Weather Alert
+    title: NOAA Weather Alert
+    message: |
+      {% set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
+      {% set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
+      {% set headline = states.sensor.noaa_alerts_miz076.attributes.alerts[0].parameters.NWSheadline %}
+      {% set severity = states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity %}
+      {% set inst = states.sensor.noaa_alerts_miz076.attributes.alerts[0].instruction %}
+      {% set start = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].onset)|timestamp_custom('%_I:%M %p, %A',true) %}
+      {% set until = as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].expires)|timestamp_custom('%_I:%M %p, %A',true) %}
+      The National Weather Service has issued a {{ severity }} weather {{ type }}.
+      There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if until != None }}.
+      {{ headline[0] ~ '.' if headline != None }}
+      {{ inst ~ '.' if inst != None }}
+    entity_id: binary_sensor.noaa_alert_active
+    state: 'on'
+    repeat: 720
+    can_acknowledge: false
+    notifiers: mobile
+    data:
+      tag: noaa_weather_alert
+      group: General
+      channel: Alert
+      importance: max
+      timeout: 86400
+      clickAction: /lovelace/weather
+      color: !secret WEATHER_COLOR
+      icon_url: !secret STORM_ICON
 
 # status - Actual
 # messageType - Alert, Update
