@@ -1,39 +1,54 @@
 #######################################################################################################################
-## Schedule - Shift Change Log
+## Schedule - Shift Change
 #######################################################################################################################
-- id: schedule_shift_change_log
-  alias: "[Schedule] Shift Change Log"
-  description: Write calandar info to log whenever calandar state changes.
+- id: schedule_shift_change
+  alias: "[Schedule] Shift Change"
+  description: Logbook entry, notification when work shift changes.
   initial_state: true
-  mode: single
+  mode: restart
   trigger:
     - platform: state
       entity_id:
         - calendar.days
         - calendar.afternoons
-
   action:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.supplemental_logging
-              state: 'on'
+    - delay: 300 # prevent double notification, sent on lastest change (current shift)
 
-          sequence:
-            - service: system_log.write
-              data:
-                message: "***** CALENDAR CHANGE: Days {{ states('calendar.days') }} Afternoons: {{ states('calendar.afternoons') }} *****"
-                level: critical
+    - service: logbook.log
+      data:
+        name: Work Shift
+        message: has changed
+        entity_id: calendar.days
+        domain: calendar
+
+    - service: notify.jason
+      data:
+        title: Work Shift Change
+        message: "Shift: {{ states('sensor.current_shift') }}"
+        data:
+          tag: shift_change
+          group: General
+          channel: General
+          importance: max
+          ttl: 0
+          priority: high
+          color: !secret NOTIFY_COLOR
+          icon_url: !secret WORK_ICON
+          actions:
+            - title: Work Schedule Off
+              action: work_schedule_off
+            - title: Open Schedule
+              action: URI
+              uri: /lovelace/schedule
 
 #######################################################################################################################
 ## Schedule - Shift Selection
 #######################################################################################################################
 - id: schedule_shift_selection
   alias: "[Schedule] Shift Selection"
-  description: Select correct shift from calendar when shift selection changes.
+  description: Select current shift from calendar when shift calendar or shift selection changes.
   initial_state: true
-  mode: single
-  #max_exceeded: silent
+  max_exceeded: silent
   trigger:
     - platform: state
       entity_id:
@@ -50,9 +65,8 @@
       to: 'on'
 
     - platform: state
-      entity_id: binary_sensor.startup_complete
-      to: 'on'
-
+      entity_id: input_boolean.startup_pending
+      to: 'off'
   condition:
     - condition: state
       entity_id:
@@ -65,11 +79,9 @@
       state: 'off'
 
     - condition: state
-      entity_id: binary_sensor.startup_complete
-      state: 'on'
-
+      entity_id: input_boolean.startup_pending
+      state: 'off'
   action:
-    # select current shift from calendar
     - service: input_select.select_option
       data:
         entity_id: input_select.shift_selection
@@ -87,7 +99,6 @@
   alias: "[Schedule] Shift Override Auto Off"
   description: Turn shift override off.
   initial_state: true
-
   trigger:
     - platform: state
       entity_id:
@@ -99,14 +110,12 @@
       event_type: mobile_app_notification_action
       event_data:
         action: shift_override_off
-
   condition:
     - condition: state
       entity_id:
         - input_boolean.schedule_automation
         - binary_sensor.google_calendar_connected
       state: 'on'
-
   action:
     - service: input_boolean.turn_off
       entity_id: input_boolean.shift_override
@@ -118,7 +127,6 @@
   alias: "[Schedule] Shift Override Auto On"
   description: Turn shift override back on if calendar disconnected.
   initial_state: true
-
   trigger:
     - platform: state
       entity_id:
@@ -127,9 +135,8 @@
       to: 'off'
 
     - platform: state
-      entity_id: binary_sensor.startup_complete
-      to: 'on'
-
+      entity_id: input_boolean.startup_pending
+      to: 'off'
   condition:
     - condition: state
       entity_id: input_boolean.schedule_automation
@@ -138,7 +145,6 @@
     - condition: state
       entity_id: binary_sensor.google_calendar_connected
       state: 'off'
-
   action:
     - service: input_boolean.turn_on
       entity_id: input_boolean.shift_override

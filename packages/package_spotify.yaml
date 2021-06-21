@@ -1,24 +1,29 @@
 #######################################################################################################################
 ## Spotify Package
+## #WARNING (SyncWorker_29) [spotipy.client] Invalid state
+## #ERROR (Thread-16) [homeassistant.components.cast.media_player] Failed to cast media https://www.home-assistant.io/images/cast/splash.png. Please make sure the URL is: Reachable from the cast device and either a publicly resolvable hostname or an IP address
 #######################################################################################################################
 spotify:
   client_id: !secret SPOTIFY_CLIENTID
   client_secret: !secret SPOTIFY_SECRET
 
-spotcast:
+spotcast: # https://github.com/fondberg/spotcast
   sp_dc: !secret HASSIO_SP_DC
   sp_key: !secret HASSIO_SP_KEY
   accounts:
-    jason:
+    hassio:
+      sp_dc: !secret HASSIO_SP_DC
+      sp_key: !secret HASSIO_SP_KEY
+    jazzyisj:
       sp_dc: !secret JAZZYISJ_SP_DC
       sp_key: !secret JAZZYISJ_SP_KEY
-    sheri:
+    sherigagnon:
       sp_dc: !secret SHERI_SP_DC
       sp_key: !secret SHERI_SP_KEY
 
 input_boolean:
-  spotify_on:
-    name: Spotify On
+  spotify:
+    name: Spotify
     icon: mdi:spotify
 
   spotify_random:
@@ -31,22 +36,44 @@ input_boolean:
 
   spotify_repeat:
     name: Spotify Repeat
-    icon: mdi:progress-question
+    icon: mdi:replay
 
   spotify_failed:
     initial: false
 
-input_text: #NOTE use input text so we can store cleared value
-  active_media_player_spotify:
+  resume_spotify:
+    initial: false
+
+input_text: # use input text so we can store cleared value
+  active_spotify_media_player:
 
 input_select:
+  spotify_account:
+    name: Spotify Account
+    icon: mdi:spotify
+    options:
+      - Hassio
+      - Jason
+      - Sheri
+
   spotify_media_player:
     name: Spotify Player
     icon: mdi:speaker-wireless
     options: !include /config/include/entities/media_player_names.yaml
 
-  spotify_playlist:
-    name: Spotify Playlist
+  spotify_playlist_hassio:
+    name: Spotify Playlist - Hassio
+    icon: mdi:speaker-wireless
+    options:
+      - none
+
+  spotify_playlist_jazzyisj:
+    name: Spotify Playlist - Jason
+    icon: mdi:speaker-wireless
+    options: !include /config/include/entities/spotify_playlist_names.yaml
+
+  spotify_playlist_sherigagnon:
+    name: Spotify Playlist - Sheri
     icon: mdi:speaker-wireless
     options: !include /config/include/entities/spotify_playlist_names.yaml
 
@@ -59,73 +86,32 @@ input_number:
     max: 100
     step: 5
 
-binary_sensor:
-  - platform: template
-    sensors:
-#######################################################################################################################
-## Spotify Connected
-#######################################################################################################################
-      spotify_connected:
-        friendly_name: Spotify
-        unique_id: spotify_connected
-        icon_template: >
-          {{ 'mdi:spotify' if not states('media_player.spotify_hassio')|lower in ['unknown','unavailable','none']
-             else 'mdi:alert-circle' }}
-        device_class: connectivity
-        value_template: "{{ states('media_player.spotify_hassio')|lower not in ['unknown','unavailable','none'] }}"
-
-      spotify_connected_alert:
-        friendly_name: Spotify
-        unique_id: spotify_connected_alert
-        icon_template: mdi:spotify
-        value_template: "{{ is_state('binary_sensor.spotify_connected','off') and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## Spotify Active
-#NOTE used to detect spotify starting from spotcast/app
-#######################################################################################################################
-      spotify_active:
-        friendly_name: Spotify Active
-        unique_id: spotify_active
-        icon_template: mdi:spotify
-        delay_off:
-          seconds: 5 # prevent triggering automations when switching players, playlists
-        value_template: "{{ states(states('input_text.active_media_player_spotify')) in ['playing','paused'] }}"
-        availability_template: "{{ is_state('binary_sensor.spotify_connected','on') }}"
-
 sensor:
-#######################################################################################################################
-## Spotcast Sensor
-#######################################################################################################################
-  - platform: spotcast
+  - platform: spotcast # https://github.com/fondberg/spotcast
 
-  - platform: template
-    sensors:
-#######################################################################################################################
-## Spotify Media Player - entity_id of spotify media player
-#NOTE only populated while Spotify is playing
-#######################################################################################################################
-      spotify_media_player:
-        friendly_name: Spotify Media Player
-        unique_id: spotify_media_player
-        icon_template: mdi:spotify
-        value_template: >
-          {% set group = states.media_player|selectattr('attributes.speaker_group','eq',true)|selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|list %}
-          {% set single = expand('group.media_players_single')|selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|list %}
-          {% if group|count > 0 %}{{ group[0] }}
-          {% else %}{{ single[0] }}
-          {% endif %}
-
-#######################################################################################################################
-## Spotcast Device - name of spotify media player
-#NOTE use input_text.active_media_player_spotify or spotcast error in auto_resume (spotify not playing - sensor blank)
-#######################################################################################################################
-      spotify_device_name:
-        friendly_name: Spotcast Device
-        unique_id: spotify_device_name
-        icon_template: mdi:spotify
-        value_template: >
-          {{ expand('group.media_players')|selectattr('entity_id','eq',states('input_text.active_media_player_spotify'))|map(attribute='name')|join(',') }}
-
-
-
+alert:
+  spotify_play_failed:
+    name: Spotify Play Failed
+    title: Spotify Play Failed
+    message: "Spotify play has failed on {{ state_attr('sensor.spotify_media_player','name') }}"
+    done_message: clear_notification
+    entity_id: input_boolean.spotify_play_failed
+    state: 'on'
+    repeat:
+      - 5
+      - 720
+    skip_first: true
+    notifiers: jason
+    data:
+      tag: spotify_play_failed
+      group: System
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      clickAction: /lovelace/media
+      color: !secret WARNING_COLOR
+      icon_url: !secret ALERT_ICON
+      actions:
+        - title: Reset Spotify
+          action: spotify_failed_reset

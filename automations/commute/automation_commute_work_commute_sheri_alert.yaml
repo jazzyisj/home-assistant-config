@@ -5,30 +5,28 @@
   alias: "[Commute] Work Commute Sheri Alert"
   description: Play announcement when alert turns on.
   initial_state: true
-  mode: single
   trigger:
     - platform: state
       entity_id: alert.work_commute_sheri
       to: 'on'
+  condition: # remove conditions if on different shifts
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: alert.work_commute_jason
+          state:  idle
 
-  condition:
-    - condition: state
-      entity_id: input_boolean.schedule_automation
-      state: 'on'
-
-    # don't duplicate jason commute alert
-    - condition: state
-      entity_id: binary_sensor.jason_home
-      state: 'off'
-
+        - condition: state
+          entity_id: binary_sensor.sheri_home
+          state: 'off'
   action:
     - repeat:
         sequence:
           - service: browser_mod.popup
             data:
-              deviceID: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='attributes.deviceID')|list }}"
-              title: Work Commute Traffic
+              deviceID: !include /config/include/entities/browsers.yaml
               large: true
+              title: Work Commute Traffic
               card: !include /config/lovelace/include/card/traffic_map.yaml
 
           - service: script.turn_on
@@ -36,57 +34,44 @@
               entity_id: script.tts_play
               variables:
                 play_message: |
-                  Attention!
-                  Sheri, you should leave for work before {{ states('sensor.leave_home_time_sheri') }} today!
-                  Your current commute time to work is {{ state_attr('sensor.sheri_time_to_work','duration_in_traffic')
-                    if not states('sensor.sheri_time_to_work') == 'unknown' else 'expected to be longer than usual'}}.
-              quiet_play: true
-              min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'speaker_group',true) else 70 }}"
+                  Attention! Sheri!
+                  {% if is_state('binary_sensor.leave_home_sheri_alert','on') %}
+                    It is {{ as_timestamp(now())|timestamp_custom('%-I:%M %p',true) }}!
+                    You should have already left for work!  Your current commute time to work is {{ state_attr('sensor.sheri_time_to_work','duration_in_traffic')
+                      if not states('sensor.sheri_time_to_work') == 'unknown' else ' not currently available.'}}.
+                  {% else %}
+                    Attention!
+                    Sheri, you should leave for work before {{ states('sensor.leave_home_time_sheri') }} today!
+                    Your current commute time to work is {{ state_attr('sensor.sheri_time_to_work','duration_in_traffic')
+                      if not states('sensor.sheri_time_to_work') == 'unknown' else 'expected to be longer than usual'}}.
+                  {% endif %}
+                quiet_play: true
+                min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 70 }}"
 
-          # wait for alert to turned off/dismissed
           - wait_template: "{{ not is_state('alert.work_commute_sheri','on') }}"
-            timeout:
+            timeout: # wait for alert to turned off/dismissed
               minutes: 5
-
         until:
           - condition: not
             conditions:
               - condition: state
                 entity_id: alert.work_commute_sheri
                 state: 'on'
-                
+
 #######################################################################################################################
-## Commute - Close Sheri Work Commute Notifications
+## Commute - Pause Work Commute Sheri Alert
 #######################################################################################################################
-- id: commute_close_work_commute_sheri_notifications
-  alias: "[Commute] Close Sheri Work Commute Notifications"
-  description: Dismiss notifications on all devices.
+- id: commute_pause_work_commute_sheri_alert
+  alias: "[Commute] Pause Work Commute Sheri Alert"
+  description: Pause alert.
   initial_state: true
-  mode: single
-  #max_exceeded: silent
   trigger:
-    - platform: state
-      entity_id: alert.work_commute_sheri
-      to:
-        - idle
-        - 'off'
-
-    - platform: event
-      event_type: mobile_app_notification_cleared
-      event_data:
-        tag: work_commute_sheri
-
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: pause_work_commute_sheri
-
   action:
-    - service: script.close_notifications
-      data:
-        target: mobile_app_sphone
-        tag: work_commute_sheri
-        pause: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_work_commute_sheri' }}{% endif %}"
+    - service: alert.turn_off
+      entity_id: alert.work_commute_sheri
 
-    - delay:
-        seconds: 180 # prevent recursive triggers                
+

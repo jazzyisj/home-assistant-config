@@ -20,12 +20,11 @@
       entity_id: binary_sensor.alarm_clock_active
       state: 'on'
 
-    - condition: state
-      entity_id: script.alarm_clock_play
+    - condition: state # don't change volume if alarm clock is snoozed, will be set on resume
+      entity_id: input_boolean.alarm_clock_snooze
       state: 'off'
 
-    # only run if volume input is for active alarm
-    - condition: template
+    - condition: template # only run if volume input is for active alarm
       value_template: >
         {% if trigger.entity_id == 'input_number.alarm_clock_volume' %} true
         {% elif trigger.entity_id == 'input_number.alarm_clock_volume_auto' and is_state('input_boolean.alarm_clock_active_auto','on') %} true
@@ -33,16 +32,16 @@
         {% elif trigger.entity_id == 'input_number.alarm_clock_volume_nap' and is_state('input_boolean.alarm_clock_active_nap','on') %} true
         {% endif %}
 
-  action:
-    # set main volume to alarm type value if active alarm type volume changed
-    - choose:
-        - conditions:
-            - condition: template
-              value_template: "{{ not trigger.entity_id == 'input_number.alarm_clock_volume' }}"
+    - condition: template # only run if the new set volume is not already equal to the media player volume
+      value_template: >
+        {{ state_attr(states('sensor.alarm_clock_media_player'),'volume_level')|float|round(2)
+            != states(trigger.entity_id)|float/100 }}
 
+  action:
+    - choose: # set main volume to alarm type value if active alarm type volume changed
+        - conditions: "{{ not trigger.entity_id == 'input_number.alarm_clock_volume' }}"
           sequence:
-            # this will retrigger automation to change media player volume
-            - service: input_number.set_value
+            - service: input_number.set_value # this will retrigger automation to change media player volume
               data:
                 entity_id: input_number.alarm_clock_volume
                 value: >
@@ -52,16 +51,7 @@
                   {% endif %}
 
       default:
-        # only change media player volume when master alarm clock volume changes
-        # turn off volume automation to avoid recursive calls
-        - service: automation.turn_off
-          entity_id: automation.alarm_clock_media_player_volume_change
-
-        # set media player volume to alarm clock volume value
-        - service: media_player.volume_set
+        - service: media_player.volume_set # set media player volume to alarm clock volume value
           data:
             entity_id: "{{ states('sensor.alarm_clock_media_player') }}"
             volume_level: "{{ states('input_number.alarm_clock_volume')|float / 100 }}"
-
-        - service: automation.turn_on
-          entity_id: automation.alarm_clock_media_player_volume_change

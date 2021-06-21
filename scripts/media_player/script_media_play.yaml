@@ -1,0 +1,362 @@
+#######################################################################################################################
+## Media Play
+#######################################################################################################################
+media_play:
+  alias: Media Play
+  description: Play media.
+  icon: mdi:play-box
+  mode: queued
+  max: 5
+  max_exceeded: error
+  fields:
+    media_type:
+      description: Media type to play.
+      example: spotify
+    resume:
+      description: Resume media play.
+      example: 'playlist'
+    account:
+      description: Spotify account to use (spotify).
+      example: hassio
+    device:
+      description: Playback media player name (spotify).
+      example: Dining Room Speaker
+    playlist:
+      description: Spotify Playlist (spotify).
+      example: Shower Songs
+    volume:
+      description: Playback volume in percent (spotify).
+      example: '50'
+    random:
+      description: Random playback (spotify).
+      example: 'true'
+    shuffle:
+      description: Shuffle playback (spotify).
+      example: 'true'
+    repeat:
+      description: Repeat playback (spotify).
+      example: 'true'
+  variables:
+    resume: "{{ resume|default(false) }}"
+    media_types: "{{ ['radio','spotify'] }}"
+    volume: >
+      {% set qvol = states('input_number.media_quiet_volume')|float %}
+      {% if volume not in ['',empty] %}{% set vol = volume|float %}
+      {% elif media_type in ['radio','spotify'] %}{% set vol = states('input_number.' ~ media_type ~ '_volume')|float %}
+      {% endif %}
+      {{ qvol if (is_state('binary_sensor.quiet_hours','on') and vol > qvol) and is_state('input_boolean.volume_override','off') else vol }}
+    account: "{{ account|default('hassio') }}" # spotify
+    playlist: > # spotify
+      {% if playlist not in ['',empty] %}{{ playlist }}
+      {% else %}{{ states('input_select.spotify_playlist_hassio') }}
+      {% endif %}
+    device: > # spotify
+      {% if device not in ['',empty] %}{{ device }}
+      {% else %}{{ states('input_select.spotify_media_player') }}
+      {% endif %}
+    repeat: "{{ repeat if repeat not in ['',empty] else is_state('input_boolean.spotify_repeat','on') }}" # spotify
+    random: "{{ random if random not in ['',empty] else is_state('input_boolean.spotify_random','on') }}" # spotify
+    shuffle: "{{ shuffle if shuffle not in ['',empty] else is_state('input_boolean.spotify_shuffle','on') }}" # spotify
+    speaker_groups: "{{ state_attr('sensor.media_player_groups','players') }}"
+    radio_player: "{{ states('sensor.radio_media_player') }}"
+    radio_players: "{{ state_attr('sensor.radio_media_player','players') }}"
+    #SPOTIFY sensor.spotify_media_player not populated until playing so determine media player from selected device
+    spotify_player: "{{ expand(state_attr('sensor.media_players','players'))|selectattr('name','eq',device)|map(attribute='entity_id')|list|join('') }}"
+    spotify_players: "{{ expand(state_attr('sensor.media_players','players'))|selectattr('attributes.' ~ spotify_player.split('.')[1],'eq',true)|map(attribute='entity_id')|list }}"
+    alarm_player: "{{ states('sensor.alarm_clock_media_player') }}"
+    alarm_players: "{{ state_attr('sensor.alarm_clock_media_player','players') }}"
+    player: >
+      {% if media_type == 'radio' %}{{ radio_player }}
+      {% elif media_type == 'spotify' %}{{ spotify_player }}
+      {% endif %}
+    players: "{{ state_attr('sensor.' ~ player.split('.')[1],'players') if is_state_attr(player,'type','group') else [player] }}"
+    old_player: >
+      {% if media_type == 'radio' %}{{ spotify_player }}
+      {% elif media_type == 'spotify' %}{{ radio_player }}
+      {% endif %}
+    old_sensor: "{{ 'sensor.' ~ old_player.split('.')[1] }}"
+    old_type: >
+      {% set found = namespace(value=0) %}
+      {% if player in speaker_groups %}
+        {% for pitem in players %}
+          {% if old_player in speaker_groups %}
+            {% for olditem in state_attr(old_sensor,'players') %}
+              {% if olditem == pitem %}{% set found.value = 1 %}{% endif %}
+            {% endfor %}
+          {% elif pitem == old_player  %}
+            {% set found.value =1 %}
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        {% if old_player in speaker_groups %}
+          {% for olditem in state_attr(old_sensor,'players') %}
+            {% if olditem == player %}{% set found.value = 1 %}{% endif %}
+          {% endfor %}
+        {% elif old_player == player %}
+          {% set found.value = 1 %}
+        {% endif %}
+      {% endif %}
+      {% if found.value == 1 %}
+        {% if media_type == 'radio' and is_state('input_boolean.spotify','on') %} spotify
+        {% elif media_type == 'spotify'and is_state('input_boolean.radio','on') %} radio
+        {% else %} none
+        {% endif %}
+      {% endif %}
+  sequence:
+    # - service: system_log.write
+    #   data:
+    #     message: |
+    #       *
+    #       device: {{ device }}
+    #       player: {{ player }}
+    #       players: {{ players }}
+    #       radio_player: {{ radio_player }}
+    #       radio_players: {{ radio_players }}
+    #       spotify_player: {{ spotify_player }}
+    #       spotify_players: {{ spotify_players }}
+    #       playlist: {{ playlist }}
+    #       state: {{ states(player) }}
+    #       media_type: {{ media_type }}
+    #       old_player: {{ old_player }}
+    #       old_type: {{ old_type }}
+    #       resume: {{ resume }}
+    #       in media: {{ old_type in media_types }}
+    #     level: error
+    #     logger: script.media_play
+
+    - service: input_boolean.turn_off
+      data:
+        entity_id: "input_boolean.resume_{{ media_type }}"
+
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state:
+                    - Away
+                    - Vacation
+
+                - condition: state
+                  entity_id: input_boolean.mute_all
+                  state: 'on'
+
+                - condition: state
+                  entity_id: input_boolean.alarm_triggered
+                  state: 'on'
+
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: 'off'
+
+                - condition: template
+                  value_template: >
+                    {% if is_state('binary_sensor.alarm_clock_active','on') %}
+                      {% set found = namespace(value=0) %}
+                      {% if player in speaker_groups %}
+                        {% for pitem in players %}
+                          {% if alarm_player in speaker_groups %}
+                            {% for item in alarm_players %}{% if item == pitem %}{% set found.value = 1 %}{% endif %}{% endfor %}
+                          {% elif pitem == alarm_player %}
+                            {% set found.value = 1 %}
+                          {% endif %}
+                        {% endfor %}
+                      {% else %}
+                        {% if alarm_player in speaker_groups %}
+                          {% for item in alarm_players %}{% if item == pitem %}{% set found.value = 1 %}{% endif %}{% endfor %}
+                        {% elif item == player %}
+                          {% set found.value = 1 %}
+                        {% endif %}
+                      {% endif %}
+                      {{ found.value|int == 1 }}
+                    {% else %} false
+                    {% endif %}
+
+          sequence:
+            - service: browser_mod.toast
+              data:
+                duration: 30000
+                message: >
+                  {% set message = 'Media cannot be played. ' %}
+                  {% if media_type not in media_types %}{% set message = message ~ 'ERROR: Invalid media type specified.' %}{% endif %}
+                  {% if is_state('input_boolean.mute_all','on') %}{% set message = message ~ 'The system has been muted.' %}{% endif %}
+                  {% if is_state('input_select.occupancy_mode','Vacation') %}{% set message = message ~ 'The house is in Away mode.' %}{% endif %}
+                  {% if is_state('alarm_control_panel.alarmo','triggered') or is_state('input_boolean.alarm_triggered','on')%}
+                    {% set message = message ~ 'The house alarm has been triggered.' %}
+                  {% endif %}
+                  {{ message }}
+
+            - service: script.media_stop
+              data:
+                media_type: "{{ media_type }}"
+                reset_volume: false
+
+      default:
+        - wait_template: "{{ is_state('input_boolean.tts_playing','off') and is_state('script.media_stop','off') }}"
+          timeout:  # wait for tts/previous stop script to finish
+            seconds: 300
+
+        - choose: # something is wrong, media failed
+            - conditions: "{{ not wait.completed }}"
+              sequence:
+                - service: input_boolean.turn_on
+                  data:
+                    entity_id: "input_boolean.{{ media_type }}_failed"
+                - service: browser_mod.toast
+                  data:
+                    duration: 30000
+                    message: "{{ media_type|title }} cannot play. Something has gone wrong."
+
+          default:
+            - choose:
+                - conditions: "{{ is_state_attr('binary_sensor.phone_in_use','speaker_on','on') }}"
+                  sequence:
+                    - service: browser_mod.toast
+                      data:
+                        duration: 30000
+                        message: "{{ media_type|title }} will play when the mobile speakerphone has turned off."
+                    - wait_template: "{{ is_state_attr('binary_sensor.phone_in_use','speaker_on','off') }}"
+                      timeout:
+                        minutes: 15
+                      continue_on_timeout: false # after timeout media will not play
+
+            # turn off previous media if new media playing on old media player or is a member of old media speaker group
+            # if it's the same media player, skip (vol/station change)
+            - choose:
+                - conditions: "{{ old_type in media_types and resume != false }}"
+                  sequence:
+                    - service: script.media_stop
+                      data:
+                        media_type: "{{ old_type }}"
+                        reset_volume: false
+
+            - choose: # check if player available, if speaker group check state for each media_player
+                - conditions: >
+                    {% if is_state_attr(player,'type','group') %}
+                      {% set found = namespace(value=0) %}
+                      {% for item in players -%}
+                        {% if states(item)|lower in ['unknown','unavailable','none'] %}{% set found.value = 1 %}{% endif %}
+                      {% endfor %}
+                      {{ found.value|int == 1 }}
+                    {% else %}
+                      {{ states(player) in ['unknown','unavailable','none'] }}
+                    {% endif %}
+                  sequence:
+                    - service: input_boolean.turn_on
+                      data:
+                        entity_id: "input_boolean.{{ media_type }}_failed"
+                    - service: browser_mod.toast
+                      data:
+                        duration: 30000
+                        message: "{{ media_type|title }} cannot play. Selected media player is unavailable."
+
+              default:
+                - choose:
+                    - conditions: "{{ resume not in ['station','playlist'] }}"
+                      sequence:
+                        - service: media_player.volume_set
+                          data: #BLOOP set volumes to 0 before media play avoid google bloops
+                            entity_id: "{{ players }}"
+                            volume_level: 0
+
+                - choose:
+                    - conditions: "{{ media_type == 'radio' }}"
+                      sequence:
+                        - service: media_player.play_media
+                          data:
+                            entity_id: "{{ player }}"
+                            media_content_id: !include /config/include/template/radio_station_selection_template.yaml
+                            media_content_type: music
+
+                    - conditions: "{{ media_type == 'spotify' }}"
+                      sequence:
+                        - choose:
+                            - conditions: "{{ resume == 'playlist' }}"
+                              sequence:
+                                - service: spotcast.start
+                                  data:
+                                    account: "{{ account }}"
+                                    device_name: "{{ device }}"
+                                    uri: > #SPOTIFY
+                                      {% for item in state_attr('sensor.spotcast_hassio','playlists')|from_json -%}
+                                        {% if item.name == playlist %}
+                                          spotify:{{ item.type }}:{{ item.uri }}
+                                        {% endif %}
+                                      {% endfor %}
+                                    random_song: "{{ random }}"
+                                    repeat: "{{ repeat }}"
+                                    shuffle: "{{ shuffle }}"
+                                    ignore_fully_played: true
+                                    # start_volume: 0 #SPOTIFY {{ 0 if resume == 'player' else volume }}
+                                    force_playback: true
+
+                            - conditions: "{{ resume != false }}"
+                              sequence:
+                                - service: spotcast.start
+                                  data:
+                                    account: "{{ account }}"
+                                    device_name: "{{ device }}"
+                                    random_song: "{{ random }}"
+                                    repeat: "{{ repeat }}"
+                                    shuffle: "{{ shuffle }}"
+                                    ignore_fully_played: true
+                                    # start_volume: 0 #SPOTIFY "{{ volume }}"
+                                    force_playback: true
+
+                          default:
+                            - service: spotcast.start
+                              data:
+                                account: "{{ account }}"
+                                device_name: "{{ device }}"
+                                uri: > #SPOTIFY
+                                  {% for item in state_attr('sensor.spotcast_hassio','playlists')|from_json -%}
+                                    {% if item.name == playlist %}
+                                      spotify:{{ item.type }}:{{ item.uri }}
+                                    {% endif %}
+                                  {% endfor %}
+                                random_song: "{{ random }}"
+                                repeat: "{{ repeat }}"
+                                shuffle: "{{ shuffle }}"
+                                ignore_fully_played: true
+                                # start_volume: 0 #SPOTIFY "{{ volume }}"
+                                force_playback: true
+
+                - wait_template: "{{ is_state(player,'playing') }}" # wait for spotify media player to begin playing
+                  timeout:
+                    seconds: 15
+
+                - choose: # turn on media failed boolean if media player doesn't play
+                    - conditions: "{{ not is_state(player,'playing') }}"
+                      sequence:
+                        - service: input_boolean.turn_on
+                          data:
+                            entity_id: "input_boolean.{{ media_type }}_failed"
+
+                  default:
+                    - service: input_boolean.turn_on # turn boolean on to keep in sync if called from script
+                      data:
+                        entity_id: "input_boolean.{{ media_type }}"
+
+                    - choose: # spotify input_text is set by automation.spotify_media_player_changed
+                        - conditions: "{{ media_type != 'spotify' }}"
+                          sequence:
+                            - service: input_text.set_value
+                              data:
+                                entity_id: "input_text.active_{{ media_type }}_media_player"
+                                value: "{{ player }}"
+
+                    - choose:
+                        - conditions: "{{ resume not in ['station','playlist'] }}"
+                          sequence:
+                            - service: script.set_media_player_volumes
+                              data:
+                                source: "{{ media_type }}"
+                                player_volume: "{{ volume }}"
+
+                    - service: input_boolean.turn_off
+                      data:
+                        entity_id: "input_boolean.{{ media_type }}_failed"
+
+
+

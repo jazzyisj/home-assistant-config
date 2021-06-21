@@ -1,0 +1,66 @@
+#######################################################################################################################
+## System WAN Connection
+#######################################################################################################################
+- id: system_wan_connection
+  alias: "[System] WAN Connection"
+  description: Turn down logging when WAN disconnected.
+  initial_state: true
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.wan_connected
+      to:
+       - 'on'
+       - 'off'
+
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+      for: # check 1 minute after startup, don't conflict with startup log selection
+        minutes: 1
+  condition: # don't change logging until after startup
+    - condition: state
+      entity_id: input_boolean.startup_pending
+      state: 'off'
+  action:
+    - choose:
+        - conditions: "{{ is_state('binary_sensor.wan_connected','off') }}"
+          sequence:
+            - service: system_log.write
+              data:
+                logger: automation.system_wan_connection
+                level: critical
+                message: "Internet has disconnected. binary_sensor.wan_connected: {{ states('binary_sensor.wan_connected') }}"
+
+            - service: input_select.select_option
+              data:
+                entity_id: input_select.component_log_level
+                option: critical
+
+            - service: persistent_notification.create
+              data:
+                title: Log Level Changed
+                message: Internet has disconnected. Log level has been set to critical.
+                notification_id: log_wan_down
+      default:
+        - condition: template
+          value_template:  "{{ trigger.entity_id != 'input_boolean.startup_pending' }}"
+
+        - service: system_log.write
+          data:
+            logger: automation.system_wan_connection
+            level: critical
+            message: "Internet has reconnected. binary_sensor.wan_connected: {{ states('binary_sensor.wan_connected') }}"
+
+        - service: input_select.select_option
+          data:
+            entity_id: input_select.component_log_level
+            option: custom
+
+        - service: persistent_notification.create
+          data:
+            title: Log Level Changed
+            message: Internet is reconnected. Log level has been reset to custom settings.
+            notification_id: log_wan_down
+
+        - service: script.internet_speedtest # update speedtest values
+

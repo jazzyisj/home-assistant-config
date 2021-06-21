@@ -1,47 +1,40 @@
 #######################################################################################################################
 ## Save Media Player Volumes
-#NOTE - this does not save speaker group volumes, group volumes are determined by individual media players
+# - this does not save speaker group volumes, group volumes are determined by individual media players
 #######################################################################################################################
 save_media_player_volumes:
   alias: Save Media Player Volumes
   description: Store media player volumes.
   icon: mdi:play-box-multiple-outline
-  mode: parallel
+  mode: queued
   max: 5
   fields:
     source:
       description: Source calling this script.
       example: tts
     media_player:
-      description: Media player entity to save.
-      example: media_player.dining_room_display
+      description: Media player list.
+      example: "[media_player.dining_room_display, media_player.bedroom_display]"
   variables:
-    players: >
-      {% if media_player == 'all' %}{{ state_attr('group.media_players_single','entity_id') }}
-      {% elif is_state_attr(media_player,'speaker_group',true) %}{{ expand('group.' ~ media_player.split('.')[1])|map(attribute='entity_id')|list }}
-      {% else %}{{ media_player }}
-      {% endif %}
+    players: "{{ state_attr('sensor.media_players_single','players') if media_player == '' else  media_player }}"
     player: null
     name: null
     new_volume: null
   sequence:
     - repeat:
-        while:
-          - condition: template
-            value_template: "{{ repeat.index <= players|count }}"
-
+        while: "{{ repeat.index <= players|count }}"
         sequence:
           - variables:
               player: "{{ players[repeat.index-1] }}"
               name: "{{ players[repeat.index-1].split('.')[1] }}"
               new_volume: >
-                {% set current = '%0.2f'|format(state_attr(player,'volume_level')|float)|float %}
+                {% set current = state_attr(player,'volume_level')|float|round(2) %}
                 {% set default = states('input_number.' ~ name ~ '_default_volume')|float %}
                 {% if source == 'reset' %}
                   {% if is_state_attr(player,'device_class','speaker') %}
-                    {% set quiet = states('input_number.speaker_quiet_volume')|float %}
+                    {% set quiet = states('input_number.speaker_quiet_volume')|float/100 %}
                   {% else %}
-                    {% set quiet = states('input_number.tv_quiet_volume')|float %}
+                    {% set quiet = states('input_number.tv_quiet_volume')|float/100 %}
                   {% endif %}
                   {% if is_state('binary_sensor.quiet_hours','on') %}{{ quiet if current > quiet else current if current > 0 else quiet }}
                   {% else %}{{ default }}
@@ -51,7 +44,7 @@ save_media_player_volumes:
 
           - choose:
               - conditions:
-                  # don'tts save if media player is in off state (volume will be null == 0)
+                  # don't save if media player is in off state (volume will be null == 0)
                   - condition: template
                     value_template: "{{ not states(player)|lower in ['off','unknown','unavailable','none'] }}"
 
@@ -60,23 +53,21 @@ save_media_player_volumes:
                     value_template: "{{ true if source == 'reset' else new_volume > 0 }}"
 
                 sequence:
-                  - choose:
-                      # phone is on, store radio/spotify volumes to restore when phone turns off
+                  - choose: # phone is on, store radio/spotify volumes to restore when phone turns off
                       - conditions:
                           - condition: template
                             value_template: "{{ source == 'reset' }}"
 
                           - condition: state
-                            entity_id: sensor.phone_in_use
+                            entity_id: binary_sensor.phone_in_use
                             state: 'on'
-
                         sequence:
                           - service: input_number.set_value
                             data:
-                              entity_id: "input_number.{{ 'phone_' ~ name }}"
-                              value: "{{ new_volume|float/100 }}" #NOTE phone/tts/alarm volumes stored as decimal
+                              entity_id: "input_number.{{ name ~ '_phone' }}"
+                              value: "{{ new_volume|float/100 }}"
 
                   - service: input_number.set_value
                     data:
-                      entity_id: "input_number.{{ name ~ 'current_volume' if source == 'reset' else source ~ '_' ~ name }}"
+                      entity_id: "input_number.{{ name ~ '_current_volume' if source in ['reset'] else name ~ '_' ~ source }}"
                       value: "{{ new_volume }}"

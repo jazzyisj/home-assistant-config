@@ -1,0 +1,60 @@
+#######################################################################################################################
+## Lock - Auto Lock
+#######################################################################################################################
+- id: lock_auto_lock
+  alias: "[Lock] Auto Lock"
+  description: Automatically lock locks.
+  mode: queued
+  variables:
+    lock_trigger: "{{ trigger.entity_id in states.lock|map(attribute='entity_id')|list }}"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: lock_all_locks
+
+    - platform: state
+      entity_id:
+        - lock.back_door_lock
+        - lock.front_door_lock
+        - lock.garage_door_lock
+        - lock.side_door_lock
+      to: unlocked
+      for:
+        minutes: 10
+  condition:
+    - condition: state
+      entity_id: input_boolean.lock_automation
+      state: 'on'
+
+    - "{{ is_state(trigger.entity_id,'unlocked') and states('alarm_control_panel.alarmo')
+        in ['armed_home','armed_night','armed_away'] if lock_trigger else true }}"
+  action:
+    - repeat:
+        while:
+          - "{{ repeat.index < 4 }}" # only try 3 times
+          - "{{ is_state(trigger.entity_id,'unlocked') if lock_trigger else state_attr('sensor.door_locks','unlocked')|count > 0 }}"
+        sequence:
+          - service: lock.lock
+            data:
+              entity_id: "{{ trigger.entity_id if lock_trigger else state_attr('sensor.door_locks','unlocked') }}" #ZWAVE device ready (state unlocked)
+
+          - wait_template: "{{ is_state(trigger.entity_id,'locked') if lock_trigger else state_attr('sensor.door_locks','unlocked')|count == 0 }}"
+            timeout: 30
+
+    - choose:
+        - conditions: "{{ is_state(trigger.entity_id,'unlocked') if lock_trigger else state_attr('sensor.door_locks','unlocked')|count > 0 }}"
+          sequence:
+            - service: input_boolean.turn_on
+              data:
+                entity_id: >
+                  {{ trigger.entity_id|replace('lock.','input_boolean.')|replace('_lock','_lock_jammed')
+                    if lock_trigger else states.lock|selectattr('state','eq','unlocked')|map(attribute='entity_id')|list
+                      |replace('lock.','input_boolean.')|replace('_lock','_lock_jammed') }}

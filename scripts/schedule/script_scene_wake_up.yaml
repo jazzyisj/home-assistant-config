@@ -1,0 +1,92 @@
+#######################################################################################################################
+## Wake Up Scene
+#######################################################################################################################
+scene_wake_up:
+  alias: Wake Up Scene
+  description: Turn on lights, set occupancy mode to home/guest, play morning radio & weather.
+  icon: mdi:white-balance-sunny
+  sequence:
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.alarm_clock_active_auto
+
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: input_boolean.alarm_triggered
+                  state: 'on'
+
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: 'off'
+
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state:
+                    - Home
+                    - Guest
+                    - Away
+                    - Vacation
+
+          sequence:
+            - service: browser_mod.toast
+              data:
+                message: Wake up routine cannot be run.
+                duration: 30000
+
+      default:
+        - service: input_select.select_option
+          data:
+            entity_id: input_select.occupancy_mode
+            option: >
+              {% if is_state('binary_sensor.owner_home','on') %} Home
+              {% elif is_state('input_boolean.guest_home','on') %} Guest
+              {% else %} Away
+              {% endif %}
+
+        - service: script.turn_on
+          entity_id: script.scene_morning_lights
+
+        - service: script.turn_on
+          data:
+            entity_id: script.arm_alarm
+            variables:
+              mode: home
+              code: !secret ALARMO_HA #ALARMO
+
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.media_preset_enabled_wake
+                  state: 'on'
+
+              sequence:
+                - service: input_boolean.turn_on
+                  entity_id: input_boolean.media_preset_wake
+
+        # delay whether wake radio enabled or not
+        - delay:
+            minutes: "{{ states('input_number.media_preset_morning_delay') }}"
+
+        - service: input_boolean.turn_off
+          entity_id: input_boolean.media_preset_wake
+
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.morning_weather_enabled
+                  state: 'on'
+
+              sequence:
+                - service: script.weather_report
+
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.media_preset_enabled_morning
+                  state: 'on'
+
+              sequence:
+                - service: input_boolean.turn_on
+                  entity_id: input_boolean.media_preset_morning

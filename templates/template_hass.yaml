@@ -1,0 +1,147 @@
+- binary_sensor:
+    - name: Automation
+      unique_id: automation_disabled
+      icon: mdi:sync-alert
+      state: "{{ states('group.automation_controls') == 'off' }}"
+
+    - name: Alert
+      unique_id: alert_disabled
+      icon: mdi:alert
+      state: "{{ states.alert|selectattr('state','eq','off')|list|count > 0 }}"
+
+    # overload uptime sensor - if uptime robot component not connected binary_sensor.hassio is unavailable
+    - name: Uptime Robot
+      unique_id: hassio_connected
+      icon: "{{ 'mdi:sort-clock-descending' if is_state('binary_sensor.hassio_connected','on') else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: "{{ is_state('binary_sensor.hassio','on') }}"
+
+    - name: Uptime Robot
+      unique_id: hassio_connected_alert
+      icon: mdi:alert-circle
+      state: "{{ is_state('binary_sensor.hassio_connected','off') and is_state('input_boolean.system_alerts','on') }}"
+
+    - name: Integrations
+      unique_id: integrations_online
+      icon: "{{ 'mdi:api' if is_state('binary_sensor.integrations_online','on') else 'mdi:api-off' }}"
+      device_class: connectivity
+      state: "{{ is_state('group.integration_online_sensors','on') }}"
+
+    - unique_id: integration_offline_alert
+      delay_on:
+        minutes: 15 # delay to allow integrations to connect on restart
+      state: "{{ is_state('binary_sensor.integrations_online','off') and is_state('input_boolean.system_alerts','on') }}"
+
+    - unique_id: remote_ui_alert
+      state: "{{ states('binary_sensor.remote_ui') in ['off','unavailable','unknown','none'] and is_state('input_boolean.system_alerts','on') }}"
+      delay_on:
+        minutes: 10 # delay to allow remote UI connect on restart, prevent trigger on shutdown
+
+    - unique_id: device_offline_alert
+      delay_on:
+        minutes: 15 # delay to allow devices to connect on restart, reduce false/temporary triggers
+      state: "{{ states('sensor.offline_devices')|int > 0 and is_state('input_boolean.system_alerts','on') }}"
+
+    - unique_id: unavailable_sensor_alert
+      delay_on: #TODO is this causing a delay_off too?
+        minutes: 15 # delay to allow devices to connect on restart, reduce false/temporary triggers
+      state: "{{ states('sensor.unavailable_sensors')|int > 0 and is_state('input_boolean.system_alerts','on') }}"
+
+    - unique_id: unknown_browser_alert
+      state: "{{ states('sensor.unknown_browsers')|int > 0 and is_state('input_boolean.system_alerts','on') }}"
+
+- sensor:
+    - unique_id: dummy
+      state: ' '
+
+    - name: Connected Browsers
+      unique_id: connected_browsers
+      unit_of_measurement: browsers
+      icon: mdi:laptop
+      state: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|list|count }}"
+      attributes:
+        entities: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='entity_id')|list }}"
+
+    - unique_id: unknown_browsers
+      unit_of_measurement: browsers
+      state: >
+        {{ states.sensor|selectattr('attributes.type','eq','browser_mod')
+            |selectattr('attributes.authorized','ne',true)|list|count }}
+      attributes:
+        entities: >
+          {{ states.sensor|selectattr('attributes.type','eq','browser_mod')
+            |selectattr('attributes.authorized','ne',true)|map(attribute='entity_id')|list }}
+
+    - name: Home Assistant Uptime
+      unique_id: ha_uptime
+      icon: mdi:clock-start
+      state: > # display home assistant system uptime in friendly format
+        {% set up_time = as_timestamp(now()) - as_timestamp(states('sensor.uptime')) %}
+        {% set minutes = (up_time // 60)|int %}
+        {% set hours = (minutes // 60) %}
+        {% set days = (hours // 24) %}
+        {% set weeks = (days // 7) %}
+        {% set minutes = (minutes % 60) %}
+        {% set hours =  (hours % 24) %}
+        {% set days = (days % 7) %}
+        {% macro phrase(value, name) %}
+          {%- set value = value %}
+          {%- set end = 's' if value > 1 else '' %}
+          {{- '{} {}{}'.format(value, name, end) if value|int > 0 else '' }}
+        {%- endmacro %}
+        {% set text = [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hr'), phrase(minutes, 'min') ]|select('!=','')|list|join(', ') %}
+        {% set last_comma = text.rfind(',') %}
+        {% if last_comma != -1 %}
+          {% set text = text[:last_comma] + ' and' + text[last_comma + 1:] %}
+        {% endif %}
+        {{ text }}
+
+    - name: Last Restart Date
+      unique_id: last_restart_date_time
+      icon: mdi:clock-start
+      #OPTION {{ as_timestamp(states('sensor.uptime'))|timestamp_custom('%a %b %d %Y, %-I:%M:%S %p',true) }}
+      state: > # display last hass restart date/time in friendly format
+        {% set date = as_timestamp(states('sensor.uptime'))|timestamp_custom('%d') %}
+        {% set date = '{:01}'.format(date|int) %}
+        {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
+        {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
+        {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
+        {% else %}{% set date = date ~ 'th' %}
+        {% endif %}
+        {{ as_timestamp(states('sensor.uptime'))|timestamp_custom('%H:%M on %a') }} {{ date }} {{ as_timestamp(states('sensor.uptime'))|timestamp_custom('%b %Y',true) }}
+
+    # Nest devices separate, binary sensor shows off state when unavailable
+    - name: "{{ 'All Devices Online' if is_state('sensor.offline_devices','0') else 'Offline Devices' }}"
+      unique_id: offline_devices
+      unit_of_measurement: devices
+      icon: "{{ 'mdi:check-circle' if is_state('sensor.offline_devices','0') else 'mdi:alert-circle' }}"
+      state: > # number of offline devices
+        {% set devices = states|selectattr('domain','in',['alarm_control_panel','cover','light','switch','fan','climate','camera','media_player'])
+            |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
+            |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list|count %}
+        {% set nest_devices = states|selectattr('entity_id','in',state_attr('group.nest_devices','entity_id'))
+            |selectattr('state','in',['unavailable','unknown','none','off'])|list|count %}
+        {{ devices + nest_devices }}
+      attributes:
+        entities: > # list of unavailable device entity id's
+          {% set devices = states|selectattr('domain','in',['alarm_control_panel','cover','light','switch','fan','climate','camera','media_player'])
+              |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
+              |selectattr('state','in',['unavailable','unknown','none'])|list %}
+          {% set nest_devices = states|selectattr('entity_id','in',state_attr('group.nest_devices','entity_id'))
+              |selectattr('state','in',['unavailable','unknown','none','off'])|list %}
+          {{ (devices + nest_devices)|map(attribute='entity_id')|list }}
+
+    - name: "{{ 'Sensors All Available' if is_state('sensor.unavailable_sensors','0') else 'Unavailable Sensors'}}"
+      unique_id: unavailable_sensors
+      unit_of_measurement: sensors
+
+      icon: "{{ 'mdi:check-circle' if is_state('sensor.unavailable_sensors','0') else 'mdi:alert-circle' }}"
+      state: > # number of unavailable sensors
+        {{ states|selectattr('domain','in',['sensor','binary_sensor'])
+            |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
+            |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list|count }}
+      attributes:
+        entities: > # list of unavailable sensor entity id's
+          {{ states|selectattr('domain','in',['sensor','binary_sensor'])
+              |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
+              |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list }}

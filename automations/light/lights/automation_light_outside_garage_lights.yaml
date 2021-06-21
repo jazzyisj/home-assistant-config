@@ -1,0 +1,133 @@
+#######################################################################################################################
+## Light - Outside Garage Lights Nobody Home
+#######################################################################################################################
+- id: light_outside_garage_lights_nobody_home #OCC
+  alias: '[Light] Outside Garage Lights Nobody Home'
+  description: Turn light on when nobody is home.
+  variables:
+    current: "{{ state_attr('light.outside_garage_lights','brightness')|int }}"
+    default: 150
+    quiet: 80
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 10 # must be after away mode has run
+
+    - platform: time_pattern
+      minutes: '/15'
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.light_automation
+        - input_boolean.presence_automation
+        - binary_sensor.auto_light_on
+      state: 'on'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Away
+        - Vacation
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.outside_garage_lights
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Outside Garage Lights Auto On
+#######################################################################################################################
+- id: light_outside_garage_lights_auto_on #OCC
+  alias: '[Light] Outside Garage Lights Auto On'
+  description: Turn on lights.
+  initial_state: true
+  variables:
+    current: "{{ state_attr('light.outside_garage_lights','brightness')|int }}"
+    default: 150
+    quiet: 80
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.auto_light_on
+      to: 'on'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      from:
+        - Away
+        - Vacation
+      for:
+        seconds: 5 # allow light scripts to start
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.light_automation
+        - binary_sensor.auto_light_on
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
+
+    - condition: template
+      value_template: "{{ current > quiet if trigger.entity_id == 'binary_sensor.quiet_hours' else current < default }}"
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.outside_garage_lights
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Outside Garage Lights Auto Off
+## - don't turn off in away mode
+#######################################################################################################################
+- id: light_outside_garage_lights_auto_off #OCC
+  alias: '[Light] Outside Garage Lights Auto Off'
+  description: Turn off lights.
+  initial_state: true
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.auto_light_on
+      to: 'off'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+        - Night
+      for:
+        minutes: 2 # allow timer to cancel, occupant to leave
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: light.turn_off
+      entity_id: light.outside_garage_lights

@@ -1,0 +1,71 @@
+#######################################################################################################################
+## Media Player Turned Off
+#######################################################################################################################
+- id: media_player_turned_off
+  alias: "[Media Player] Turned Off"
+  description: Turn media type boolean off when media player turns off.
+  initial_state: true
+  mode: queued  # must be queued to catch multiple media types (radio, spotify etc.)
+  max: 15 # must be at least number of media players to catch all media types
+  max_exceeded: error
+  variables:
+    media_type: >
+      {% if is_state('input_boolean.radio','on')
+          and (trigger.entity_id == states('sensor.radio_media_player')
+            or trigger.entity_id in state_attr('sensor.radio_media_player','players')) %} radio
+      {% elif is_state('input_boolean.spotify','on')
+          and (trigger.entity_id == states('input_text.active_spotify_media_player')
+            or trigger.entity_id in state_attr('sensor.spotify_media_player','players')) %} spotify
+      {% endif %}
+  trigger:
+    - platform: state
+      entity_id: !include /config/include/entities/media_player_entities_single.yaml
+      to:
+        - idle
+        - 'off'
+        - unavailable
+        - unknown
+      for:
+        seconds: 15 #TEST
+
+  condition:
+    - condition: template
+      value_template: "{{ media_type in ['radio','spotify'] }}"
+
+    - condition: template # don't turn off media if resume is on
+      value_template: >
+        {{ is_state('input_boolean.resume_radio','off')
+            if media_type == 'radio' and trigger.to_state.state in ['idle','off'] else true }}
+
+    - condition: template # don't turn off media if resume is on
+      value_template: >
+        {{ is_state('input_boolean.resume_spotify','off')
+            if media_type == 'spotify' and trigger.to_state.state in ['idle','off'] else true }}
+
+    - condition: state
+      entity_id: script.media_stop
+      state: 'off'
+
+  action:
+    - choose:
+        - conditions: "{{ trigger.to_state.state|lower in ['unknown','unavailable','none'] }}"
+          sequence:
+            - service: input_boolean.turn_on
+              data:
+                entity_id: "input_boolean.{{ media_type }}_failed"
+
+      default:
+        - service: input_boolean.turn_off
+          data:
+            entity_id: "input_boolean.{{ media_type }}"
+
+    # - service: system_log.write
+    #   data:
+    #     logger: automation.media_player_turned_off
+    #     level: critical
+    #     message: |
+    #       *
+    #       ** Media Player Turned Off **
+    #       trigger: {{ trigger.entity_id }}
+    #       trigger to_state: {{ trigger.to_state.state }}
+    #       media_type: {{ media_type }}

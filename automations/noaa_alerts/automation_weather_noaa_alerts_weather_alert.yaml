@@ -13,18 +13,8 @@
     - platform: state
       entity_id: sensor.noaa_alerts_miz076
 
-    - platform: state
-      entity_id: binary_sensor.startup_complete
-      to: 'on'
-
-  condition:
-    - condition: state
-      entity_id: binary_sensor.startup_complete
-      state: 'on'
-
   action:
-    # clear alert severity if no active alerts
-    - choose:
+    - choose: # clear alert severity if no active alerts
         - conditions:
             - condition: or
               conditions:
@@ -47,14 +37,12 @@
                 value: cleared
 
       default:
-        # set previous alert severity (from current_noaa_alert_severity)
-        - service: input_text.set_value
+        - service: input_text.set_value # set previous alert severity (from current_noaa_alert_severity)
           data:
             entity_id: input_text.previous_noaa_alert_severity
             value: "{{ states('input_text.current_noaa_alert_severity')|lower }}"
 
-        # set current alert severity from alert
-        - service: input_text.set_value
+        - service: input_text.set_value # set current alert severity from alert
           data:
             entity_id: input_text.current_noaa_alert_severity
             value: >
@@ -62,12 +50,12 @@
               {% else %}{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower }}
               {% endif %}
 
-        # only run if new alert is extreme or more severe than current alert
         - condition: template
+          alias: Alert is extreme severity or more severe than current alert.
           value_template: >
             {% set p = states('input_text.previous_noaa_alert_severity') %}
             {% set c = states('input_text.current_noaa_alert_severity')%}
-            {% if is_state('sensor.noaa_severe_weather_alert','on') %} true
+            {% if is_state('sensor.noaa_weather_alert','on') %} true
             {% else %}
               {{ p == 'severe' and c in ['extreme']
                   or p == 'moderate' and c in ['extreme','severe']
@@ -76,12 +64,8 @@
                     and c in ['extreme','severe','moderate','minor'] }}
             {% endif %}
 
-        - service: input_boolean.turn_on
-          entity_id: input_boolean.display_weather_alerts
-
-        # play as alert if extreme severity otherwise play as an announcement, quiet play if severe, moderate
         - service: script.tts_play
-          data:
+          data: # play as alert if extreme severity otherwise play as an announcement, quiet play if severe, moderate
             play_message: |
               {%- set type = states.sensor.noaa_alerts_miz076.attributes.alerts[0].messageType %}
               {%- set event = states.sensor.noaa_alerts_miz076.attributes.alerts[0].event %}
@@ -95,21 +79,6 @@
               There is a {{ event }} in effect at {{ start }}{{ ' until' ~ until if until != None }}.
               {{ headline[0] ~ '.' if headline != None }}
               {{ inst ~ '.' if inst != None }}
+            alert: "{{ is_state('binary_sensor.tornado_alert','on') or state_attr('sensor.noaa_alerts_miz076','event_severity')|lower == 'extreme' }}"
             quiet_play: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower in ['extreme','severe'] }}"
-            alert: "{{ state_attr('sensor.noaa_alerts_miz076','event_severity')|lower == 'extreme' }}"
-
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: sensor.noaa_severe_weather_alert
-                  state: 'on' #TEST
-                  # attribute: condition
-                  # state: tornado
-
-              sequence:
-                - service: browser_mod.popup
-                  data:
-                    title: Emergency
-                    deviceID: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='attributes.deviceID')|list }}"
-                    large: true
-                    card: !include /config/lovelace/include/picture_entity/emergency_card.yaml
+            save_message: true

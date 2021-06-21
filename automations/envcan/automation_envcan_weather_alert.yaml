@@ -1,0 +1,64 @@
+#######################################################################################################################
+## EnvCan Weather Alert
+#######################################################################################################################
+- id: envcan_weather_alert
+  alias: "[EnvCan] Weather Alert"
+  description: Display weather alert on UI, play alert/announcement for severe alerts.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.envcan_alert
+  action:
+    - choose: # clear alert severity if no active alerts
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.envcan_alert
+              state: 'off'
+
+          sequence:
+            - service: input_select.select_option
+              data:
+                entity_id: input_select.previous_envcan_alert_severity
+                option: cleared
+
+            - service: input_select.select_option
+              data:
+                entity_id: input_select.current_envcan_alert_severity
+                option: cleared
+      default:
+        - service: input_select.select_option
+          data:
+            entity_id: input_select.previous_envcan_alert_severity
+            option: "{{ states('input_select.current_envcan_alert_severity') }}"
+
+        - service: input_select.select_option
+          data:
+            entity_id: input_select.current_envcan_alert_severity
+            option: "{{ state_attr('binary_sensor.envcan_alert','severity') }}"
+
+        - condition: template
+          alias: New alert is a tornado, is watch severity, or is more severe than previous alert.
+          value_template: >
+            {% set previous = states('input_select.previous_envcan_alert_severity') %}
+            {% set current = states('input_select.current_envcan_alert_severity') %}
+            {% set condition = state_attr('binary_sensor.envcan_alert','condition') %}
+            {{ condition == 'tornado'
+                or ((previous == 'watch' and current in ['warning'])
+                  or (previous == 'advisory' and current in ['warning','watch'])
+                  or (previous == 'statement' and current in ['warning','watch','advisory'])
+                  or (previous in ['cleared','unknown','unavailable','none']
+                    and current in ['warning','watch','advisory','statement'])) }}
+
+        - service: script.tts_play
+          data:
+            play_message: > #ENVCAN
+              Attention!  Weather Alert!
+              Environment Canada has issued a
+              {{ state_attr('binary_sensor.envcan_alert','condition') ~ ' ' ~ state_attr('binary_sensor.envcan_alert','severity') }}
+              for your immediate area.
+              {{ state_attr('sensor.dark_sky_alerts','description_1').split('###')[0] }}
+            alert: "{{ is_state('binary_sensor.tornado_alert','on') }}"
+            quiet_play: "{{ state_attr('binary_sensor.envcan_alert','severity') in ['warning','watch'] }}"
+            save_message: true
+

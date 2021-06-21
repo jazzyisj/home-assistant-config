@@ -1,0 +1,104 @@
+#######################################################################################################################
+## Lock - Jammed Lock
+#######################################################################################################################
+- id: lock_jammed_lock
+  alias: "[Lock] Jammed Lock"
+  description: Jammed lock notification.
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.door_lock_jammed
+      to: 'on'
+      from: 'off'
+  action:
+    - service: script.tts_play
+      data:
+        play_message: >-
+          {%- set sensors = ['input_boolean.back_door_lock_jammed','input_boolean.front_door_lock_jammed',
+                'input_boolean.garage_door_lock_jammed','input_boolean.side_door_lock_jammed'] -%}
+          {% set msg = namespace(value='') %}
+          {% set qty = namespace(value=0) %}
+          {% for item in sensors %}
+            {% if is_state(item,'on') %}
+              {% set qty.value = qty.value|int +1 %}
+              {% if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
+              {% set msg.value = msg.value + item.split('.')[1]|replace('_door_lock_jammed','')|replace('_',' ')|title %}
+            {% endif %}
+          {% endfor %}
+          {%- set clist = ', and ' if msg.value.split(', ') | count > 2 else ' and ' -%}
+          {%- set plural = 's are' if qty.value|int > 1 else ' is' -%}
+          Attention! The {{ clist.join(msg.value.rsplit(', ', 1)) }} door lock{{ plural }} jammed!
+        quiet_play: true
+        ignore_away: true
+
+#######################################################################################################################
+## Lock - Jammed Reset
+#######################################################################################################################
+- id: lock_jammed_reset
+  alias: "[Lock] Jammed Reset"
+  description: Reset jammed lock notification.
+  max_exceeded: silent
+  mode: queued
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: reset_door_lock_jammed
+
+    - platform: state
+      entity_id:
+        - lock.back_door_lock
+        - lock.front_door_lock
+        - lock.garage_door_lock
+        - lock.side_door_lock
+      to: locked
+  condition:
+    - condition: or
+      alias: Locked jammed boolean is on
+      conditions:
+        - condition: state
+          entity_id: input_boolean.back_door_lock_jammed
+          state: 'on'
+
+        - condition: state
+          entity_id: input_boolean.front_door_lock_jammed
+          state: 'on'
+
+        - condition: state
+          entity_id: input_boolean.garage_door_lock_jammed
+          state: 'on'
+
+        - condition: state
+          entity_id: input_boolean.side_door_lock_jammed
+          state: 'on'
+  action:
+    - choose:
+        - conditions: "{{ trigger.entity_id in ['lock.back_door_lock','lock.front_door_lock','lock.garage_door_lock','lock.side_door_lock'] }}"
+          sequence:
+            - service: input_boolean.turn_off
+              data:
+                entity_id: "input_boolean.{{ trigger.entity_id.split('.')[1] }}_jammed"
+      default:
+        - service: input_boolean.turn_off
+          entity_id:
+            - input_boolean.back_door_lock_jammed
+            - input_boolean.front_door_lock_jammed
+            - input_boolean.garage_door_lock_jammed
+            - input_boolean.side_door_lock_jammed
+
+#######################################################################################################################
+## Lock - Pause Door Lock Jammed Alert
+#######################################################################################################################
+- id: lock_pause_door_lock_jammed_alert
+  alias: "[Lock] Pause Door Lock Jammed Alert"
+  description: Pause alert.
+  initial_state: true
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_door_lock_jammed
+
+  action:
+    - service: alert.turn_off
+      entity_id: alert.pause_door_lock_jammed

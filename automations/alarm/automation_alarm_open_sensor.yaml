@@ -1,0 +1,93 @@
+#######################################################################################################################
+## Alarm - Open Sensor
+#######################################################################################################################
+- id: alarm_open_sensor
+  alias: "[Alarm] Open Sensor"
+  description: Announcement, notification on alarm open sensor.
+  initial_state: true
+  variables:
+    #BUG #ALARMO alarmo loses arm_mode on disarmed if exit delay used and open sensors
+    #BUGFIX default 'away' required
+    mode:  >
+      {% set mode =  state_attr('alarm_control_panel.alarmo','arm_mode')|replace('armed_','') %}
+      {{ mode if mode == nothing else 'away' }}
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.open_sensor_alert
+      to: 'on'
+  action:
+    - repeat:
+        sequence:
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: alarm_control_panel.alarmo
+                      state: disarmed
+                  sequence:
+                    - service: script.turn_on
+                      data:
+                        entity_id: script.tts_play
+                        variables:
+                          play_message: |
+                            {%- set sensors = expand(state_attr('alarm_control_panel.alarmo','open_sensors')) -%}
+                            {%- set names = sensors|map(attribute='name')|join(', ') -%}
+                            {%- set clist = ', and ' if names.split(', ') | count > 2 else ' and ' -%}
+                            {%- set qty = sensors|count -%}
+                            {%- set plural = 'are' if qty > 1 else 'is' -%}
+                            Attention!  The house alarm could NOT be armed!
+                            The {{ clist.join(names.rsplit(', ', 1)) }} {{ plural }} open!
+                          ignore_away: true
+                          quiet_play: true
+
+                    - service: notify.alarm # not an alert because of icon/image template
+                      data:
+                        title: Alarm Error - Open Sensors
+                        message: >
+                          The house alarm could not be armed!
+                          {%- set sensors = expand(state_attr('alarm_control_panel.alarmo','open_sensors'))|map(attribute='name')|list -%}
+                          {%- for item in sensors %}
+                              <br/>{{ item|replace('Virtual','') }}
+                          {%- endfor -%}
+                        data:
+                          tag: open_sensor
+                          group: Alarm
+                          channel: Alert
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          persistant: true
+                          sticky: true
+                          clickAction: /lovelace/alarm
+                          color: !secret CRITICAL_COLOR
+                          icon_url: !secret ALARM_ICON
+                          actions:
+                            - title: Arm Home
+                              action: arm_alarm_home_override
+                            - title: Arm Night
+                              action: arm_alarm_night_override
+                            - title: Arm Away
+                              action: arm_alarm_away_override
+
+            #IDEA wait until open sensor is closed, try to arm alarm again
+            - delay: 60 # delay between alerts
+
+        until: "{{ is_state('binary_sensor.open_sensor_alert','off') or repeat.index == 3 }}"
+
+    - choose: # if still disarmed, bypass open sensors and arm
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: disarmed
+          sequence:
+            - service: script.arm_alarm # try to arm alarm
+              data:
+                mode: "{{ mode }}"
+                override: "{{ true if is_state('binary_sensor.open_sensor_alert','on') else false }}"
+
+    - wait_template: "{{ is_state('binary_sensor.open_sensor_alert','off') }}"
+
+    - service: notify.alarm
+      data:
+        message: clear_notification
+        data:
+          tag: open_sensor

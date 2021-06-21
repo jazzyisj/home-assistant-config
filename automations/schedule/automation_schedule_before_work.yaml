@@ -5,20 +5,103 @@
   alias: "[Schedule] Before Work"
   description: Play announcement when before work active turns on.
   initial_state: true
-  mode: single
-  #max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: binary_sensor.pre_work_active
+      entity_id: binary_sensor.prework_active
       to: 'on'
-      
+
   condition:
     - condition: state
-      entity_id: sensor.current_shift
-      state: Afternoons
-      
+      entity_id: binary_sensor.owner_home
+      state: 'on'
+
   action:
+    #OPTION - choose:
+    #     - conditions: "{{ is_state('sensor.current_shift','Days') }}"
+    #       sequence:
+
+
+    #     - conditions: "{{ is_state('sensor.current_shift','Afternoons') }}"
+    #       sequence:
+
     - service: script.tts_play
       data:
-        play_message: Hey Jason!  Get your ass in gear fella.  You need to leave for work in thirty minutes!
+        play_message: >
+          {% if is_state('sensor.current_shift','Days') %}
+            {% set minutes = ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.days_leave_home_time'))|int - as_timestamp(now())|int) / 60) %}
+          {% elif is_state('sensor.current_shift','Afternoons') %}
+            {% set minutes =  ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.afternoons_leave_home_time'))|int - as_timestamp(now())|int) / 60) %}
+          {% endif %}
+          Get your ass in gear there big fella.  You need to leave for work in {{ minutes|int }} minutes!
+        quiet_play: true
+        min_volume: 40
+        media_player: media_player.broadcast_speakers
+        tts_override: nabu_casa
 
+    - service: scene.create
+      data:
+        scene_id: prework_active
+        entities:
+          light.dining_room_rgb_light:
+            state:  >
+              {% set state = states('light.dining_room_rgb_light') %}
+              {{ 'off' if state|lower in ['unknown','unavailable','none'] else state }}
+            brightness: "{{ state_attr('light.dining_room_rgb_light','brightness')|int }}"
+            rgb_color: "{{ state_attr('light.dining_room_rgb_light','rgb_color') }}"
+
+    - choose: #IDEA cold? commute?
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.weather_automation
+              state: 'on'
+
+            - condition: template
+              value_template: >
+                {{ states('sensor.dark_sky_precip_probability_0h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_1h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_2h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_3h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_4h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_5h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_6h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_7h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_8h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_9h')| int > 30
+                    or states('sensor.dark_sky_precip_probability_10h')| int > 30 }}
+          sequence:
+            - service: switch.turn_off
+              entity_id: switch.light_flux_dining_room
+
+            - service: light.turn_on
+              data:
+                entity_id: light.dining_room_rgb_light
+                brightness: 255
+                rgb_color: [0,0,255]
+
+    - delay:
+        minutes: 60
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.light_scene_active
+              state: 'off'
+
+          sequence:
+            - service: switch.turn_on
+              entity_id: switch.light_flux_dining_room
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state:
+                - Home
+                - Guest
+                - Override
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.activate_scene
+                variables:
+                  scene: scene.prework_active

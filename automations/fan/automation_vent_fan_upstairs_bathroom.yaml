@@ -1,0 +1,147 @@
+#######################################################################################################################
+## Vent Fan - Upstairs Bathroom Fan In Use
+#######################################################################################################################
+- id: vent_fan_upstairs_bathroom_fan_in_use
+  alias: "[Vent Fan] Upstairs Bathroom Fan In Use"
+  description: Turn in use timer on when device state changes.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: fan.upstairs_bathroom_fan
+      to:
+        - 'on'
+        - 'off'
+      from:
+        - 'on'
+        - 'off'
+  condition:
+    - condition: state # fan states change on startup
+      entity_id: input_boolean.startup_pending
+      state: 'off'
+
+  action:
+    - service: timer.start
+      data:
+        entity_id: timer.upstairs_bathroom_fan
+
+#######################################################################################################################
+## Vent Fan - Upstairs Bathroom Auto On
+#######################################################################################################################
+- id: vent_fan_upstairs_bathroom_auto_on
+  alias: "[Vent Fan] Upstairs Bathroom Auto On"
+  description: Turn fan on when bathroom alert turns on.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.upstairs_bathroom_humidity_fan
+        - binary_sensor.upstairs_bathroom_mold_fan
+        - binary_sensor.upstairs_bathroom_temperature_fan
+      to: 'on'
+
+    - platform: time_pattern
+      minutes: '/15'
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.vent_fan_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: fan.upstairs_bathroom_fan
+      state: 'off' # only run if fan is off #ZWAVE - device ready
+
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.upstairs_bathroom_humidity_fan
+          state: 'on'
+
+        - condition: state
+          entity_id: binary_sensor.upstairs_bathroom_mold_fan
+          state: 'on'
+
+        - condition: state
+          entity_id: binary_sensor.upstairs_bathroom_temperature_fan
+          state: 'on'
+
+  action:
+    - service: automation.turn_off # prevent device in use timer from starting
+      entity_id: group.vent_fan_upstairs_bathroom_fan_in_use
+
+    - service: fan.turn_on
+      data:
+        entity_id: fan.upstairs_bathroom_fan
+        percentage: >
+          {% if is_state('binary_sensor.upstairs_bathroom_sensor_humidity_fan','on') %} 100
+          {% elif is_state('binary_sensor.upstairs_bathroom_mold_fan','on') %} 66
+          {% elif is_state('binary_sensor.upstairs_bathroom_temperature_fan','on') %} 33
+          {% else %} 0
+          {% endif %}
+
+    - delay: # delay to allow device to change states
+        seconds: 10 #ZWAVE fans are slow
+
+    - service: automation.turn_on
+      entity_id: group.vent_fan_upstairs_bathroom_fan_in_use
+
+#######################################################################################################################
+## Vent Fan - Upstairs Bathroom Auto Off
+#######################################################################################################################
+- id: vent_fan_upstairs_bathroom_auto_off
+  alias: "[Vent Fan] Upstairs Bathroom Auto Off"
+  description: Turn vent fan off when alerts turn off.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.upstairs_bathroom_humidity_fan
+        - binary_sensor.upstairs_bathroom_mold_fan
+        - binary_sensor.upstairs_bathroom_temperature_fan
+      to: 'off'
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.upstairs_bathroom_fan
+
+    - platform: time_pattern
+      minutes: '/15'
+
+    - platform: state # run at startup to prevent fan from being stranded on
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.vent_fan_automation
+        - fan.upstairs_bathroom_fan # only run if fan is on  #ZWAVE - device ready
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - binary_sensor.upstairs_bathroom_humidity_fan
+        - binary_sensor.upstairs_bathroom_mold_fan
+        - binary_sensor.upstairs_bathroom_temperature_fan
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.upstairs_bathroom_fan
+      state: idle
+
+  action:
+    - service: automation.turn_off # prevent device in use timer from starting
+      entity_id: group.vent_fan_upstairs_bathroom_fan_in_use
+
+    - service: fan.turn_off
+      entity_id: fan.upstairs_bathroom_fan
+
+    - delay: # delay to allow device to change states
+        seconds: 10  #ZWAVE fans are slow
+
+    - service: automation.turn_on
+      entity_id: group.vent_fan_upstairs_bathroom_fan_in_use

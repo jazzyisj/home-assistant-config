@@ -1,0 +1,214 @@
+#######################################################################################################################
+## Dexter Medication Package
+#######################################################################################################################
+input_boolean:
+  dexter_medication_enabled:
+    name: Dexter Medication Enabled
+    icon: mdi:cat
+
+  dexter_medication_active:
+    name: Dexter Medication Active
+    icon: mdi:cat
+
+input_datetime:
+  dexter_medication_days:
+    name: Dexter Mediation Days
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  dexter_medication_afternoons:
+    name: Dexter Mediation Afternoons
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  dexter_medication_weekends:
+    name: Dexter Mediation Weekends
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+input_number:
+  dexter_medication_day_interval:
+    name: Dexter Mediation Day Interval
+    icon: mdi:calendar-range
+    unit_of_measurement: days
+    min: 1
+    max: 7
+    step: 1
+
+automation:
+  #######################################################################################################################
+  ## Dexter Medication - Turn Off
+  #######################################################################################################################
+  - id: dexter_medication_turn_off
+    alias: "[Dexter Medication] Turn Off"
+    description: Turn off active boolean.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.dexter_medication_active
+        to: "on"
+
+      - platform: state
+        entity_id: input_boolean.dexter_medication_enabled
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: dexter_medication_done
+
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.dexter_medication_enabled
+            state: "off"
+
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+
+          - condition: template
+            value_template: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'dexter_medication_done' }}{% endif %}"
+
+    action:
+      - service: input_boolean.turn_off
+        entity_id: input_boolean.dexter_medication_active
+
+  #######################################################################################################################
+  ## Dexter Medication - Activate Reminder
+  #######################################################################################################################
+  - id: dexter_medication_activate_reminder
+    alias: "[Dexter Medication] Activate Reminder"
+    description: Turn on dexter mealtime active boolean with shift dependent time trigger.
+    initial_state: true
+    trigger:
+      - platform: template
+        value_template: >
+          {% set time = states('sensor.time') %}
+          {% set days = is_state('sensor.current_shift','Days') and is_state('binary_sensor.work_today','on') %}
+          {% set afts = is_state('sensor.current_shift','Afternoons') and is_state('binary_sensor.work_today','on') %}
+          {% set wknd = is_state('binary_sensor.work_today','off') or states('sensor.current_shift') in ['Off','unknown','unknown','none'] %}
+
+          {{ (days and time == states('input_datetime.dexter_medication_days')[0:5])
+            or (afts and time == states('input_datetime.dexter_medication_afternoons')[0:5])
+            or (wknd and time == states('input_datetime.dexter_medication_weekends')[0:5]) }}
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.dexter_medication_enabled
+        state: "on"
+
+      # only run every specified days
+      - condition: template
+        value_template: >
+          {% set last_run = state_attr('automation.dexter_medication_activate_reminder','last_triggered') %}
+          {{ last_run is none or (now().date() - last_run.date()).days >= states('input_number.dexter_medication_day_interval')|int }}
+
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+
+    action:
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.dexter_medication_active
+
+  #######################################################################################################################
+  ## Dexter Medication - Alert
+  #######################################################################################################################
+  - id: dexter_medication_alert
+    alias: "[Dexter Medication] Alert"
+    description: Sent alert every 15 minutes until dexter active turns off.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.dexter_medication_active
+        to: "on"
+        for:
+          seconds: 5 # allow boolean to turn back off if disabled
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.dexter_medication_enabled
+        state: "on"
+
+    action:
+      - repeat:
+          sequence:
+            - service: script.tts_play
+              data:
+                play_message: Hey! The fat bastard needs his roids!  Give Dexter his medication!
+                quiet_play: true
+                save_message: true
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.schedule_alerts
+                      state: "on"
+
+                  sequence:
+                    - service: notify.jason
+                      data:
+                        title: Dexter Medication
+                        message: It's time for Dexter's medication!
+                        data:
+                          tag: dexter_medication
+                          group: General
+                          channel: General
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          persistent: true
+                          clickAction: /lovelace/schedule
+                          color: !secret NOTIFY_COLOR
+                          icon_url: !secret DEXTER_ICON
+                          image: !secret DEXTER_IMAGE
+                          actions:
+                            - action: dexter_medication_done
+                              title: Medication Done
+                              uri: /lovelace/schedule
+
+            - wait_template: "{{ is_state('input_boolean.dexter_medication_active','off') }}"
+              timeout: # wait for alert to turned off/dismissed
+                minutes: 15
+
+          until:
+            - condition: state
+              entity_id: input_boolean.dexter_medication_active
+              state: "off"
+
+  #######################################################################################################################
+  ## Dexter Medication - Close Notifications
+  #######################################################################################################################
+  - id: dexter_medication_close_notifications
+    alias: "[Dexter Medication] Close Notifications"
+    description: Dismiss notifications on all devices.
+    initial_state: true
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.dexter_medication_active
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: dexter_medication
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: dexter_medication_done
+
+    action:
+      - service: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: dexter_medication

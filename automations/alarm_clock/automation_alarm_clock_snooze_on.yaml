@@ -4,28 +4,17 @@
 - id: alarm_clock_snooze_on
   alias: "[Alarm Clock] Snooze On"
   description: Pause media player and start snooze timer when snooze turned on.
+  max_exceeded: silent
   initial_state: true
-  mode: single
   trigger:
     - platform: state
       entity_id: input_boolean.alarm_clock_snooze
-      to: 'on'
-
-    # run when startup complete to restart snooze timers
-    - platform: state
-      entity_id: binary_sensor.startup_complete
       to: 'on'
 
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: snooze_alarm_clock
-
-  condition:
-    # if trigger is startup snooze boolean must be on
-    - condition: template
-      value_template: "{{ is_state('input_boolean.alarm_clock_snooze','on') if trigger.entity_id == 'binary_sensor.startup_complete' else true }}"
-
   action:
     - choose:
         - conditions:
@@ -33,6 +22,9 @@
               entity_id: binary_sensor.alarm_clock_active
               state: 'off'
 
+            - condition: state # req if snooze turned on before alarm clock play (active off)
+              entity_id: sensor.alarm_clock_next_alarm
+              state: 'Off'
           sequence:
             - service: browser_mod.toast
               data:
@@ -41,25 +33,57 @@
 
             - service: input_boolean.turn_off
               entity_id: input_boolean.alarm_clock_snooze
-
       default:
+        - service: input_boolean.turn_on
+          entity_id: input_boolean.alarm_clock_snooze
+
         - service: timer.start
           data:
             entity_id: timer.alarm_clock_snooze
             duration:
               minutes:  "{{ states('input_number.alarm_clock_snooze_time')|int }}"
 
+        - service: notify.jason
+          data:
+            message: clear_notification
+            data:
+              tag: alarm_clock_active
+
+        - service: notify.jason # not an alert - template in chronometer
+          data:
+            title: Alarm Clock Snoozed!
+            message: >
+              Alarm was snoozed for {{ states('input_number.alarm_clock_snooze_time')|int }} minutes.
+              <br/>The alarm will sound at {{ ((as_timestamp(now())
+                + states('input_number.alarm_clock_snooze_time')|int * 60)|int)|timestamp_custom('%-I:%M %p') }}.
+            data:
+              tag: alarm_clock_snoozed
+              group: General
+              channel: Alert # DND might be on
+              importance: max
+              ttl: 0
+              priority: high
+              persistent: true
+              sticky: true
+              color: !secret NOTIFY_COLOR
+              icon_url: !secret ALARM_CLOCK_ICON
+              chronometer: true
+              when: "{{ (as_timestamp(now()) + states('input_number.alarm_clock_snooze_time')|int * 60)|int }}"
+              actions:
+                - action: turn_off_alarm_clock
+                  title: Turn Off Alarm
+
         - choose:
-          - conditions: "{{ is_state(states('sensor.alarm_clock_media_player'),'playing') }}"
+            - conditions: "{{ is_state(states('sensor.alarm_clock_media_player'),'playing') }}"
+              sequence:
+                - service:  media_player.media_pause
+                  data:
+                    entity_id: "{{ states('sensor.alarm_clock_media_player') }}"
 
-            sequence:
-              # turn off automation to prevent trigger when media player paused
-              - service: automation.turn_off
-                entity_id: automation.alarm_clock_detect_snooze
+    - wait_template: "{{ is_state('input_boolean.alarm_clock_snooze','off') }}"
 
-              - service:  media_player.media_pause
-                data:
-                  entity_id: "{{ states('sensor.alarm_clock_media_player') }}"
-
-              - service: automation.turn_on
-                entity_id: automation.alarm_clock_detect_snooze
+    - service: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: alarm_clock_snoozed

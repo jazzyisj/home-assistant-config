@@ -1,0 +1,180 @@
+######################################################################################################################
+# Alarm - Lighting
+######################################################################################################################
+- id: alarm_lighting
+  alias: "[Alarm] Lighting"
+  description: House alarm lighting.
+  initial_state: true
+  mode: restart # arming waiting -> triggered
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      to:
+        - arming
+        - pending
+        - triggered
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: arming
+          sequence:
+            - service: scene.create
+              data:
+                scene_id: alarm_arming_lights_restore
+                entities:
+                  light.kitchen_potlights:
+                    state: "{{ states('light.kitchen_potlights') }}"
+                    brightness: "{{ state_attr('light.kitchen_potlights','brightness') }}"
+                  light.dining_room_potlights:
+                    state: "{{ states('light.dining_room_potlights') }}"
+                    brightness: "{{ state_attr('light.dining_room_potlights','brightness') }}"
+                  light.side_entrance_light:
+                    state: "{{ states('light.side_entrance_light') }}"
+                    brightness: "{{ state_attr('light.side_entrance_light','brightness') }}"
+                  light.upstairs_hallway_potlights:
+                    state: "{{ states('light.upstairs_hallway_potlights') }}"
+                    brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness') }}"
+
+            - wait_template: "{{ not is_state('alarm_control_panel.alarmo','arming') }}"
+              timeout: "{{ state_attr('alarm_control_panel.alarmo','delay')|int }}"
+
+            - condition: state # check to see if alarm was disarmed
+              entity_id: alarm_control_panel.alarmo
+              state: disarmed
+
+            - service: script.turn_on
+              data: # restore lights if alarm was disarmed
+                entity_id: script.activate_scene
+                variables:
+                  scene: scene.alarm_arming_lights_restore
+
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: pending
+          sequence:
+            - service: scene.create
+              data:
+                scene_id: alarm_pending_lights_restore
+                entities:
+                  light.kitchen_potlights:
+                    state: "{{ states('light.kitchen_potlights') }}"
+                    brightness: "{{ state_attr('light.kitchen_potlights','brightness')|int }}"
+                  light.dining_room_potlights:
+                    state: "{{ states('light.dining_room_potlights') }}"
+                    brightness: "{{ state_attr('light.dining_room_potlights','brightness')|int }}"
+                  light.side_entrance_light:
+                    state: "{{ states('light.side_entrance_light') }}"
+                    brightness: "{{ state_attr('light.side_entrance_light','brightness')|int }}"
+                  light.upstairs_hallway_potlights:
+                    state: "{{ states('light.upstairs_hallway_potlights') }}"
+                    brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness')|int }}"
+
+            - service: light.turn_on
+              data:
+                entity_id: light.side_entrance_light
+                brightness: 255
+
+            - service: light.turn_on
+              data:
+                entity_id:
+                  - light.kitchen_potlights
+                  - light.dining_room_potlights
+                  - light.upstairs_hallway_potlights
+                brightness: 150
+
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: triggered
+          sequence:
+            - service: scene.create
+              data:
+                scene_id: alarm_triggered_lights_restore
+                entities: !include /config/include/entities/all_lights_scene_entities.yaml
+
+            - service: script.turn_on
+              entity_id: script.lights_on
+
+#######################################################################################################################
+## Alarm - Pending Lights Restore
+#######################################################################################################################
+- id: alarm_pending_lights_restore
+  alias: "[Alarm] Pending Lights Restore"
+  description: Restore pre alarm pending light scene.
+  initial_state: true
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.alarm_pending
+      to: 'off'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+  action:
+    - choose: # lights were turned off if previous mode was night/away etc so turn a couple lights on if it's dark out
+        - conditions:
+            - condition: template
+              value_template: >
+                {{ is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.auto_light_on','on')
+                    and states('input_select.previous_occupancy_mode') in ['Night','Away','Vacation','Override'] }}
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.activate_scene
+                variables:
+                  scene: scene.night_lights
+      default:
+        - service: script.turn_on
+          data:
+            entity_id: script.activate_scene
+            variables:
+              scene: scene.alarm_pending_lights_restore
+
+#######################################################################################################################
+## Alarm - Triggered Lights Restore
+#######################################################################################################################
+- id: alarm_triggered_lights_restore
+  alias: "[Alarm] Triggered Lights Restore"
+  description: Restore pre alarm triggered light scene
+  initial_state: true
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.alarm_triggered
+      to: 'off'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+  action:
+    - service: script.turn_on
+      data:
+        entity_id: script.activate_scene
+        variables:
+          scene: scene.alarm_triggered_lights_restore
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.alarm_pending
+              state: 'off'
+
+            - condition: template
+              alias: Previous occupancy mode was night/away, it's dark out and someone is home
+              value_template: > # lights were turned off if previous mode was night/away etc so turn a couple lights on if it's dark out
+                {{ is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.auto_light_on','on')
+                    and states('input_select.previous_occupancy_mode') in ['Night','Away','Vacation','Override'] }}
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.activate_scene
+                variables:
+                  scene: scene.night_lights

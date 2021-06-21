@@ -5,94 +5,48 @@
   alias: "[Climate] Emergency Heat Alert"
   description: Play tts announcement when alert turns on.
   initial_state: true
-  mode: single
   trigger:
     - platform: state
       entity_id: alert.emergency_heat
-      to: 'on'
+      to: "on"
 
   action:
-    - service: persistent_notification.create
-      data:
-        title: Emergency Heat Activated
-        message: "Indoor Temperature: {{ states('sensor.upstairs_thermostat_temperature') }}°."
-        notification_id: emergency_heat
-
     - repeat:
         sequence:
           - service: script.tts_play
             data:
               play_message: |
-                  The upstairs thermostat emergency heat mode has been activated.
-                  The indoor temperature is {{ '%0.0f'|format(states('sensor.upstairs_thermostat_temperature')|float) }} degrees.
+                The upstairs thermostat emergency heat mode has been activated.
+                The indoor temperature is {{ '%0.0f'|format(states('sensor.upstairs_thermostat_temperature')|float) }} degrees.
               quiet_play: true
               ignore_away: true
               save_message: true
-              min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'speaker_group',true) else 60 }}"
+              min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 60 }}"
 
           - wait_template: "{{ not is_state('alert.emergency_heat','on') }}"
             timeout:
               hours: 1
-            continue_on_timeout: true
 
         until:
           - condition: not
             conditions:
               - condition: state
                 entity_id: alert.emergency_heat
-                state: 'on'
+                state: "on"
 
 #######################################################################################################################
-## Climate - Close Emergency Heat Notifications
+## Climate - Pause Emergency Heat Alert
 #######################################################################################################################
-- id: climate_close_emergency_heat_notifications
-  alias: "[Climate] Close Emergency Heat Notifications"
-  description: Dismiss notifications on all devices.
+- id: climate_pause_emergency_heat_alert
+  alias: "[Climate] Pause Emergency Heat Alert"
+  description: Pause alert.
   initial_state: true
-  mode: single
-  #max_exceeded: silent
   trigger:
-    - platform: state
-      entity_id: alert.emergency_heat
-      to:
-        - idle
-        - 'off'
-
-    #BUG from_state of dismissed persistent notifcations is unknown, use state_changed event
-    - platform: event
-      event_type: state_changed
-      event_data:
-        entity_id: persistent_notification.emergency_heat
-
-    - platform: event
-      event_type: mobile_app_notification_cleared
-      event_data:
-        tag: emergency_heat
-
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
-        action: pause_emergency_heat
-
-  condition:
-    #BUGFIX conditions required as workaround for unknown persistent notification state
-    - condition: or
-      conditions:
-        - "{% if trigger.entity_id is defined %}{{ trigger.entity_id == 'alert.emergency_heat' and states('alert.emergency_heat') in ['idle','off'] }}{% endif %}"
-        - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'emergency_heat' }}{% endif %}"
-        - "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'pause_emergency_heat' }}{% endif %}"
-        - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.emergency_heat','notifying') }}{% endif %}"
+        action: pause_emergency_heat_jason
 
   action:
-    - service: persistent_notification.dismiss
-      data:
-        notification_id: emergency_heat
-
-    - service: notify.mobile_app_jphone
-      data:
-        message: clear_notification
-        data:
-          tag: emergency_heat
-
-    - delay:
-        seconds: 180 # prevent recursive triggers
+    - service: alert.turn_off
+      entity_id: alert.emergency_heat

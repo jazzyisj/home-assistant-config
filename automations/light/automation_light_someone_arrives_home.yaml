@@ -3,7 +3,7 @@
 #######################################################################################################################
 - id: light_someone_arrives_home
   alias: "[Light] Someone Arrives Home"
-  description: "Save current light scene then turn on arrive home lights"
+  description: Save current light scene, turn on arrive home lights.
   initial_state: true
   mode: restart
   trigger:
@@ -13,10 +13,9 @@
         - binary_sensor.sheri_home
         - input_boolean.guest_home
       to: 'on'
-
   condition:
     - condition: state
-      entity_id: binary_sensor.emergency_active
+      entity_id: input_boolean.alarm_triggered
       state: 'off'
 
     - condition: state
@@ -24,12 +23,6 @@
         - input_boolean.presence_automation
         - input_boolean.light_automation
       state: 'on'
-
-    # jason_home / sheri_home always off as startup
-    - condition: state
-      entity_id: binary_sensor.startup_complete
-      state: 'on'
-
   action:
     - choose:
         - conditions: "{{ states('input_select.occupancy_mode') not in ['Home','Guest'] }}"
@@ -37,10 +30,6 @@
             - wait_template: "{{ states('input_select.occupancy_mode') in ['Home','Guest'] }}"
               timeout:
                 seconds: 5
-              continue_on_timeout: true # home lights might not be on yet so away lights might be saved
-
-            - delay:
-                seconds: 5 #ZWAVE
 
     - service: scene.create
       data:
@@ -48,28 +37,25 @@
         entities:
           light.kitchen_potlights:
             state: "{{ states('light.kitchen_potlights') }}"
-            brightness: "{{ state_attr('light.kitchen_potlights','brightness') }}"
+            brightness: "{{ state_attr('light.kitchen_potlights','brightness')|int }}"
           light.dining_room_potlights:
             state: "{{ states('light.dining_room_potlights') }}"
-            brightness: "{{ state_attr('light.dining_room_potlights','brightness') }}"
+            brightness: "{{ state_attr('light.dining_room_potlights','brightness')|int }}"
           light.upstairs_hallway_potlights:
             state: "{{ states('light.upstairs_hallway_potlights') }}"
-            brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness') }}"
+            brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness')|int }}"
 
     - service: timer.start
       entity_id: timer.arrive_home_lights
 
-    # always turn side entrance light on, restart in use timer if already on
-    - choose:
+    - choose: # always turn side entrance light on, restart in use timer if already on
         - conditions:
             - condition: state
               entity_id: light.side_entrance_light
               state: 'on'
-
           sequence:
             - service: timer.start
               entity_id: timer.side_entrance_light
-
       default:
         - service: light.turn_on
           entity_id: light.side_entrance_light
@@ -97,18 +83,16 @@
 #######################################################################################################################
 - id: light_arrive_home_lights_restore
   alias: "[Light] Arrive Home Lights Restore"
-  description: "Restore arrive home lights to previous setting."
+  description: Restore arrive home lights.
   initial_state: true
-  mode: single
   trigger:
     - platform: event
       event_type: timer.finished
       event_data:
         entity_id: timer.arrive_home_lights
-
   condition:
     - condition: state
-      entity_id: binary_sensor.emergency_active
+      entity_id: input_boolean.alarm_triggered
       state: 'off'
 
     - condition: state
@@ -118,12 +102,11 @@
         - binary_sensor.auto_light_on
       state: 'on'
 
-    - condition: state
+    - condition: state # don't restore if lights were off!
       entity_id: input_select.previous_occupancy_mode
       state:
         - Home
         - Guest
-
   action:
     - service: script.activate_scene
       data:

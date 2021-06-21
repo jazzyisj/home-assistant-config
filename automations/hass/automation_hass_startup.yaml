@@ -2,26 +2,24 @@
 ## Hass - Startup
 #######################################################################################################################
 - id: hass_startup
-  alias: "[Hass] Startup"
+  alias: '[Hass] Startup'
   description: Turn on delayed automations, send restart notification.
   initial_state: true
-  mode: single
   trigger:
     - platform: homeassistant
       event: start
-
   action:
     - choose:
         - conditions:
             - condition: state
               entity_id: input_boolean.supplemental_logging
               state: 'on'
-
           sequence:
             - service: system_log.write
               data:
-                message: "**** HOME ASSISTANT START ****"
                 level: critical
+                logger: automation.hass_startup
+                message: '**** HOME ASSISTANT START ****'
 
     - service: persistent_notification.create
       data:
@@ -29,62 +27,35 @@
         message: Waiting for startup to complete.
         notification_id: startup_delay
 
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.manual_mode
-              state: 'on'
-
-          sequence:
-            - service: automation.trigger
-              entity_id: automation.hass_manual_mode
-
     # wait for entities to initialize before continuing
     # use integration group state - binary sensor will always be on at startup
     # use offline devices sensor - binary sensor will always be on at startup
-    # use zwave_unavailable_devices sensor - binary sensor will always on at startup
     - wait_template: >
-        {{ is_state('group.integration_connected_sensors','on')
-            and is_state('sensor.zwave_unavailable_devices','0')
+        {{ is_state('group.integration_online_sensors','on')
             and is_state('sensor.offline_devices','0')
             and is_state('sensor.unavailable_sensors','0') }}
       timeout:
         minutes: 5
-      continue_on_timeout: true  # don't hold up rest of startup
+
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.startup_pending
+
+    - service: browser_mod.window_reload #BUGFIX browser unresponsive sometimes after startup
+
+    - service: script.turn_on
+      entity_id: script.internet_speedtest # manually update, unknown at startup
 
     - choose:
         - conditions:
             - condition: state
               entity_id: input_boolean.supplemental_logging
               state: 'on'
-
           sequence:
             - service: system_log.write
               data:
-                message: "**** HOME ASSISTANT STARTUP COMPLETE ****"
                 level: critical
-
-    - service: input_boolean.turn_off
-      entity_id: input_boolean.startup_pending
-
-    # select appropriate occupancy mode
-    #NOTE default to Home/Guest if waketime_today or bedtime_today is Off
-    - service: input_select.select_option
-      data:
-        entity_id: input_select.occupancy_mode
-        option: >
-          {% set time = states('sensor.time') %}
-          {% set bed = states('sensor.bedtime_today') %}
-          {% set wake = states('sensor.waketime_today') %}
-          {% if is_state('binary_sensor.someone_home','off') %}
-            {{ 'Vacation' if is_state('input_select.occupancy_mode','Vacation') else 'Away' }}
-          {% elif bed == 'Off' or wake == 'Off' %}
-             {{ 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
-          {% elif (bed < time < wake if bed < wake else ( bed < time > wake or bed > time < wake )) %}
-            {{ 'Night' if is_state('input_boolean.bedtime_delayed','off') else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
-          {% else %}
-            {{ 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
-          {% endif %}
+                logger: automation.hass_startup
+                message: '**** HOME ASSISTANT STARTUP COMPLETE ****'
 
     - service: persistent_notification.dismiss
       data:
@@ -92,18 +63,18 @@
 
     - service: persistent_notification.create
       data:
-        title: &start_title "Home Assistant Restarted"
-        message: &start_message "Restarted at {{ now().strftime('%H:%M %p') }}."
+        title: &start_title Home Assistant Restarted
+        message: &start_message "Startup completed at {{ now().strftime('%H:%M %p') }}."
         notification_id: hass_restart
 
     - choose:
         - conditions:
             - condition: state
-              entity_id: binary_sensor.alerts_enabled
+              entity_id: input_boolean.system_alerts
               state: 'on'
 
           sequence:
-            - service: notify.mobile_app_jphone
+            - service: notify.jason
               data:
                 title: *start_title
                 message: *start_message
@@ -112,12 +83,11 @@
                   group: System
                   channel: General
                   importance: max
-                  priority: &start_priority high
-                  ttl: &start_ttl 0
-                  timeout: 3600
+                  ttl: 0
+                  priority: high
                   clickAction: &start_url /lovelace/home
                   color: !secret NOTIFY_COLOR
-                  icon_url: &start_icon !secret HASSIO_ICON
+                  icon_url: !secret &start_icon HASSIO_ICON
 
             - choose:
                 - conditions:
@@ -129,6 +99,10 @@
                       entity_id: input_select.occupancy_mode
                       state: Home
 
+                    - condition: state # push causes error if no wan
+                      entity_id: binary_sensor.wan_connected
+                      state: 'on'
+
                   sequence:
                     - service: notify.push
                       data:
@@ -137,9 +111,9 @@
                         target: jlaptop
                         data:
                           tag: *start_tag
-                          timestamp: "{{ as_timestamp(now()) }}"
-                          priority: *start_priority
-                          ttl: *start_ttl
+                          timestamp: '{{ as_timestamp(now()) }}'
+                          priority: high
+                          ttl: 0
                           renotify: true
                           silent: true
                           requireInteraction: false
@@ -151,80 +125,21 @@
                             - title: Close
                               action: close_hass_restart
 
-    - wait_template: "{{ is_state('zwave.living_room_cove_light','ready') }}"
-      timeout:
-        minutes: 15
-      continue_on_timeout: true
-
-    - service: script.zwave_led_reset
-
-    # avoid error if zwave device doesn't initialize
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: zwave.living_room_cove_light
-              state: ready
-
-          sequence:
-            - service: zwave.set_config_parameter
-              data:
-                node_id: "{{ state_attr('zwave.living_room_cove_light','node_id')|int }}"
-                parameter: 16
-                size: 4
-                value: 88803920 # color: 80 , brightness 10, duration 15m, pulse
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: zwave.kitchen_potlights
-              state: ready
-
-          sequence:
-            - service: zwave.set_config_parameter
-              data:
-                node_id: "{{ state_attr('zwave.kitchen_potlights','node_id')|int }}"
-                parameter: 16
-                size: 4
-                value: 88803920 # color: 80 , brightness 10, duration 15m, pulse
-
-    # set log level to value set in UI, set to info in config so we always log startup
-    - service: logger.set_default_level
-      data:
-        level: "{{ states('input_select.log_level') }}"
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.supplemental_logging
-              state: 'on'
-
-          sequence:
-            - service: system_log.write
-              data:
-                message: "***** DEFAULT LOG LEVEL SET TO : {{ states('input_select.log_level') }} *****"
-                level: critical
-
-    # manually update speedtest sensors so they are not unknown at startup
-    - service: speedtestdotnet.speedtest
-
 #######################################################################################################################
 ## Hass - Close Restart Notification
 #######################################################################################################################
 - id: hass_close_restart_notifications
-  alias: "[Hass] Close Restart Notifications"
+  alias: '[Hass] Close Restart Notifications'
   description: Dismiss notifications on all devices.
   initial_state: true
-  mode: single
-  #max_exceeded: silent
+  max_exceeded: silent
   trigger:
-    # from_state of dismissed persistent notifcations is unknown, use state_changed event
-    - platform: event
+    - platform: event  # from_state of dismissed persistent notifcations is unknown, use state_changed event
       event_type: state_changed
       event_data:
         entity_id: persistent_notification.hass_restart
 
-    #BUG html5 closed event doesn't work if notification is in tray
-    - platform: event
+    - platform: event #BUG html5 closed event doesn't work if notification is in tray
       event_type: html5_notification.closed
       event_data:
         tag: hass_restart
@@ -238,25 +153,27 @@
       event_type: mobile_app_notification_cleared
       event_data:
         tag: hass_restart
-
-  condition:
-    #BUGFIX conditions required as workaround for unknown persistent notification state
+  condition: #BUGFIX conditions required as workaround for unknown persistent notification state
     - condition: or
       conditions:
         - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'hass_restart' }}{% endif %}"
         - "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'close_hass_restart' }}{% endif %}"
         - "{% if trigger.event is defined %}{{ trigger.event.event_type == 'state_changed' and not is_state('persistent_notification.hass_restart','notifying') }}{% endif %}"
-
   action:
-    - service: script.close_notifications
+    - service: notify.jason
       data:
-        target: mobile_app_jphone
-        tag: hass_restart
+        message: clear_notification
+        data:
+          tag: hass_restart
 
     - service: html5.dismiss
       data:
         data:
           tag: hass_restart
 
+    - service: persistent_notification.dismiss
+      data:
+        notification_id: hass_restart
+
     - delay:
-        seconds: 180 # prevent recursive triggers
+        seconds: 30 # prevent recursive triggers

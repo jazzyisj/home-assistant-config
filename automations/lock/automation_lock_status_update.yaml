@@ -1,0 +1,36 @@
+#######################################################################################################################
+## Lock - Status Update
+#######################################################################################################################
+- id: lock_status_update
+  alias: "[Lock] Status Update"
+  description: Update lock status.
+  mode: parallel
+  variables:
+    node_id: "{{ trigger.event.data['node_id']|int }}"
+    lock_name: "{{ (states.lock|selectattr('attributes.node_id','eq',node_id)|map(attribute='entity_id')|join('')).split('.')[1] }}"
+    userID: >
+      {% if trigger.event.data.parameters is defined %}
+        {% if trigger.event.data.parameters['userId'] is defined %}
+          {{ trigger.event.data.parameters['userId']|int(-1) }}
+        {% endif %}
+      {% endif %}
+    event_label: "{{ trigger.event.data['event_label'] }}"
+  trigger:
+    - platform: event
+      event_type: zwave_js_notification
+  condition: "{{ event_label.endswith('lock operation') and node_id > 0 }}"
+  action:
+    - service: input_text.set_value
+      data:
+        entity_id: "input_text.{{ lock_name }}_status"
+        value: >
+          {% set users = ['Jason','Sheri','Dawn'] %}
+          {% set user = 'Keypad' if userID|int < 1 else users[userID|int -1] %}
+          {% if event_label == 'Manual unlock operation' %} Unlocked (Manual)
+          {% elif event_label == 'Manual lock operation' %} Locked (Manual)
+          {% elif event_label == 'RF unlock operation' %} Unlocked (Hassio)
+          {% elif event_label == 'RF lock operation' %} Locked (Hassio)
+          {% elif event_label == 'Keypad unlock operation' %} Unlocked ({{ user }})
+          {% elif event_label == 'Keypad lock operation' %} Locked ({{ user }})
+          {% else %} Unknown
+          {% endif %}

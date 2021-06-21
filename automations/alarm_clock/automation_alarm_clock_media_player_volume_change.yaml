@@ -1,37 +1,51 @@
 #######################################################################################################################
 ## Alarm Clock - Media Player Volume Change
-## - media player is decimal value, input_number is percent
+# media player volume is float value, input_number is percent value
 #######################################################################################################################
 - id: alarm_clock_media_player_volume_change
   alias: "[Alarm Clock] Media Player Volume Change"
-  description: Change volume on alarm clock control when volume on media player changed.
+  description: Change alarm_clock volume control when radio media player volume changes.
   initial_state: true
   mode: queued
-  max: 5
+  max: 3
   trigger:
     - platform: state
       entity_id: !include /config/include/entities/media_player_entities_single.yaml
-
+      attribute: volume_level
   condition:
     - condition: state
       entity_id: binary_sensor.alarm_clock_active
       state: 'on'
 
     - condition: state
-      entity_id: script.alarm_clock_play
+      entity_id:
+        - input_boolean.alarm_clock_resume # prevent alarm changing volume with tts
+        - input_boolean.alarm_clock_snooze # prevent alarm changing volume when snoozed
+        - input_boolean.tts_playing
       state: 'off'
+      for: 10 # wait for alarm clock play to resume or volume set to zero
 
-    - !include /config/include/template/alarm_clock_media_player_condition.yaml
+    - "{{ is_state('sensor.alarm_clock_media_player',trigger.entity_id) }}"
 
-    # false if tts playing and alarm clock player is tts player
     - condition: template
+      alias: Trigger to_state is not off (volume will be set to 0)
+      value_template: "{{ states(trigger.entity_id)|lower not in ['off','idle','unknown','unavailable','none'] }}"
+
+    - condition: template
+      alias: Media player volume is not already equal to the alarm clock volume.
       value_template: >
-        {% set tts = states('sensor.tts_media_player') %}
-        {% if is_state('binary_sensor.tts_playing','off') %} true
+          {{ '%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float)
+                != '%0.2f'|format(states('input_number.alarm_clock_volume')|float/100) }}
+
+    - condition: template
+      alias: If TTS is playing, tts player is not alarm clock player.
+      value_template: >
+        {% if is_state('input_boolean.tts_playing','off') %} true
         {% else %}
-          {% if is_state_attr(tts,'speaker_group',true) %}
+          {% set tts = states('sensor.tts_media_player') %}
+          {% if is_state_attr(tts,'type','group') %}
             {% set found = namespace(value=0) %}
-            {% set tts_group = states.media_player|selectattr('attributes.' ~ tts.split('.')[1],'eq',true)|map(attribute='entity_id')|list %}
+            {% set tts_group = state_attr('sensor.tts_media_player','players') %}
             {% for tts_player in tts_group %}
               {% if trigger.entity_id == tts_player %}{% set found.value = 1 %}{% endif %}
             {% endfor %}
@@ -39,34 +53,8 @@
           {% else %}{{ trigger.entity_id != tts }}
           {% endif %}
         {% endif %}
-
-    # only run if the volume has changed on trigger entity
-    - condition: template
-      value_template: >
-          {{ '%0.2f'|format(state_attr(trigger.from_state.entity_id,'volume_level')|float)
-               != '%0.2f'|format(state_attr(trigger.to_state.entity_id,'volume_level')|float) }}
-
-    # only run if trigger state is not off or volume will be set to 0
-    - condition: template
-      value_template: "{{ not states(trigger.to_state.state) in ['off','unknown','unavailable','none'] }}"
-
-    # only run if the media player volume is not equal to the alarm clock volume
-    - condition: template
-      value_template: >
-          {{ '%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float)
-               != '%0.2f'|format(states('input_number.alarm_clock_volume')|float/100) }}
-
   action:
-    # turn off volume automation to prevent recursive calls
-    - service: automation.turn_off
-      entity_id: automation.alarm_clock_volume_change
-
-    # set alarm clock volume input number to trigger media player volume level
-    # media player volume float *100 format float to zero decimal for percent value
     - service: input_number.set_value
       data:
         entity_id: input_number.alarm_clock_volume
-        value: "{{ '%0.0f'|format(state_attr(trigger.entity_id,'volume_level')|float*100 ) }}"
-
-    - service: automation.turn_on
-      entity_id: automation.alarm_clock_volume_change
+        value: "{{ (state_attr(trigger.entity_id,'volume_level')|float*100)|int }}"

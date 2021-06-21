@@ -1,0 +1,105 @@
+#######################################################################################################################
+## Lock - Auto Unlock
+#######################################################################################################################
+- id: lock_auto_unlock
+  alias: "[Lock] Auto Unlock"
+  description: Automatically unlock locks.
+  mode: queued
+  variables:
+    person: >
+      {% set action = trigger.event.data['action'] %}
+      {% if action in ['disarm_alarm_jason','open_garage_jason','panic_alarm_jason'] %} jason
+      {% elif action in ['disarm_alarm_sheri','open_garage_sheri','panic_alarm_sheri'] %} sheri
+      {% endif %}
+    arrival: "{{ person in ['jason','sheri'] }}"
+    locks: &locks > #ZWAVE - device ready (state locked)
+      {{ expand(['lock.side_door_lock','lock_back_door_lock'])|selectattr('state','eq','locked')|map(attribute='entity_id')|list
+          if arrival else states.lock|selectattr('state','eq','locked')|map(attribute='entity_id')|list }}
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.smoke_detected
+        - binary_sensor.co_detected
+      to: 'on'
+
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      attribute: changed_by
+      to: JasonX #ALARMO this is the panic user
+
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      attribute: changed_by
+      to: SheriX #ALARMO this is the panic user
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disarm_alarm_jason
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disarm_alarm_sheri
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: open_garage_jason
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: open_garage_sheri
+  condition:
+    - condition: state
+      entity_id: input_boolean.lock_automation
+      state: 'on'
+
+    - "{{ locks|count > 0 }}"
+  action:
+    - wait_template: "{{ is_state('alarm_control_panel.alarmo','disarmed') if arrival else true }}"
+      timeout: 90
+      continue_on_timeout: false
+
+    - repeat:
+        while:
+          - "{{ repeat.index < 4 }}"
+          - "{{ locks|count > 0 }}"
+        sequence:
+          - variables:
+              locks: *locks
+          - choose:
+              - conditions: "{{ person == 'jason' }}"
+                sequence:
+                  - service: lock.unlock
+                    data:
+                      entity_id: "{{ locks }}"
+                      code: !secret LOCK_JASON #LOCK_USER
+
+              - conditions: "{{ person == 'sheri' }}"
+                sequence:
+                  - service: lock.unlock
+                    data:
+                      entity_id: "{{ locks }}"
+                      code: !secret LOCK_SHERI #LOCK_USER
+            default:
+              - service: lock.unlock
+                data:
+                  entity_id: "{{ locks }}"
+                  code: !secret LOCK_JASON #LOCK_USER
+
+          - wait_template: "{{ locks|count == 0 }}"
+            timeout: 30
+
+    - variables:
+        locks: *locks
+
+    - choose:
+        - conditions: "{{ locks|count > 0 }}"
+          sequence:
+            - service: input_boolean.turn_on
+              data:
+                entity_id: >
+                  {{ locks|replace('lock.','input_boolean.')|replace('_lock','_lock_jammed') }}
+

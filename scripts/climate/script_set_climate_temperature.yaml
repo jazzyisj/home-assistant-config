@@ -2,8 +2,8 @@
 ## Set Climate Temperature
 #######################################################################################################################
 set_climate_temperature:
-  alias: 'Set Climate Temperature'
-  description: 'Set thermostat to preset mode/temperatures.'
+  alias: Set Climate Temperature
+  description: Set thermostat to preset mode/temperatures.
   icon: mdi:thermostat
   mode: restart
   variables:
@@ -11,56 +11,44 @@ set_climate_temperature:
     preset_mode: "{{ state_attr('climate.upstairs_thermostat','preset_mode') }}"
     occupancy_mode: "{{ states('input_select.occupancy_mode') }}"
   sequence:
-    # turn off climate mode automation to avoid recursive calls when climate mode changes
-    - service: automation.turn_off
-      entity_id: automation.climate_settings_adjusted
+    - service: automation.turn_off # avoid recursive calls
+      entity_id: &climate_automations
+        - automation.climate_settings_adjusted
+        - automation.climate_mode_changed
 
-    # if climate is turned off set it to auto
-    - choose:
+    - choose: # if climate is off set to previous hvac mode
         - conditions:
             - condition: state
               entity_id: climate.upstairs_thermostat
               state: 'off'
-
           sequence:
             - service: climate.set_hvac_mode
               data:
                 entity_id: climate.upstairs_thermostat
-                hvac_mode: auto
+                hvac_mode: "{{ states('input_select.set_hvac_mode') }}"
 
-    # set occupancy mode override to cancel eco mode to preheat/cool house when not at home
-    # set to away (eco) mode if away, use 'Away and Eco' instead of eco
-    - service: climate.set_preset_mode
+    - service: climate.set_preset_mode # if override mode, cancel eco to preheat/cool house when not at home
       data:
         entity_id: climate.upstairs_thermostat
-        # none is Nest value for no preset
         preset_mode: "{{ 'Away and Eco' if occupancy_mode in ['Away','Vacation'] else 'none' }}"
 
-    # delay to allow climate mode changes to register
-    - delay:
-        seconds: 5
+    - delay: 5 # delay to allow climate mode changes to register (Nest slow))
 
-    # update variables to current values
     - variables:
         hvac_mode: "{{ states('climate.upstairs_thermostat') }}"
         preset_mode: "{{ state_attr('climate.upstairs_thermostat','preset_mode') }}"
 
     - service: automation.turn_on
-      entity_id: automation.climate_settings_adjusted
+      entity_id: *climate_automations
 
-    # if away/vacation test for eco else test for not eco
-    # wait for eco mode to register in away mode - sometimes delay in Nest response
-    - wait_template: >
+    - wait_template: > # away/vacation test for eco else test for not eco, wait for eco mode to register in away mode (Nest slow)
         {% if occupancy_mode in ['Away','Vacation'] %}{{ true if preset_mode == 'Away and Eco' else false }}
         {% else %}{{ true if not preset_mode == 'Away and Eco' else false }}
         {% endif %}
-      timeout:
-        seconds: 10
-      continue_on_timeout: true
+      timeout: 5
 
-    # error if temp is set in eco mode so check and quit if true
-    # don't continue if HVAC mode is eco / off / away
-    - condition: template
+    - condition: template  # error if temp is set in eco mode so check and quit if true
+      alias: HVAC mode is not eco, off or away
       value_template: >
         {% if hvac_mode == 'off' %} false
         {% elif preset_mode == 'eco' %} false
@@ -69,15 +57,8 @@ set_climate_temperature:
         {% else %} true
         {% endif %}
 
-    # delay to allow state changes to register
-    - delay:
-        seconds: 5
-
-    # set temps based on HVAC mode
-    # override occupancy mode defaults to Home occupancy mode values
-    # temp defaults to heat temp
     - service: climate.set_temperature
-      data:
+      data: # override occupancy mode defaults to Home mode values, temperature defaults to heat temp
         entity_id: climate.upstairs_thermostat
         temperature: >
           {% if hvac_mode == 'heat' %}
@@ -95,8 +76,8 @@ set_climate_temperature:
           {% else %}
             {{ states('input_number.home_heat_temperature')|int }}
           {% endif %}
-        # set temps for auto mode - temps can't be within 3 degress of eachother!
-        target_temp_high: >
+
+        target_temp_high: > # set temps for auto mode - temps can't be within 3 degress of eachother!
           {% if (states('input_number.home_cool_temperature')|int) > (states('input_number.home_heat_temperature')|int) %}
             {% if occupancy_mode == 'Home' %}{{ states('input_number.home_cool_temperature')|int }}
             {% elif occupancy_mode == 'Night' %}{{ states('input_number.night_cool_temperature')|int }}

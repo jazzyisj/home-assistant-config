@@ -31,6 +31,10 @@ homeassistant:
       friendly_name: RPI Power
       icon: mdi:raspberry-pi
       category: system
+    alert.pihole_disconnected:
+      friendly_name: Pi-Hole
+      icon: mdi:pi-hole
+      category: system
 
     sensor.cpu_temperature:
       device_class: temperature
@@ -42,13 +46,16 @@ homeassistant:
       device_class: connectivity
       icon: mdi:wan
 
+input_boolean:
+  system_automation:
+    name: System Automation
+    icon: mdi:plus-circle-multiple-outline
 
-speedtestdotnet:
+  system_alerts:
+    name: System Alerts
+    icon: mdi:plus-circle-multiple-outline
 
 input_number:
-#######################################################################################################################
-## System History Hours
-#######################################################################################################################
   system_history_hours:
     name: System History Hours
     icon: mdi:progress-clock
@@ -57,39 +64,28 @@ input_number:
     step: 1
     unit_of_measurement: hours
 
-#######################################################################################################################
-## System - Known Network Devices
-#######################################################################################################################
   known_network_devices:
     name: nown Network Devices
     min: 0
     max: 100
 
-input_boolean:
-  system_automation:
-    name: System Automation
-    icon: mdi:plus-circle-multiple-outline
-    #OPTION initial: true
-
-sensor:
-#######################################################################################################################
-## DNS IP Sensor
-#######################################################################################################################
-  - platform: dnsip
-
-#######################################################################################################################
-## Rpi CPU Temperature
-#######################################################################################################################
-  - platform: command_line
-    name: CPU Temperature
-    command: "cat /sys/class/thermal/thermal_zone0/temp"
-    value_template: "{{ '%0.1f'|format(value|float|multiply(0.001)) }}"
-    unit_of_measurement: 'C'
+binary_sensor:
+  - platform: ping # https://www.home-assistant.io/components/binary_sensor.ping/
+    name: WAN Connected
+    host: 8.8.8.8
+    count: 2
     scan_interval: 300
 
-#######################################################################################################################
-## System Monitor
-#######################################################################################################################
+sensor:
+  - platform: dnsip
+
+  - platform: command_line
+    name: CPU Temperature
+    command: 'cat /sys/class/thermal/thermal_zone0/temp'
+    unit_of_measurement: 'C'
+    value_template: "{{ '%0.1f'|format(value|multiply(0.001)) }}"
+    scan_interval: 60
+
   - platform: systemmonitor
     resources:
       - type: last_boot
@@ -116,156 +112,7 @@ sensor:
       - type: packets_out
         arg: eth0
 
-  - platform: template
-    sensors:
-#######################################################################################################################
-## Last Boot Date & Time
-## display last boot date/time in friendly format
-#######################################################################################################################
-      last_boot_date_time:
-        friendly_name: Last Boot Date
-        unique_id: last_boot_date_time
-        icon_template: mdi:clock-start
-        value_template: >
-          {% set date = as_timestamp(states('sensor.last_boot'))|timestamp_custom('%d') %}
-          {% set date = '{:01}'.format(date|int) %}
-          {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
-          {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
-          {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
-          {% else %}{% set date = date ~ 'th' %}
-          {% endif %}
-          {{ as_timestamp(states('sensor.last_boot'))|timestamp_custom('%H:%M on %a') }} {{ date }} {{ as_timestamp(states('sensor.last_boot'))|timestamp_custom('%b %Y',true) }}
-
-#######################################################################################################################
-## Rpi Uptime Sensor
-## display system uptime in friendly format
-#######################################################################################################################
-      rpi_uptime:
-        friendly_name: RPi Uptime
-        unique_id: rpi_uptime
-        icon_template: mdi:clock-start
-        value_template: >
-          {% set up_time = as_timestamp(now()) - as_timestamp(states('sensor.last_boot')) %}
-          {% set minutes = (up_time // 60)|int %}
-          {% set hours = (minutes // 60) %}
-          {% set days = (hours // 24) %}
-          {% set weeks = (days // 7) %}
-          {% set minutes = (minutes % 60) %}
-          {% set hours =  (hours % 24) %}
-          {% set days = (days % 7) %}
-          {% macro phrase(value, name) %}
-            {%- set value = value %}
-            {%- set end = 's' if value > 1 else '' %}
-            {{- '{} {}{}'.format(value, name, end) if value|int > 0 else '' }}
-          {%- endmacro %}
-          {% set text = [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hr'), phrase(minutes, 'min') ]|select('!=','')|list|join(', ') %}
-          {% set last_comma = text.rfind(',') %}
-          {% if last_comma != -1 %}
-            {% set text = text[:last_comma] + ' and' + text[last_comma + 1:] %}
-          {% endif %}
-          {{ text }}
-
-binary_sensor:
-#######################################################################################################################
-## WAN Connected  https://www.home-assistant.io/components/binary_sensor.ping/
-#######################################################################################################################
-  - platform: ping
-    name: WAN Connected
-    host: 8.8.8.8
-    count: 2
-    scan_interval: 300
-
-  - platform: template
-    sensors:
-#######################################################################################################################
-## WAN Connected Alert
-#######################################################################################################################
-      wan_connected_alert:
-        friendly_name: Internet
-        unique_id: wan_connected_alert
-        icon_template: mdi:wan
-        value_template: "{{ is_state('binary_sensor.wan_connected','off') }}"
-
-######################################################################################################################
-## RPI Power
-######################################################################################################################
-      rpi_power_alert:
-        unique_id: rpi_power_alert
-        value_template: "(( is_state('binary_sensor.rpi_power_status','on') and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## CPU Temperature
-#######################################################################################################################
-      cpu_temperature_alert:
-        unique_id: cpu_temperature_alert
-        delay_on:
-          minutes: 10
-        value_template: "{{ states('sensor.cpu_temperature')|int > 65 and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## Processor Use
-#######################################################################################################################
-      processor_use_alert:
-        unique_id: processor_use_alert
-        delay_on:
-          minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
-        value_template: "{{ states('sensor.processor_use')|int > 60 and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## Memory Use
-#######################################################################################################################
-      memory_use_alert:
-        unique_id: memory_use_alert
-        delay_on:
-          minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
-        value_template: "{{ states('sensor.memory_use_percent')|int > 75 and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## Swap File Use
-#######################################################################################################################
-      swap_use_alert:
-        unique_id: swap_use_alert
-        delay_on:
-          minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
-        value_template: "{{ states('sensor.swap_use_percent')|int > 80 and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## Disk Use
-#######################################################################################################################
-      disk_use_alert:
-        unique_id: disk_use_alert
-        value_template: "{{ states('sensor.disk_use_percent_home')|int > 60 and is_state('binary_sensor.alerts_enabled','on') }}"
-        
 alert:
-#######################################################################################################################
-## Alert - Bluetooth Disconnected
-#######################################################################################################################
-  bluetooth_disabled:
-    name: Bluetooth Disconnected
-    title: Bluetooth Disconnected Alert
-    message: Home Assistant Bluetooth is disconnected.
-    entity_id: binary_sensor.bluetooth_alert
-    state: 'on'
-    repeat: 3600
-    notifiers: mobile_app_jphone
-    data:
-      tag: bluetooth_disabled
-      group: System
-      channel: Alert
-      importance: max
-      clickAction: /lovelace/system
-      color: !secret WARNING_COLOR
-      icon_url: !secret OFFLINE_ICON
-      image: !secret OFFLINE_IMAGE
-      actions:
-        - action: reboot_server
-          title: Reboot
-        - action: pause_bluetooth_disabled
-          title: Pause
-
-#######################################################################################################################
-## Alert - Swap Use
-#######################################################################################################################
   swap_use:
     name: Swap Use
     title: Swap File Use Alert
@@ -273,12 +120,14 @@ alert:
     entity_id: binary_sensor.swap_use_alert
     state: 'on'
     repeat: 3600
-    notifiers: mobile_app_jphone
+    notifiers: jason
     data:
       tag: swap_use
       group: System
       channel: Alert
       importance: max
+      ttl: 0
+      priority: high
       clickAction: /lovelace/system
       color: !secret WARNING_COLOR
       icon_url: !secret MEMORY_ICON
@@ -287,59 +136,31 @@ alert:
         - action: reboot_server
           title: Reboot
         - action: pause_swap_use
-          title: Pause
+          title: Pause Alert
 
-#######################################################################################################################
-## Alert - RPi Power
-#######################################################################################################################
-  rpi_power:
-    name: RPi Power
-    title: RPi Power Alert
-    message: There is an issue with the Hassio RPi power source.
-    entity_id: binary_sensor.rpi_power_status_alert
-    state: 'on'
-    repeat: 30
-    notifiers: mobile_app_jphone
-    data:
-      tag: rpi_power
-      group: System
-      channel: Alert
-      importance: max
-      clickAction: /lovelace/system
-      color: !secret WARNING_COLOR
-      icon_url: !secret PROCESSOR_ICON
-      image: !secret PROCESSOR_IMAGE
-      actions:
-        - action: pause_rpi_power
-          title: Pause
-
-#######################################################################################################################
-## Alert - Processor Use
-#######################################################################################################################
   processor_use:
     name: Processor Use
     title: Processor Use Alert
-    message: "Processor Use - {{ states('sensor.processor_use') }}%"
+    message: "Processor Use - {{ states('sensor.processor_use_percent') }}%"
     entity_id: binary_sensor.processor_use_alert
     state: 'on'
     repeat: 60
-    notifiers: mobile_app_jphone
+    notifiers: jason
     data:
       tag: processor_use
       group: System
       channel: Alert
       importance: max
+      ttl: 0
+      priority: high
       clickAction: /lovelace/system
       color: !secret WARNING_COLOR
       icon_url: !secret PROCESSOR_ICON
       image: !secret PROCESSOR_IMAGE
       actions:
         - action: pause_processor_use
-          title: Pause
+          title: Pause Alert
 
-#######################################################################################################################
-## Alert - Memory Use
-#######################################################################################################################
   memory_use:
     name: Memory Use
     title: Memory Use Alert
@@ -347,12 +168,14 @@ alert:
     entity_id: binary_sensor.memory_use_alert
     state: 'on'
     repeat: 60
-    notifiers: mobile_app_jphone
+    notifiers: jason
     data:
       tag: memory_use
       group: System
       channel: Alert
       importance: max
+      ttl: 0
+      priority: high
       clickAction: /lovelace/system
       color: !secret WARNING_COLOR
       icon_url: !secret MEMORY_ICON
@@ -361,11 +184,8 @@ alert:
         - action: reboot_server
           title: Reboot
         - action: pause_memory_use
-          title: Pause
+          title: Pause Alert
 
-#######################################################################################################################
-## Alert - Disk Use
-#######################################################################################################################
   disk_use:
     name: Disk Use
     title: Disk Use Alert
@@ -373,55 +193,22 @@ alert:
     entity_id: binary_sensor.disk_use_alert
     state: 'on'
     repeat: 1440
-    notifiers: mobile_app_jphone
+    notifiers: jason
     data:
       tag: disk_use
       group: System
       channel: Alert
       importance: max
+      ttl: 0
+      priority: high
       clickAction: /lovelace/system
       color: !secret WARNING_COLOR
       icon_url: !secret DISK_ICON
       image: !secret DISK_IMAGE
       actions:
         - action: pause_disk_use
-          title: Pause
+          title: Pause Alert
 
-#######################################################################################################################
-## Alert - Device Offline
-#######################################################################################################################
-  device_offline:
-    name: Device Offline
-    title: Device Offline Alert
-    message: >
-      {%- if states.sensor.offline_devices.attributes.entities is defined -%}
-        {%- if states('sensor.offline_devices')|int == 0 -%}
-          No offline devices.
-        {%- else -%}
-          {%- for device in state_attr('sensor.offline_devices','entities') -%}
-          - {{ state_attr(device,'friendly_name')}}{%- if not loop.last -%}<bt>{%- endif -%}
-          {%- endfor -%}
-        {%- endif -%}
-      {%- endif -%}
-    entity_id: binary_sensor.device_offline_alert
-    state: 'on'
-    repeat: 1440
-    notifiers: mobile_app_jphone
-    data:
-      tag: device_offline
-      group: System
-      channel: Alert
-      importance: max
-      clickAction: /lovelace/system
-      color: !secret WARNING_COLOR
-      icon_url: !secret OFFLINE_ICON
-      actions:
-        - action: pause_device_offline
-          title: Pause
-
-#######################################################################################################################
-## Alert - CPU Temperature
-#######################################################################################################################
   cpu_temperature:
     name: CPU Temperature
     title: CPU Temperature Alert
@@ -429,12 +216,14 @@ alert:
     entity_id: binary_sensor.cpu_temperature_alert
     state: 'on'
     repeat: 60
-    notifiers: mobile_app_jphone
+    notifiers: jason
     data:
       tag: cpu_temperature
       group: System
       channel: Alert
       importance: max
+      ttl: 0
+      priority: high
       clickAction: /lovelace/system
       color: !secret WARNING_COLOR
       icon_url: !secret PROCESSOR_ICON
@@ -443,4 +232,31 @@ alert:
         - action: reboot_server
           title: Reboot
         - action: pause_cpu_temperature
-          title: Pause
+          title: Pause Alert
+
+  pihole_disconnected:
+    name: PiHole Disconnected
+    title: PiHole Disconnected
+    message: "PiHole is disabled or disconnected."
+    entity_id: binary_sensor.pihole_disconnected_alert
+    state: 'on'
+    repeat: 60
+    notifiers: jason
+    data:
+      tag: pihole_disconnected
+      group: System
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      clickAction: /lovelace/system
+      color: !secret WARNING_COLOR
+      icon_url: !secret PROCESSOR_ICON
+      image: !secret PROCESSOR_IMAGE
+      actions:
+        - action: URI
+          title: PiHole Admin
+          uri: http://http://pi.hole/admin/index.php
+        - action: URI
+          title: Entity Test
+          entityId: sensor.pi_hole_ads_percentage_blocked_today

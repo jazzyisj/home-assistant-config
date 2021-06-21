@@ -1,0 +1,213 @@
+#######################################################################################################################
+## Jason Medication Package
+#######################################################################################################################
+input_boolean:
+  jason_medication_enabled:
+    name: Jason Medication Enabled
+    icon: mdi:pill
+
+  jason_medication_active:
+    name: Jason Medication Active
+    icon: mdi:pill
+
+input_datetime:
+  jason_medication_days:
+    name: Jason Mediation Days
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  jason_medication_afternoons:
+    name: Jason Mediation Afternoons
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  jason_medication_weekends:
+    name: Jason Mediation Weekends
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+input_number:
+  jason_medication_day_interval:
+    name: Jason Mediation Day Interval
+    icon: mdi:calendar-range
+    unit_of_measurement: days
+    min: 1
+    max: 7
+    step: 1
+
+automation:
+  #######################################################################################################################
+  ## Jason Medication - Turn Off
+  #######################################################################################################################
+  - id: jason_medication_turn_off
+    alias: "[Jason Medication] Turn Off"
+    description: Turn off active boolean.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.jason_medication_active
+        to: "on"
+
+      - platform: state
+        entity_id: input_boolean.jason_medication_enabled
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: jason_medication_done
+
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.jason_medication_enabled
+            state: "off"
+
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+
+          - condition: template
+            value_template: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'jason_medication_done' }}{% endif %}"
+
+    action:
+      - service: input_boolean.turn_off
+        entity_id: input_boolean.jason_medication_active
+
+  #######################################################################################################################
+  ## Jason Medication - Activate Reminder
+  #######################################################################################################################
+  - id: jason_medication_activate_reminder
+    alias: "[Jason Medication] Activate Reminder"
+    description: Turn on jason mealtime active boolean with shift dependent time trigger.
+    initial_state: true
+    trigger:
+      - platform: template
+        value_template: >
+          {% set time = states('sensor.time') %}
+          {% set days = is_state('sensor.current_shift','Days') and is_state('binary_sensor.work_today','on') %}
+          {% set afts = is_state('sensor.current_shift','Afternoons') and is_state('binary_sensor.work_today','on') %}
+          {% set wknd = is_state('binary_sensor.work_today','off') or states('sensor.current_shift') in ['Off','unknown','unknown','none'] %}
+
+          {{ (days and time == states('input_datetime.jason_medication_days')[0:5])
+            or (afts and time == states('input_datetime.jason_medication_afternoons')[0:5])
+            or (wknd and time == states('input_datetime.jason_medication_weekends')[0:5]) }}
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.jason_medication_enabled
+        state: "on"
+
+      - condition: template # only run every specified days
+        value_template: >
+          {% set last_run = state_attr('automation.jason_medication_activate_reminder','last_triggered') %}
+          {{ last_run is none or (now().date() - last_run.date()).days >= states('input_number.jason_medication_day_interval')|int }}
+
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+
+    action:
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.jason_medication_active
+
+  #######################################################################################################################
+  ## Jason Medication - Alert
+  #######################################################################################################################
+  - id: jason_medication_alert
+    alias: "[Jason Medication] Alert"
+    description: Sent alert every 15 minutes until jason active turns off.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.jason_medication_active
+        to: "on"
+        for:
+          seconds: 5 # allow boolean to turn back off if disabled
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.jason_medication_enabled
+        state: "on"
+
+    action:
+      - repeat:
+          sequence:
+            - service: script.tts_play
+              data:
+                play_message: Attention!  Jason, it's time to do some drugs.  Take your damn pills.
+                quiet_play: true
+                save_message: true
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.schedule_alerts
+                      state: "on"
+
+                  sequence:
+                    - service: notify.jason
+                      data:
+                        title: Jason Medication
+                        message: It's time for Jason's medication!
+                        data:
+                          tag: jason_medication
+                          group: General
+                          channel: General
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          persistent: true
+                          clickAction: /lovelace/schedule
+                          color: !secret NOTIFY_COLOR
+                          icon_url: !secret JASON_ICON
+                          image: !secret JASON_IMAGE
+                          actions:
+                            - action: jason_medication_done
+                              title: Medication Done
+                              uri: /lovelace/schedule
+
+            - wait_template: "{{ is_state('input_boolean.jason_medication_active','off') }}"
+              timeout: # wait for alert to turned off/dismissed
+                minutes: 15
+
+          until:
+            - condition: state
+              entity_id: input_boolean.jason_medication_active
+              state: "off"
+
+  #######################################################################################################################
+  ## Jason Medication - Close Notifications
+  #######################################################################################################################
+  - id: jason_medication_close_notifications
+    alias: "[Jason Medication] Close Notifications"
+    description: Dismiss notifications on all devices.
+    initial_state: true
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.jason_medication_active
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: jason_medication
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: jason_medication_done
+
+    action:
+      - service: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: jason_medication

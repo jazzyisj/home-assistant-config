@@ -1,11 +1,16 @@
 #######################################################################################################################
 ## Media Player - Auto Off
 #######################################################################################################################
-- id: media_player_auto_off
-  alias: "[Media Player] Auto Off"
-  description: "Automatically stop and turn off media players."
-  initial_state: true
+- id: media_player_auto_off #OCC
+  alias: '[Media Player] Auto Off'
+  description: Automatically stop and turn off media players.
   mode: restart
+  variables:
+    players: > # don't turn off tv's when alarm triggered, they switch to security cams
+      {{ expand(state_attr('sensor.media_players_single','players'))
+          |rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list
+            if is_state('alarm_control_panel.alarm','triggered')
+              else expand(state_attr('sensor.media_players_single','players'))|map(attribute='entity_id')|list }}
   trigger:
     - platform: state
       entity_id: input_select.occupancy_mode
@@ -13,52 +18,32 @@
         - Night
         - Away
         - Vacation
+      for:
+        minutes: 2 # wait until alarm sets and tts done so no auto resume
 
     - platform: state
-      entity_id:
-        - binary_sensor.emergency_active
-        - input_boolean.alarm_triggered
-      to: 'on'
+      entity_id: alarm_control_panel.alarm
+      to: triggered
 
-  # if triggered by occupancy mode only run if presence, media_player automation enabled, always run for alerts, smoke etc.
-  condition: >
-    {{ (is_state('input_boolean.presence_automation','on') and is_state('input_boolean.media_player_automation','on'))
-        if trigger.entity_id == 'input_select.occupancy_mode' else true }}
+  condition:
+    - condition: state
+      entity_id: input_boolean.media_player_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
 
   action:
-    # stop any playing media players
-    - choose:
-        - conditions: "{{ expand('group.media_players')|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list|count > 0 }}"
+    - choose: # stop players playing (req for browser players)
+        - conditions: "{{ expand(players)|selectattr('state','in',['playing','paused'])|list|count > 0 }}"
           sequence:
             - service: media_player.media_stop
               data:
-                entity_id: "{{ expand('group.media_players')|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|join(',') }}"
+                entity_id: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list }}"
 
-    - condition: state
-      entity_id:
-        - binary_sensor.emergency_active
-        - input_boolean.alarm_triggered
-      state: 'off'
-
-    - service: media_player.turn_off
-      entity_id: all
-
-    # only run if assistant relay addon running
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: sensor.assistant_relay_status
-              state: 'on'
-
+    - choose: # turn off players not off
+        - conditions: "{{ expand(players)|selectattr('state','in',['on','playing','paused','idle'])|list|count > 0 }}"
           sequence:
-            # delay turning off TV if night mode #OPTION
-            - choose:
-                - conditions: "{{ trigger.entity_id == 'input_select.occupancy_mode' and is_state('input_select.occupancy_mode','Night') }}"
-                  sequence:
-                    - delay:
-                        minutes: 60
-
-            # turn of livingroom TV with assistant relay
-            - service: rest_command.assistant_relay
+            - service: media_player.turn_off
               data:
-                command: "Turn off the Living Room TV"
+                entity_id: "{{ expand(players)|selectattr('state','in',['on','playing','paused','idle'])|map(attribute='entity_id')|list }}"

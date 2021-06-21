@@ -5,188 +5,134 @@ garage_door_open:
   alias: Garage Door Open
   description: Open the garage door.
   icon: mdi:garage
-  mode: single
+  mode: restart
   fields:
-    override:
-      description: Allow garage door open override.
-      example: true
-    mobile:
-      description: Script called by this mobile device.
-      example: jphone
+    person:
+      description: Script called by this person.
+      example: jason
   sequence:
     - choose:
         - conditions:
             - condition: state
-              entity_id: alarm_control_panel.house
-              state: disarmed
-
+              entity_id: binary_sensor.myq_connected
+              state: 'off'
           sequence:
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: binary_sensor.someone_home
-                      state: 'off'
-
-                    - condition: template
-                      value_template: "{{ mobile == empty }}"
-
-                  sequence:
-                    - service: script.tts_play
-                      data:
-                        play_message: "The garage door cannot be opened unless somebody is home."
-                        min_volume: 50
-                        quiet_play: true
-                        ignore_away: true
-                        save_message: true
-
-              default:
-                - service: cover.open_cover
-                  entity_id: cover.garage_door_opener
-
-      default:
-        - choose:
-            - conditions: "{{ override }}"
-              sequence:
-                - choose:
-                    - conditions: "{{ is_state('alarm_control_panel.house','disarmed') }}"
-                      sequence:
-                        - service: cover.open_cover
-                          entity_id: cover.garage_door_opener
-
-                  default:
-                    - service: script.disarm_alarm_auto
-                      data:
-                        override: true
-
-                    - wait_template: "{{ is_state('alarm_control_panel.house','disarmed') }}"
-                      timeout:
-                        minutes: 2
-                      continue_on_timeout: true
-
-                    - choose:
-                        - conditions: "{{ is_state('alarm_control_panel.house','disarmed') }}"
-                          sequence:
-                            - service: cover.open_cover
-                              entity_id: cover.garage_door_opener
-
-                      default:
-                        - service: script.zwave_led_notification
-                          data:
-                            trigger: garage_warning
-
-                        - service: script.tts_play
-                          data:
-                            play_message: "The house alarm did not disarm.  The garage door cannot be opened."
-                            min_volume: 50
-                            quiet_play: true
-                            ignore_away: true
-                            save_message: true
-
-          default:
-            - service: script.zwave_led_notification
-              data:
-                trigger: garage_warning
-
-            - choose:
-                - conditions: "{{ mobile in ['jphone','sphone'] }}"
-                  sequence:
-                    - service: notify.mobile #NOTIFY "notify.mobile_app_{{ mobile }}"
-                      data:
-                        title: Garage Door - House Alarm
-                        message: The garage cannot be opened because house alarm was not disarmed.
-                        data:
-                          tag: garage_alarm_warning
-                          group: Alarm
-                          channel: General
-                          importance: max
-                          timeout: 300
-                          clickAction: /lovelace/alarm
-                          color: !secret NOTIFY_COLOR
-                          icon_url: !secret HASSIO_ICON
+            - service: input_boolean.turn_on
+              entity_id: input_boolean.garage_door_switch_alert
 
             - service: script.tts_play
               data:
-                play_message: "The garage door cannot be opened until the house alarm has been disarmed."
+                play_message: My Q is not connected.  The garage door cannot be opened.
                 min_volume: 50
                 quiet_play: true
                 ignore_away: true
                 save_message: true
 
-            - wait_template: "{{ is_state('alarm_control_panel.house','disarmed') }}"
+            - choose:
+                - conditions: "{{ person in ['jason','sheri'] }}"
+                  sequence:
+                    - service: "notify.{{ person }}"
+                      data:
+                        title: Garage Door Alert
+                        message: MyQ is not connected.  The garage door cannot be opened.
+                        data:
+                          tag: garage_door_alert
+                          group: Alert
+                          channel: Alert
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          timeout: 600
+                          color: !secret NOTIFY_COLOR
+                          icon_url: !secret HASSIO_ICON
+
+        - conditions:
+            - condition: not
+              conditions:
+                - condition: state
+                  entity_id: alarm_control_panel.alarmo
+                  state: disarmed
+          sequence:
+            - service: input_boolean.turn_on
+              entity_id: input_boolean.garage_door_switch_alert
+
+            - service: script.tts_play
+              data:
+                play_message: Disarm the alarm to open the garage door.
+                min_volume: 50
+                quiet_play: true
+                ignore_away: true
+                save_message: true
+
+            - wait_template: "{{ is_state('alarm_control_panel.alarmo','disarmed') }}"
               timeout:
-                minutes: 1
-              continue_on_timeout: true
+                seconds: 30
 
             - choose:
-                - conditions: "{{ is_state('alarm_control_panel.house','disarmed') }}"
+                - conditions: "{{ wait.completed }}"
                   sequence:
                     - service: cover.open_cover
                       entity_id: cover.garage_door_opener
-
               default:
-                - choose:
-                    - conditions: "{{ mobile in ['jphone','sphone'] }}"
-                      sequence:
-                        - service: notify.mobile #NOTIFY "notify.mobile_app_{{ mobile }}"
-                          data:
-                            title: Garage Door - House Alarm
-                            message: The garage cannot be opened.
-                            data:
-                              tag: garage_alarm_warning
-                              group: Alarm
-                              channel: General
-                              importance: max
-                              timeout: 300
-                              clickAction: /lovelace/alarm
-                              color: !secret NOTIFY_COLOR
-                              icon_url: !secret HASSIO_ICON
-
                 - service: script.tts_play
                   data:
-                    play_message: "The house alarm did not disarm.  The garage door cannot be opened."
+                    play_message: The house alarm did not disarm.  The garage door cannot be opened.
                     min_volume: 50
                     quiet_play: true
                     ignore_away: true
                     save_message: true
 
+                - choose:
+                    - conditions: "{{ person in ['jason','sheri'] }}"
+                      sequence:
+                        - service: "notify.{{ person }}"
+                          data:
+                            title: Garage Door Alert
+                            message: The house alarm did not disarm.  The garage door cannot be opened.
+                            data:
+                              tag: garage_door_alert
+                              group: Alert
+                              channel: Alert
+                              importance: max
+                              ttl: 0
+                              priority: high
+                              timeout: 600
+                              color: !secret NOTIFY_COLOR
+                              icon_url: !secret HASSIO_ICON
+                              actions:
+                                - title: Disarm
+                                  action: "disarm_alarm_{{ person }}"
+                                - title: Garage
+                                  action: "open_garage_{{ person }}"
+      default:
+        - service: cover.open_cover
+          entity_id: cover.garage_door_opener
+
 ##################################################################################################
-# Garage Door Open Switch
+# Garage Door Toggle
 ##################################################################################################
-garage_door_open_switch:
-  alias: Garage Door Open Switch
-  description: Open the garage door via switch zwave scene.
+garage_door_toggle:
+  alias: Garage Door Toggle
+  description: Toggle garage door.
   icon: mdi:garage
-  mode: single
   sequence:
     - choose:
-      - conditions:
-          - condition: state
-            entity_id: binary_sensor.myq_connected
-            state: 'off'
+        - conditions:
+            - condition: state
+              entity_id: cover.garage_door_opener
+              state:
+                - closed
+                - closing
+                - unknown # to trigger tts warning
+                - unavailable # to trigger tts warning
 
-        sequence:
-          - service: script.zwave_led_notification
-            data:
-              trigger: garage_offline
-
-          - service: script.tts_play
-            data:
-              play_message: "MY Q is not connected.  The garage door cannot be opened."
-              min_volume: 50
-              quiet_play: true
-              ignore_away: true
-              save_message: true
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.garage_door_open
+                variables:
+                  person: switch
 
       default:
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: binary_sensor.garage_door_open
-                  state: 'off'
-
-              sequence:
-                - service: script.garage_door_open
-
-          default:
-            - service: cover.close_cover
-              entity_id: cover.garage_door_opener
+        - service: cover.close_cover
+          entity_id: cover.garage_door_opener

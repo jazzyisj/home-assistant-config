@@ -5,18 +5,36 @@
   alias: "[Alarm Clock] Play Failed"
   description: Play announcement, reset alarm clock when failed.
   initial_state: true
-  mode: single
+  max_exceeded: silent
   trigger:
     - platform: state
       entity_id: input_boolean.alarm_clock_failed
       to: 'on'
 
+    - platform: state
+      entity_id: sensor.alarm_clock_status
+      to: failed
+      for: 15 # avoid triggering on momentary state changes
   condition:
     - condition: state
       entity_id: binary_sensor.alarm_clock_active
       state: 'on'
-
   action:
+    - choose:
+        - conditions: "{{ is_state('input_boolean.alarm_clock_failed','off') }}"
+          sequence:
+            - service: automation.turn_off
+              data:
+                entity_id: automation.alarm_clock_play_failed
+                stop_actions: false
+
+            - service: input_boolean.turn_on
+              data:
+                entity_id: input_boolean.alarm_clock_failed
+
+            - service: automation.turn_on
+              entity_id: automation.alarm_clock_play_failed
+
     - service: script.turn_on
       data:
         entity_id: script.tts_play
@@ -26,41 +44,37 @@
             A scheduled alarm clock has failed to play.
             Again, a scheduled alarm clock has failed to play.
           quiet_play: true
-          min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'speaker_group',true) else 70 }}"
+          min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 70 }}"
 
     - service: script.alarm_clock_stop
 
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: binary_sensor.alerts_enabled
-              state: 'on'
+#######################################################################################################################
+## Alarm Clock - Play Failed Reset
+#######################################################################################################################
+- id: alarm_clock_play_failed_reset
+  alias: "[Alarm Clock] Play Failed Reset"
+  description: Reset alarm_clock play failed.
+  initial_state: true
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: alarm_clock_failed_reset
 
-          sequence:
-            # delay to allow occupant to reset radio before notification
-            - delay:
-                minutes: 5
-
-            - condition: state
-              entity_id: input_boolean.alarm_clock_failed
-              state: 'on'
-
-            - service: notify.mobile_app_jphone
-              data:
-                title: Alarm Clock Error
-                message: The alarm clock has failed to play!
-                data:
-                  tag: alarm_clock_play_failed
-                  group: General
-                  channel: Alert
-                  importance: max
-                  clickAction: /lovelace/schedule
-                  color: !secret CRITICAL_COLOR
-                  icon_url: !secret ALERT_ICON
-
-    # delay before resetting alarm status
-    - delay:
-        hours: 1
-
-    - service: input_boolean.turn_off
+    - platform: state
       entity_id: input_boolean.alarm_clock_failed
+      to: 'on'
+      for:
+        hours: 8
+
+    - platform: state
+      entity_id: sensor.alarm_clock_status
+      to: playing
+  condition:
+    condition: state
+    entity_id: input_boolean.alarm_clock_failed
+    state: 'on'
+  action:
+    - service: input_boolean.turn_off
+      data:
+        entity_id: input_boolean.alarm_clock_failed

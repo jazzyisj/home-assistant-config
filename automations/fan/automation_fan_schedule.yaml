@@ -1,0 +1,140 @@
+#######################################################################################################################
+## House Fan Schedule - On
+#######################################################################################################################
+- id: fan_schedule_on
+  alias: "[Fan] Schedule On"
+  description: Start fan schedule when turned on.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: input_boolean.fan_schedule
+      to: 'on'
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.fan_schedule
+  condition:
+    - condition: state
+      entity_id: input_boolean.fan_schedule
+      state: 'on'
+  action:
+    - choose:
+        - conditions: "{{ trigger.entity_id == 'input_boolean.fan_schedule' }}"
+          sequence:
+            - service: browser_mod.toast
+              data:
+                duration: 30000
+                message: "Scheduled climate fans have been turned on."
+
+    - service: timer.start
+      data:
+        entity_id: timer.fan_schedule
+        duration:
+          minutes: "{{ states('input_number.fan_schedule_interval')|int }}"
+
+    - choose:
+        - conditions:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: climate.upstairs_thermostat
+                attribute: fan_mode
+                state: 'on'
+          sequence:
+            - service: climate.set_fan_mode
+              data:
+                entity_id: climate.upstairs_thermostat
+                fan_mode: 'on'
+
+    - delay: # delay for fan schedule duration
+        minutes: "{{ states('input_number.fan_schedule_duration')|int }}"
+
+    - condition: template # if interval == duration don't turn fan off (continuous operation)
+      value_template: "{{ not states('input_number.fan_schedule_interval')|int == states('input_number.fan_schedule_duration')|int }}"
+
+    - service: climate.set_fan_mode # put thermostat fan back into auto mode (turn off)
+      data:
+        entity_id: climate.upstairs_thermostat
+        fan_mode: 'auto'
+
+#######################################################################################################################
+## Fan Schedule - Off
+#######################################################################################################################
+- id: fan_schedule_off
+  alias: "[Fan] Schedule Off"
+  description: Stop fan schedule when turned off.
+  initial_state: true
+  trigger:
+    - platform: state
+      entity_id: input_boolean.fan_schedule
+      to: 'off'
+
+    - platform: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.fan_schedule
+  condition: "{{ trigger.entity_id == 'input_boolean.fan_schedule' or is_state('input_boolean.fan_schedule','on') }}"
+  action:
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.fan_schedule
+
+    - choose:
+        - conditions: "{{ is_state_attr('climate.upstairs_thermostat','fan_mode','on') }}"
+          sequence:
+            - service: climate.set_fan_mode
+              data:
+                entity_id: climate.upstairs_thermostat
+                fan_mode: 'auto'
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: timer.fan_schedule
+              state: active
+          sequence:
+            - service: timer.cancel
+              entity_id: timer.fan_schedule
+
+    - service: browser_mod.toast
+      data:
+        duration: 30000
+        message: "Scheduled fans have been turned off."
+
+#######################################################################################################################
+## Climate Fan Schedule - Adjusted
+#######################################################################################################################
+- id: fan_schedule_adjusted
+  alias: "[House Climate Fan Schedule] Adjusted"
+  description: Update fan schedule when interval changed.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - input_number.fan_schedule_interval
+        - input_number.fan_schedule_duration
+  action:
+    - choose: # if duration > interval set duration = interval
+        - conditions: "{{ states('input_number.fan_schedule_duration')|int > states('input_number.fan_schedule_interval')|int }}"
+          sequence:
+            - service: input_number.set_value # adjust the duration value to match the interval value
+              data:
+                entity_id: input_number.fan_schedule_duration
+                value: "{{ states('input_number.fan_schedule_interval')|int }}"
+
+    - condition: state
+      entity_id: input_boolean.fan_schedule
+      state: 'on'
+
+    - service: timer.start # restart the climate fan interval timer
+      data:
+        entity_id: timer.fan_schedule
+        duration:
+          seconds: "{{ states('input_number.fan_schedule_duration')|int*60 + 5 }}"
+
+    - service: browser_mod.toast
+      data:
+        duration: 30000
+        message: "Scheduled fan timers have been reset."

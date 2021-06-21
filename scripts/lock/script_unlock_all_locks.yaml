@@ -1,0 +1,56 @@
+#######################################################################################################################
+## UnLock All Locks
+#######################################################################################################################
+unlock_all_locks:
+  alias: Unlock All Locks
+  description: Unlock all door locks.
+  icon: mdi:lock
+  mode: restart
+  fields:
+    override:
+      description: Override alarm.
+      example: 'true'
+  sequence:
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - "{{ override|default(false) }}"
+                - condition: state
+                  entity_id: alarm_control_panel.alarmo
+                  state: disarmed
+          sequence:
+            - repeat: # try 3 times if a lock is still locked
+                while: "{{ state_attr('sensor.door_locks','locked')|count > 0 and repeat.index < 4 }}"
+                sequence:
+                  - service: lock.unlock
+                    data:
+                      entity_id: "{{ state_attr('sensor.door_locks','locked') }}" #ZWAVE skips unavailable
+
+                  - wait_template: "{{ state_attr('sensor.door_locks','locked')|count == 0 }}"
+                    timeout: 30
+            - choose:
+                - conditions: "{{ state_attr('sensor.door_locks','locked')|count != 0 }}"
+                  sequence:
+                    - service: input_boolean.turn_on
+                      data: # turn on jammed boolean for any locks that didn't ock
+                        entity_id: >
+                          {% set msg = namespace(value='[') %}
+                          {% for item in state_attr('sensor.door_locks','locked') %}
+                          {% if not loop.first %}{% set msg.value = msg.value ~ ',' %}{% endif %}
+                          {% set msg.value = msg.value ~ "'input_boolean." ~ item.split('.')[1] ~ "_jammed'" %}
+                          {% endfor %}
+                          {% set msg.value = msg.value ~ ']' %}
+                          {{ msg.value }}
+              default:
+                - service: script.tts_play
+                  data:
+                    play_message: All doors are now unlocked.
+                    quiet_play: true
+                    ignore_away: true
+      default:
+        - service: script.tts_play
+          data:
+            play_message: Doors cannot be unlocked while the house alarm is armed!  Disarm the alarm and try again.
+            quiet_play: true
+            ignore_away: true

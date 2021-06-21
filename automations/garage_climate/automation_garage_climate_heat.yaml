@@ -1,0 +1,130 @@
+#######################################################################################################################
+## Garage Climate - Thermostat Adjusted
+#######################################################################################################################
+- id: garage_climate_thermostat_adjusted
+  alias: "[Garage Climate] Thermostat Adjusted"
+  description: Garage thermostat turned on or off, update hassio.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: climate.garage_thermostat
+      to:
+       - heat
+       - 'off'
+
+  action:
+    - service: automation.turn_off
+      entity_id: automation.garage_climate_heat_changed
+
+    # turn heat on if thermostat turned on or else turn it off
+    - service: "{{ 'input_boolean.turn_on' if is_state('climate.garage_thermostat','heat') else 'input_boolean.turn_off' }}"
+      entity_id: input_boolean.garage_heat
+
+    - service: automation.turn_on
+      entity_id: automation.garage_climate_heat_changed
+
+#######################################################################################################################
+## Garage Climate - Heat Changed
+#######################################################################################################################
+- id: garage_climate_heat_changed
+  alias: "[Garage Climate] Heat Changed"
+  description: Garage heat turned on or off.  Update thermostat, play announcement.
+  initial_state: true
+  trigger:
+    - entity_id: input_boolean.garage_heat
+      platform: state
+
+  action:
+    - service: "{{ 'script.garage_climate_on' if is_state('input_boolean.garage_heat','on') else 'script.garage_climate_off' }}"
+
+    # allow thermostat state change to register
+    # if garage door is open heat should be off even if boolean is on - test first or we get stuck waiting!
+    - wait_template: >
+        {% if is_state('binary_sensor.garage_door_open','on') %}{{ is_state('climate.garage_thermostat','off') }}
+        {% elif is_state('input_boolean.garage_heat','on') %}{{ is_state('climate.garage_thermostat','heat') }}
+        {% else %}{{ is_state('climate.garage_thermostat','off') }}
+        {% endif %}
+      timeout:
+        minutes: 1
+
+    # if heat on allow temperature change to register before continuing or wrong set temp reported
+    # if heat is off but freeze on, allow temp to change to freeze temp before continuing or wrong set temp reported
+    # just continue if thermostat is off
+    - wait_template: >
+        {% if is_state('climate.garage_thermostat','heat') %}
+          {% if is_state('input_boolean.garage_heat','on') %}
+            {{ state_attr('climate.garage_thermostat','temperature')|float ==  states('input_number.garage_heat_temperature')|float }}
+          {% else %}
+            {{ state_attr('climate.garage_thermostat','temperature')|float ==  states('input_number.garage_freeze_temperature')|float }}
+          {% endif %}
+        {% else %} true
+        {% endif %}
+      timeout:
+        minutes: 1
+
+    # turn off garage heat boolean if thermostat not in heat mode (thermostat didn't switch modes)
+    - choose:
+        - conditions:
+            - condition: not
+              conditions:
+                - condition: state
+                  entity_id: climate.garage_thermostat
+                  state: heat
+
+          sequence:
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.garage_heat
+
+    - service: script.tts_play
+      data:
+        play_message: |
+          {%- if is_state('input_boolean.garage_heat','on') %}
+            {%- if is_state('climate.garage_thermostat','heat') %}
+              The garage heat has been turned on.
+              The thermostat is set to {{ state_attr('climate.garage_thermostat','temperature') }} degrees.
+              The current garage temperature is {{ state_attr('climate.garage_thermostat','current_temperature') }} degrees.
+            {%- else %} The garage heat could not be turned on.
+            {%- endif %}
+          {%- elif is_state('input_boolean.garage_freeze_protection','on') %}
+            {%- if is_state('climate.garage_thermostat','heat') %}
+              The garage freeze protection has been turned back on.
+              The current garage temperature is {{ state_attr('climate.garage_thermostat','current_temperature') }} degrees.
+            {%- else %} The garage freeze protection could not be turned back on.
+            {%- endif %}
+          {%- else %}  The garage heat has been turned off.
+          {%- endif %}
+
+#######################################################################################################################
+## Garage Climate - Heat Temp Adjusted
+#######################################################################################################################
+- id: garage_climate_heat_temp_adjusted
+  alias: "[Garage Climate] Heat Temp Adjusted"
+  description: Heat temperature adjusted, update thermostat and play announcement.
+  initial_state: true
+  mode: restart
+  trigger:
+    - entity_id: input_number.garage_heat_temperature
+      platform: state
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.garage_heat
+      state: 'on'
+
+  action:
+    - service: climate.set_temperature
+      data:
+        entity_id: climate.garage_thermostat
+        temperature: "{{ states('input_number.garage_heat_temperature')|int}}"
+
+    # wait for thermostat temp = set temp before announcement
+    - wait_template: "{{ states('input_number.garage_heat_temperature')|float == state_attr('climate.garage_thermostat','temperature')|float }}"
+      timeout:
+        minutes: 2
+
+    - service: script.tts_play
+      data:
+        play_message: |
+            The garage thermostat has been set to {{ '%0.0f'|format(state_attr('climate.garage_thermostat','temperature')|float) }} degrees.
+            The garage temperature is {{ '%0.0f'|format(state_attr('climate.garage_thermostat','current_temperature')|float) }} degrees.

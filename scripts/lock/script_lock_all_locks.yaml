@@ -1,0 +1,44 @@
+#######################################################################################################################
+## Lock All Locks
+#######################################################################################################################
+lock_all_locks:
+  alias: Lock All Locks
+  description: Lock all door locks.
+  icon: mdi:lock
+  mode: restart
+  fields:
+    tts:
+      description: Play tts message.
+      example: 'false'
+  sequence:
+    - repeat: # try 3 times if unlocked locks
+        while: "{{ states('sensor.door_locks')|int > 0 and repeat.index < 4 }}"
+        sequence:
+          - service: lock.lock
+            data:
+              entity_id: "{{ state_attr('sensor.door_locks','unlocked') }}" #ZWAVE skips unavailable
+
+          - wait_template: "{{ states('sensor.door_locks')|int == 0 }}"
+            timeout: 30
+    - choose:
+        - conditions: "{{ states('sensor.door_locks')|int != 0 }}"
+          sequence:
+            - service: input_boolean.turn_on
+              data: # turn on jammed boolean for any locks that didn't ock
+                entity_id: >
+                  {% set msg = namespace(value='[') %}
+                  {% for item in state_attr('sensor.door_locks','unlocked') %}
+                  {% if not loop.first %}{% set msg.value = msg.value ~ ',' %}{% endif %}
+                  {% set msg.value = msg.value ~ "'input_boolean." ~ item.split('.')[1] ~ "_jammed'" %}
+                  {% endfor %}
+                  {% set msg.value = msg.value ~ ']' %}
+                  {{ msg.value }}
+      default:
+        - choose:
+            - conditions: "{{ tts }}"
+              sequence:
+                - service: script.tts_play
+                  data:
+                    play_message: All doors are now locked.
+                    quiet_play: true
+                    ignore_away: true

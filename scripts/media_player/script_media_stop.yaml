@@ -1,0 +1,86 @@
+######################################################################################################################
+## Media Stop
+######################################################################################################################
+media_stop:
+  alias: Media Stop
+  description: Turn off media players, reset volumes.
+  mode: parallel
+  max: 5
+  fields:
+    media_type:
+      description: Media type to stop.
+      example: spotify
+    reset_volume:
+      description: Run reset volume.
+      example: false
+  variables:
+    reset_volume: "{{ reset_volume|default(false) }}"
+    player: "{{ states('input_text.active_' ~ media_type ~ '_media_player') }}" # input text is media player currently playing
+    players: > # if players|count > 0 player is a group
+      {% set players = state_attr('sensor.' ~ media_type ~ '_media_player','players') %}
+      {{ [player] if players|count == 0 else players }}
+  sequence:
+    # - service: system_log.write
+    #   data:
+    #     level: critical
+    #     logger: script.media_stop
+    #     message: |
+    #       *
+    #       media_type: {{ media_type }}
+    #       reset_volume: {{ reset_volume }}
+    #       player: {{ player }}
+    #       players: {{ players }}
+
+    - service: automation.turn_off
+      data:
+        entity_id: automation.media_player_media_turned_off
+        stop_actions: false
+
+    - service: input_boolean.turn_off # turn boolean off to keep in sync if called from script
+      data:
+        entity_id: "input_boolean.{{ media_type }}"
+
+    - service: automation.turn_on
+      entity_id: automation.media_player_media_turned_off
+
+    - choose:
+        - conditions: "{{ media_type == 'spotify' }}"
+          sequence:
+            - service: switch.turn_on # was turned off in color extractor
+              entity_id: switch.light_flux_dining_room
+
+    - service: input_text.set_value # clear active media player value
+      data:
+        entity_id: "input_text.active_{{ media_type }}_media_player"
+        value: ''
+
+    - condition: not
+      conditions:
+          condition: state
+          entity_id: alarm_control_panel.alarmo
+          state: triggered
+
+    - choose: # stop players (req for browser players)
+        - conditions: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list|count > 0 }}"
+          sequence:
+            - service: media_player.media_stop
+              data:
+                entity_id: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list }}"
+
+    - choose: # turn off players
+        - conditions: "{{ expand(players)|selectattr('state','in',['idle','playing','paused'])|map(attribute='entity_id')|list|count > 0 }}"
+          sequence:
+            - service: media_player.turn_off
+              data:
+                entity_id: "{{ expand(players)|selectattr('state','in',['idle','playing','paused'])|map(attribute='entity_id')|list }}"
+
+    - wait_template: "{{ expand(players)|selectattr('state','in',['playing'])|map(attribute='entity_id')|list|count == 0 }}"
+      timeout: # wait for all group media players to stop so we don't get a volume jump
+        seconds: 10
+
+    - choose: # reset media player volumes
+        - conditions: "{{ reset_volume }}"
+          sequence:
+            - service: script.set_media_player_volumes
+              data:
+                source: "{{ media_type }}_off"

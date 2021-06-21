@@ -1,0 +1,234 @@
+#######################################################################################################################
+## Maddie Mealtime Package
+#######################################################################################################################
+input_boolean:
+  maddie_mealtime_enabled:
+    name: Maddie Mealtime Enabled
+    icon: mdi:dog
+
+  maddie_mealtime_active:
+    name: Maddie Mealtime Active
+    icon: mdi:dog
+
+input_datetime:
+  maddie_mealtime_days_1:
+    name: Days Maddie Meal 1
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_days_2:
+    name: Days Maddie Meal 2
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_days_3:
+    name: Days Maddie Meal 3
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_afternoons_1:
+    name: Afternoons Maddie Meal 1
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_afternoons_2:
+    name: Afternoons Maddie Meal 2
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_afternoons_3:
+    name: Afternoons Maddie Meal 3
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_weekends_1:
+    name: Weekends Maddie Meal 1
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_weekends_2:
+    name: Weekends Maddie Meal 2
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  maddie_mealtime_weekends_3:
+    name: Weekends Maddie Meal 3
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+automation:
+#######################################################################################################################
+## Maddie Mealtime - Turn Off
+#######################################################################################################################
+  - id: maddie_mealtime_turn_off
+    alias: "[Maddie Mealtime] Turn Off"
+    description: Turn off active boolean.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_active
+        to: "on"
+
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_enabled
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: maddie_mealtime_done
+
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.maddie_mealtime_enabled
+            state: "off"
+
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+
+          - condition: template
+            value_template: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'maddie_mealtime_done' }}{% endif %}"
+
+    action:
+      - service: input_boolean.turn_off
+        entity_id: input_boolean.maddie_mealtime_active
+
+#######################################################################################################################
+## Maddie Mealtime - Activate Reminder  - defaults to weekend if current shift is off/unknown
+#######################################################################################################################
+  - id: maddie_mealtime_activate_reminder
+    alias: "[Maddie Mealtime] Activate Reminder"
+    description: Turn on maddie mealtime active boolean with shift dependent time trigger.
+    initial_state: true
+    trigger:
+      - platform: template
+        value_template: >
+          {% set time = states('sensor.time') %}
+          {% set days = is_state('sensor.current_shift','Days') and is_state('binary_sensor.work_today','on') %}
+          {% set afts = is_state('sensor.current_shift','Afternoons') and is_state('binary_sensor.work_today','on') %}
+          {% set wknd = is_state('binary_sensor.work_today','off') or states('sensor.current_shift') in ['Off','unknown','unavailable','none'] %}
+
+          {{ (days and time == states('input_datetime.maddie_mealtime_days_1')[0:5])
+            or (days and time == states('input_datetime.maddie_mealtime_days_2')[0:5])
+            or (days and time == states('input_datetime.maddie_mealtime_days_3')[0:5])
+            or (afts and time == states('input_datetime.maddie_mealtime_afternoons_1')[0:5])
+            or (afts and time == states('input_datetime.maddie_mealtime_afternoons_2')[0:5])
+            or (afts and time == states('input_datetime.maddie_mealtime_afternoons_3')[0:5])
+            or (wknd and time == states('input_datetime.maddie_mealtime_weekends_1')[0:5])
+            or (wknd and time == states('input_datetime.maddie_mealtime_weekends_2')[0:5])
+            or (wknd and time == states('input_datetime.maddie_mealtime_weekends_3')[0:5]) }}
+
+    condition:
+      - condition: state
+        entity_id: input_boolean.maddie_mealtime_enabled
+        state: "on"
+
+      #MIDNIGHT disabled mondays on afternoons when time < waketime and sunday workday is off to prevent afternoons workday night trigger
+      - "{{ not (now().strftime('%w')|int == 1
+              and states('sensor.time') < states('sensor.waketime_today')
+              and is_state('sensor.current_shift','Afternoons')
+              and is_state('input_boolean.sunday_workday','off')) }}"
+
+    action:
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.maddie_mealtime_active
+
+#######################################################################################################################
+## Maddie Mealtime - Alert
+#######################################################################################################################
+  - id: maddie_mealtime_alert
+    alias: "[Maddie Mealtime] Alert"
+    description: Sent alert every 15 minutes until maddie active turns off.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_active
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.maddie_mealtime_enabled
+        state: "on"
+    action:
+      - repeat:
+          sequence:
+            - service: script.tts_play
+              data:
+                play_message: Hey asshole! Feed yer fuckin animals!  Maddie!  Hey Maddie!  And Pooie Rooie too!  It's time to get some food!
+                quiet_play: true
+                save_message: true
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.schedule_alerts
+                      state: "on"
+
+                  sequence:
+                    - service: notify.jason
+                      data:
+                        title: Maddie Mealtime
+                        message: It's time to feed the animals!
+                        data:
+                          tag: maddie_mealtime
+                          group: General
+                          channel: General
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          persistent: true
+                          color: !secret NOTIFY_COLOR
+                          icon_url: !secret MADDIE_ICON
+                          image: !secret MADDIE_IMAGE
+                          actions:
+                            - action: maddie_mealtime_done
+                              title: Mealtime Done
+                              uri: /lovelace/schedule
+
+            - wait_template: "{{ is_state('input_boolean.maddie_mealtime_active','off') }}"
+              timeout:  # wait for alert to turned off/dismissed
+                minutes: 15
+          until:
+            - condition: state
+              entity_id: input_boolean.maddie_mealtime_active
+              state: "off"
+
+#######################################################################################################################
+## Maddie Mealtime - Close Notifications
+#######################################################################################################################
+  - id: maddie_mealtime_close_notifications
+    alias: "[Maddie Mealtime] Close Notifications"
+    description: Dismiss notifications on all devices.
+    initial_state: true
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_active
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: maddie_mealtime
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: maddie_mealtime_done
+    action:
+      - service: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: maddie_mealtime

@@ -1,0 +1,195 @@
+
+#######################################################################################################################
+## Light - Dining Room Light Timer Finished
+#######################################################################################################################
+- id: light_dining_room_light_timer_finished
+  alias: '[Light] Dining Room Light Timer Finished'
+  description: Turn light flux back on.
+  initial_state: true
+  trigger:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.dining_room_light
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - script.scene_company
+        - script.scene_movie
+        - script.scene_morning_lights
+      state: 'off'
+  action:
+    - service: switch.turn_on
+      entity_id: switch.light_flux_dining_room
+
+#######################################################################################################################
+## Light - Dining Room Light Nobody Home
+#######################################################################################################################
+- id: light_dining_room_light_nobody_home #OCC
+  alias: '[Light] Dining Room Light Nobody Home'
+  description: Turn light on when nobody is home.
+  initial_state: true
+  variables:
+    current: "{{ state_attr('light.dining_room_rgb_light','brightness')|int }}"
+    default: 90
+    quiet: 30
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 10 # must be after away mode has run
+
+    - platform: time_pattern
+      minutes: '/15'
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.light_automation
+        - input_boolean.presence_automation
+        - binary_sensor.auto_light_on
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Away
+        - Vacation
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.dining_room_rgb_light
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Dining Room Light Auto On
+#######################################################################################################################
+- id: light_dining_room_light_auto_on #OCC
+  alias: '[Light] Dining Room Light Auto On'
+  description: Turn on lights.
+  initial_state: true
+  variables:
+    current: "{{ state_attr('light.dining_room_rgb_light','brightness')|int }}"
+    default: 90
+    quiet: 60
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.auto_light_on
+        - binary_sensor.illuminance_light_on
+      to: 'on'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      from:
+        - Away
+        - Vacation
+      for:
+        seconds: 5 # allow light scripts to start
+
+    - platform: state
+      entity_id: binary_sensor.quiet_hours
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: >
+        {% if trigger.entity_id == 'input_select.occupancy_mode' %}{{ is_state('input_boolean.presence_automation','on') }}
+        {% elif trigger.entity_id == 'alarm_control_panel.alarmo' %}{{ is_state('input_boolean.alarm_automation','on') }}
+        {% else %} true
+        {% endif %}
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
+    - condition: state
+      entity_id: binary_sensor.light_scene_active
+      state: 'off'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
+
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.auto_light_on
+          state: 'on'
+
+        - condition: state
+          entity_id: binary_sensor.illuminance_light_on
+          state: 'on'
+
+    - condition: template
+      value_template: "{{ current > quiet if trigger.entity_id == 'binary_sensor.quiet_hours' else current < default }}"
+  action:
+    - service: light.turn_on
+      data:
+        entity_id: light.dining_room_rgb_light
+        brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
+
+#######################################################################################################################
+## Light - Dining Room Light Auto Off
+#######################################################################################################################
+- id: light_dining_room_light_auto_off #OCC
+  alias: '[Light] Dining Room Light Auto Off'
+  description: Turn off lights.
+  initial_state: true
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.auto_light_on
+        - binary_sensor.illuminance_light_on
+      to: 'off'
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+      for:
+        minutes: 2 # allow timer to cancel, occupant to leave
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.someone_home','on') %}
+          {{ is_state('binary_sensor.auto_light_on','off') if trigger.entity_id == 'binary_sensor.illuminance_light_on'
+              else (is_state('binary_sensor.illuminance_light_on','off') if trigger.entity_id == 'binary_sensor.auto_light_on' else true) }}
+        {% else %} true
+        {% endif %}
+
+    - condition: state
+      entity_id:
+        - binary_sensor.light_scene_active
+        - input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: light.turn_off
+      entity_id: light.dining_room_rgb_light
+

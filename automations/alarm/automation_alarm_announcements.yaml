@@ -1,0 +1,149 @@
+######################################################################################################################
+# Alarm - Announcements
+######################################################################################################################
+- id: alarm_announcements
+  alias: "[Alarm] Announcements"
+  description: House alarm TTS announcements.
+  initial_state: true
+  mode: queued
+  variables:
+    mode: "{{ state_attr('alarm_control_panel.alarmo','arm_mode')|replace('armed_','') }}"
+  trigger:
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+        - arming
+        - pending
+        - triggered
+      for: 2 # allow current_alarm to populate
+
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      to: disarmed
+      from:
+        - armed_home
+        - armed_away
+        - armed_night
+        - triggered
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_announcements
+      state: 'on'
+    - "{{ is_state('input_boolean.occupancy_announcements','off') if trigger.to_state.state
+            in ['disarmed','armed_home','armed_night','armed_away'] else true }}" # duplicates occupancy mode announcement
+    - "{{ is_state('input_boolean.alarm_temp_override','off') if trigger.to_state.state == 'disarmed' else true }}" # temp disabled
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: arming
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.tts_play
+                variables:
+                  play_message: "The alarm is now being armed in {{ mode }} mode."
+                  ignore_away: true
+
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: pending
+          sequence:
+            - wait_template: "{{ not is_state('input_text.current_alarm','cleared') }}"
+              timeout: 30 # wait for current alarm to popuplate
+              continue_on_timeout: true # announcement won't have a trigger, but play something!
+
+            - repeat:
+                while:  "{{ is_state('alarm_control_panel.alarmo','pending') }}"
+                sequence:
+
+                  - service: script.turn_on
+                    data:
+                      entity_id: script.tts_play
+                      variables:
+                        play_message: >
+                          Warning! The alarm has been triggered by the {{ states('input_text.current_alarm') }}.
+                          Disarm the system or the alarm will sound.
+                        quiet_play: true
+                        ignore_away: true
+                        min_volume: "{{ 40 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 50 }}"
+
+                  - wait_template: "{{ not is_state('alarm_control_panel.alarmo','pending') }}"
+                    timeout: 30 # delay between announcements
+                    continue_on_timeout: false # don't play if not pending
+
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: triggered
+            - condition: state
+              entity_id:
+                - binary_sensor.tornado_alert # tts handled by weather alert
+                - binary_sensor.smoke_detected_alert # audio handled by nest protect
+                - binary_sensor.co_detected_alert # audio handled by nest protect
+              state: 'off'
+          sequence:
+            - wait_template: "{{ not is_state('input_text.current_alarm','cleared') }}"
+              timeout: 30 # wait for current alarm to popuplate
+
+            - service: script.turn_on # first tts here before light scene
+              data:
+                entity_id: script.tts_play
+                variables:
+                  alert: true
+                  play_message: "Attention!  Alarm! {{ states('input_text.current_alarm') }}"
+
+            - delay: 30 # wait for disarmed before repeating announcememt
+
+            - choose: # check if disarmed
+                - conditions:
+                    - condition: state
+                      entity_id: alarm_control_panel.alarmo
+                      state: triggered
+                  sequence:
+                    - repeat:
+                        sequence:
+                          - service: script.turn_on
+                            data:
+                              entity_id: script.tts_play
+                              variables:
+                                alert: true
+                                play_message: |
+                                  Attention! Alarm! {{ states('input_text.current_alarm') }}
+                                  Your intrusion has been detected and confirmed.
+                                  The owners have been notified and the police have now been called.
+
+                          - wait_template: "{{ not is_state('alarm_control_panel.alarmo','triggered') }}"
+                            timeout: 60 # delay between announcements
+
+                        until: "{{ not is_state('alarm_control_panel.alarmo','triggered') }}"
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state:
+                - disarmed
+                - armed_home
+                - armed_night
+                - armed_away
+
+            - condition: state
+              entity_id: input_boolean.alarm_temp_override
+              state: 'off'
+
+            - "{{ not is_state('alarm_control_panel.alarmo','disarmed') if is_state('binary_sensor.open_sensor_alert','on')
+                    or is_state('binary_sensor.bypassed_sensor_alert','on') else true }}" # triggered when sensor open
+          sequence:
+            - service: script.turn_on
+              data:
+                entity_id: script.tts_play
+                variables:
+                  play_message: >
+                    {% if is_state('alarm_control_panel.alarmo','disarmed') %} The house alarm has been disarmed.
+                    {% else %} The house alarm is now armed in {{ mode }} mode.
+                    {% endif %}
+                  ignore_away: true

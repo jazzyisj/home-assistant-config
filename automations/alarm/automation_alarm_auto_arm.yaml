@@ -1,0 +1,111 @@
+#######################################################################################################################
+## Alarm - Auto Arm
+#######################################################################################################################
+- id: alarm_auto_arm #OCC
+  alias: "[Alarm] Auto Arm"
+  description: Auto arm alarm by occupancy mode.
+  initial_state: true
+  mode: restart
+  variables:
+    lock_sensors: "['sensor.side_door_lock_status','sensor.front_door_lock_status','sensor.back_door_lock_status']" # no garage
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+
+    - platform: state
+      entity_id: alarm_control_panel.alarmo
+      to: disarmed
+      for: # wait to see if someone comes home (almost home, plug in dead phone, turn on override etc.)
+        minutes: 10
+
+    - platform: state
+      entity_id:
+        - sensor.back_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.side_door_lock_status
+      to: Locked (Keypad)
+
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_auto_arming
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.alarm_temp_override
+      state: 'off'
+  action:
+    - choose:
+        - conditions:
+            - condition: and
+              alias: Alarm disarmed and nobody is home #IDEA additional logic - override?
+              conditions:
+                - condition: state
+                  entity_id: alarm_control_panel.alarmo
+                  state: disarmed
+
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: 'off'
+          sequence:
+            - service: script.arm_alarm
+              data:
+                mode: away
+                code: !secret ALARMO_HA
+
+        - conditions: "{{ trigger.entity_id in lock_sensors and is_state('input_boolean.lock_automation','on') }}"
+          sequence:
+            - wait_template: "{{ is_state('binary_sensor.owner_home','off') }}"
+              timeout: 300 # wait for person to leave
+              continue_on_timeout: false # don't arm if someone still home - arm right away if only guest was home
+
+            - condition: not
+              alias: Alarm not already armed_away # alarm may arm by occupancy mode
+              conditions:
+                - condition: state
+                  entity_id: alarm_control_panel.alarmo
+                  state: armed_away
+
+            - service: script.arm_alarm
+              data:
+                mode: away
+                code: !secret ALARMO_HA
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+
+            - condition: not
+              alias: Alarm not already armed_night
+              conditions:
+                - condition: state
+                  entity_id: alarm_control_panel.alarmo
+                  state: armed_night
+          sequence:
+            - service: script.arm_alarm
+              data:
+                mode: night
+                code: !secret ALARMO_HA
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state:
+                - Away
+                - Vacation
+
+            - condition: not
+              alias: Alarm not already armed_away
+              conditions:
+                - condition: state
+                  entity_id: alarm_control_panel.alarmo
+                  state: armed_away
+          sequence:
+            - service: script.arm_alarm
+              data:
+                mode: away
+                code: !secret ALARMO_HA

@@ -1,89 +1,115 @@
 #######################################################################################################################
 ## Alarm Clock - Resume
+#ERROR AttributeError: 'NoneType' object has no attribute 'resume_reading'+
+#BUG when changing settings rapidly alarm clock stuck in 30 sec default loop (alarm_clock_play), media player playing, no sound
+#BUGFIX stop alarm clock play script
 #######################################################################################################################
 - id: alarm_clock_resume
   alias: "[Alarm Clock] Resume"
   description: Restart alarm clock.
   initial_state: true
-  mode: single
-  #max_exceeded: silent
+  mode: restart
   trigger:
-    # restart if media player selection changed
-    - platform: state
-      entity_id:
-         - input_select.alarm_clock_media_player
-         - input_select.alarm_clock_radio_auto
-         - input_select.alarm_clock_sound
-
-    # restart alarm when snooze timer is finished
-    - platform: event
+    - platform: event # resume when snooze timer finishes
       event_type: timer.finished
       event_data:
         entity_id: timer.alarm_clock_snooze
 
-    # resume after announcement
+    - platform: homeassistant
+      event: start
+
     - platform: state
-      entity_id: binary_sensor.tts_playing
+      entity_id:
+        - input_select.alarm_clock_media_player
+        - input_select.alarm_clock_radio_station
+        - input_select.alarm_clock_spotify_playlist
+        - input_select.alarm_clock_sound
+
+    - platform: state # resume after announcement
+      entity_id: input_boolean.tts_playing
       to: 'off'
 
-    # restart when alarm is disarmed from triggered
-    # required if announcements are muted, no tts to restart alarm clock
-    - platform: state
-      entity_id: alarm_control_panel.house
+    - platform: state # required if announcements are muted, no tts to restart alarm clock
+      entity_id: alarm_control_panel.alarmo
       to: disarmed
       from: triggered
-      for:
-        seconds: 30
-
-    # restart alarm clock if it's on at startup
-    - platform: state
-      entity_id: binary_sensor.startup_complete
-      to: 'on'
-
+      for: 60
   condition:
     - condition: state
       entity_id: binary_sensor.alarm_clock_active
       state: 'on'
 
-    # don't resume play if alarm clock is snoozed
-    - condition: state
-      entity_id: input_boolean.alarm_clock_snooze
-      state: 'off'
+    - condition: template
+      alias: Resume when tts sensor turns off if alarm clock resume boolean on.
+      value_template: >
+        {% if trigger.entity_id is defined %}
+          {{ is_state('input_boolean.alarm_clock_resume','on')
+              if trigger.entity_id == 'input_boolean.tts_playing' else true }}
+        {% else %} true
+        {% endif %}
+
+    - condition: template
+      alias: Only resume play when alarm clock is snoozed if snooze boolean is trigger.
+      value_template: >
+        {% if trigger.event is defined %}
+          {{ true if trigger.event.data['entity_id'] == 'timer.alarm_clock_snooze'
+              else is_state('input_boolean.alarm_clock_snooze','off') }}
+        {% else %} true
+        {% endif %}
 
     - condition: not
       conditions:
         - condition: state
-          entity_id: alarm_control_panel.house
+          entity_id: alarm_control_panel.alarmo
           state:
             - triggered # media players playing alert
-            - warning # media players are auto paused
-
-    - !include /config/include/template/alarm_clock_tts_off_condition.yaml
-
+            - pending # media players are auto paused
   action:
-    # turn snooze boolean off if snooze timer finished
+    - service: script.turn_off # turn off any running instance of alarm_clock_play #BUGFIX
+      entity_id: script.alarm_clock_play
+
+    - choose:
+        - conditions: "{{ trigger.platform == 'homeassitant' }}"
+          sequence:
+            - delay: 10 # allow timers to restart
+
     - choose:
         - conditions:
-            - condition: template
-              value_template: >
-                {{ trigger.event.data['entity_id'] == 'timer.alarm_clock_snooze' if trigger.event is defined else false }}
+            - condition: or
+              conditions:
+                - condition: template
+                  alias: Resume triggered by snooze timer finishing.
+                  value_template: >
+                    {% if trigger.event is defined %}
+                      {{ trigger.event.data['entity_id'] == 'timer.alarm_clock_snooze'
+                          if trigger.event.event_type == 'timer.finished' else false }}
+                    {% else %}
+                    {% endif %}
 
+                - condition: template
+                  alias: Resumed by system restart and snooze timer is idle
+                  value_template: >
+                    {{ is_state('timer.alarm_clock_snooze','idle')
+                        if trigger.platform == 'homeassistant' else false }}
           sequence:
-            # turn off automation so we don't turn off the alarm clock
             - service: automation.turn_off
-              entity_id: automation.alarm_clock_off
+              data:
+                entity_id: automation.alarm_clock_off
+                stop_actions: false
 
             - service: input_boolean.turn_off
               entity_id: input_boolean.alarm_clock_snooze
 
+            - service: notify.jason
+              data:
+                message: clear_notification
+                data:
+                  tag: alarm_clock_snoozed
+
             - service: automation.turn_on
               entity_id: automation.alarm_clock_off
 
-    # turn automation off so we don't trigger when radio resumes from tts etc.
-    - service: automation.turn_off
-      entity_id: automation.alarm_clock_off_from_media_player
-
-    - service: script.turn_on
+    - service: script.turn_on # let this automation finish, script loops if sound
       data:
         entity_id: script.alarm_clock_play
         variables:
@@ -92,14 +118,7 @@
             {% elif is_state('input_boolean.alarm_clock_active_manual','on') %} manual
             {% elif is_state('input_boolean.alarm_clock_active_nap','on') %} nap
             {% endif %}
-          # first_run at startup to restart timers, set volumes
-          first_run: "{{ trigger_id == 'binary_sensor.startup_complete' }}"
+          first_run: "{{ trigger.platform == 'homeassistant' }}" # first_run at startup to set volumes
+          resume: "{{ trigger.entity_id in ['input_select.alarm_clock_media_player','input_boolean.tts_playing'] }}"
 
-    # wait until alarm clock is playing to turn automation back on
-    - wait_template: "{{ is_state(states('sensor.alarm_clock_media_player'),'playing') }}"
-      timeout:
-        seconds: 60
-      continue_on_timeout: true # don't leave automation stranded off
 
-    - service: automation.turn_on
-      entity_id: automation.alarm_clock_off_from_media_player

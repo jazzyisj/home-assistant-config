@@ -11,28 +11,37 @@ homeassistant:
       icon: mdi:garage-alert
       category: garage
 
-cover:
-#######################################################################################################################
-## MYQ Component
-#######################################################################################################################
-  - platform: myq
-    username: !secret MYQ_USERNAME
-    password: !secret MYQ_PASSWORD
-    type: chamberlain
+    alert.garage_door_not_closed:
+      friendly_name: Garage Not Closed
+      icon: mdi:garage-alert
+      category: garage
+
+    binary_sensor.garage_door_open:
+      device_class: garage_door
 
 input_boolean:
-#######################################################################################################################
-## Garage Door Automation
-#######################################################################################################################
   garage_door_automation:
     name: Garage Door Automation
     icon: mdi:garage
-    #OPTION initial: true
+
+  garage_announcements:
+    name: Garage Announcements
+    icon: mdi:account-voice
+
+  garage_alerts:
+    name: Garage Door Alerts
+    icon: mdi:alert
+
+  garage_door_switch_alert:
+    initial: false
+
+  garage_door_alert:
+    initial: false
+
+  garage_door_not_closed:
+    initial: false
 
 input_number:
-#######################################################################################################################
-## Garage History Hours
-#######################################################################################################################
   garage_history_hours:
     name: Garage History Hours
     icon: mdi:progress-clock
@@ -41,68 +50,66 @@ input_number:
     step: 1
     unit_of_measurement: hours
 
-binary_sensor:
-  - platform: template
-    sensors:
-#######################################################################################################################
-## Garage Door Connected
-#######################################################################################################################
-      myq_connected:
-        friendly_name: MyQ Garage Door
-        unique_id: myq_connected
-        icon_template: "{{ 'mdi:garage' if is_state('binary_sensor.myq_connected','on') else 'mdi:alert-circle' }}"
-        device_class: connectivity
-        value_template: >
-          {{ is_state('binary_sensor.home_myq_gateway','on') and not states('cover.garage_door_opener')|lower in ['unknown','unavailable','none'] }}
-
-      myq_connected_alert:
-        friendly_name: MyQ
-        unique_id: myq_connected_alert
-        icon_template: mdi:garage-alert
-        value_template: "{{ is_state('binary_sensor.myq_connected','off') and is_state('binary_sensor.alerts_enabled','on') }}"
-
-#######################################################################################################################
-## Garage Door Open - if disconnected unknown state will be unavailable
-#######################################################################################################################
-      garage_door_open:
-        friendly_name: Garage Door Open
-        unique_id: garage_door_open
-        icon_template: >
-          {{ ('mdi:garage-alert' if is_state('binary-sensor.garage_door_open_alert','on')
-              else 'mdi:garage-open') if is_state('binary_sensor.garage_door_open','on') else 'mdi:garage' }}
-        device_class: garage_door
-        value_template: "{{ states('cover.garage_door_opener') in ['opening','open','closing'] }}"
-        availability_template: "{{ is_state('binary_sensor.myq_connected','on') and states('cover.garage_door_opener')|lower not in ['unknown','unavailable','none'] }}"
-
-      garage_door_open_alert:
-        unique_id: garage_door_open_alert
-        delay_on:
-          minutes: 20
-        value_template: "{{ is_state('binary_sensor.garage_door_open','on') and is_state('binary_sensor.alerts_enabled','on') }}"
-
 alert:
-#######################################################################################################################
-## Alert - Garage Door Open
-#######################################################################################################################
   garage_door_open:
     name: Garage Door Open
     title: Garage Door Open Alert
-    message: Garage door has been open for more than 20 minutes.
+    message: |
+      Garage door has been open for {{ ((as_timestamp(now())-as_timestamp(states.cover.garage_door_opener.last_changed))/60)|int }} minutes.
+      Opened at: {{ as_timestamp(states.cover.garage_door_opener.last_changed)|timestamp_custom('%-I:%M %p',true) }}
+    done_message: clear_notification
     entity_id: binary_sensor.garage_door_open_alert
     state: 'on'
-    repeat: 30
-    notifiers: mobile_app_jphone
+    repeat:
+      - 5
+      - 30
+      - 60
+    notifiers: jason
     data:
       tag: garage_door_open
-      group: Genreal
+      group: General
       channel: Alert
       importance: max
+      ttl: 0
+      priority: high
       clickAction: /lovelace/garage
       color: !secret WARNING_COLOR
       icon_url: !secret GARAGE_OPEN_ICON
-      image: !secret GARAGE_OPEN_IMAGE
       actions:
         - action: close_garage_door
           title: Close Door
         - action: pause_garage_door_open
-          title: Pause
+          title: Pause Alert
+
+  garage_door_not_closed:
+    name: Garage Door Not Closed
+    title: Garage Door Not Closed Alert
+    message: |
+      Time: {{ as_timestamp(states.cover.garage_door_opener.last_changed)|timestamp_custom('%-I:%M %p',true) }}
+      State: {{ states('cover.garage_door_opener') }}
+    done_message: clear_notification
+    entity_id: input_boolean.garage_door_not_closed
+    state: 'on'
+    repeat:
+      - 5
+      - 30
+      - 60
+    notifiers: jason
+    data:
+      subject: The garage door did not close!
+      tag: garage_door_not_closed
+      group: General
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      clickAction: /lovelace/garage
+      color: !secret WARNING_COLOR
+      icon_url: !secret GARAGE_OPEN_ICON
+      actions:
+        - action: close_garage_door
+          title: Close Door
+        - action: pause_garage_door_not_closed
+          title: Pause Alert
+        - action: turn_off_garage_door_not_closed
+          title: Turn Alert Off
