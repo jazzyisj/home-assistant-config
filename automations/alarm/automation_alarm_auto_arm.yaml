@@ -6,8 +6,6 @@
   description: Auto arm alarm by occupancy mode.
   initial_state: true
   mode: restart
-  variables:
-    lock_sensors: "['sensor.side_door_lock_status','sensor.front_door_lock_status','sensor.back_door_lock_status']" # no garage
   trigger:
     - platform: state
       entity_id: input_select.occupancy_mode
@@ -17,18 +15,19 @@
         - Vacation
 
     - platform: state
+      id: disarmed
       entity_id: alarm_control_panel.alarmo
       to: disarmed
       for: # wait to see if someone comes home (almost home, plug in dead phone, turn on override etc.)
         minutes: 10
 
     - platform: state
+      id: lock_keypad
       entity_id:
         - sensor.back_door_lock_status
         - sensor.front_door_lock_status
         - sensor.side_door_lock_status
       to: Locked (Keypad)
-
   condition:
     - condition: state
       entity_id: input_boolean.alarm_auto_arming
@@ -39,10 +38,12 @@
       state: 'off'
   action:
     - choose:
-        - conditions:
+        - conditions: # rearm alarm if disarmed but nobody is home
             - condition: and
-              alias: Alarm disarmed and nobody is home #IDEA additional logic - override?
+              alias: Alarm was disarmed but nobody is home
               conditions:
+                - "{{ trigger.id == 'disarmed' }}"
+
                 - condition: state
                   entity_id: alarm_control_panel.alarmo
                   state: disarmed
@@ -56,14 +57,14 @@
                 mode: away
                 code: !secret ALARMO_HA
 
-        - conditions: "{{ trigger.entity_id in lock_sensors and is_state('input_boolean.lock_automation','on') }}"
+        - conditions: "{{ trigger.id == 'lock_keypad' and is_state('input_boolean.lock_automation','on') }}"
           sequence:
-            - wait_template: "{{ is_state('binary_sensor.owner_home','off') }}"
-              timeout: 300 # wait for person to leave
-              continue_on_timeout: false # don't arm if someone still home - arm right away if only guest was home
+            - wait_template: "{{ is_state('binary_sensor.owner_home','off') }}" # arm right away if only guest was home
+              timeout: 300 # wait to see if owner leaves
+              continue_on_timeout: false
 
             - condition: not
-              alias: Alarm not already armed_away # alarm may arm by occupancy mode
+              alias: Alarm not already armed_away
               conditions:
                 - condition: state
                   entity_id: alarm_control_panel.alarmo

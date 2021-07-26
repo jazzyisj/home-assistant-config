@@ -5,7 +5,6 @@
   alias: '[Presence] Occupancy Notification'
   description: Send notification when occupancy mode or alarm state has changed.
   mode: restart
-  max_exceeded: silent
   trigger:
     - platform: state
       entity_id: input_select.occupancy_mode
@@ -15,7 +14,7 @@
         - Night
         - Away
         - Vacation
-      for: 5 # allow corresponding alarm state to set, temp changes
+      for: 5 # allow corresponding alarm state to set, allow temp changes
 
     - platform: state
       entity_id: alarm_control_panel.alarmo
@@ -23,9 +22,10 @@
         - armed_home
         - armed_night
         - armed_away
-      for: 5 # allow corresponding occupancy mode state to set, temp changes
+      for: 5 # allow corresponding occupancy mode state to set, allow temp changes
 
     - platform: state
+      id: disarmed
       entity_id: alarm_control_panel.alarmo
       to: disarmed
       from:
@@ -33,10 +33,9 @@
         - armed_night
         - armed_away
         - triggered
-      for: 5 # allow corresponding occupancy mode state to set, temp changes
-
+      for: 5 # allow corresponding occupancy mode state to set, allow temporary state changes
   condition:
-    - "{{ is_state('input_boolean.alarm_temp_override','off') if trigger.to_state.state == 'disarmed' else true }}"
+    - "{{ is_state('input_boolean.alarm_temp_override','off') if trigger.id == 'disarmed' else true }}"
 
     - condition: not
       conditions:
@@ -51,45 +50,45 @@
             - arming
             - pending
 
-        - condition: state
-          entity_id: input_boolean.alarm_triggered
-          state: 'on'
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      state: 'off'
   action:
+    - variables: # set after trigger, values after corresponding mode to change
+        occ_mode: "{{ states('input_select.occupancy_mode') }}"
+        alarm_mode: "{{ states('sensor.alarm_status') }}"
+        occ_diff: "{{ states('input_select.occupancy_mode') != states('input_select.previous_occupancy_mode') }}"
+        alarm_diff: "{{ states('alarm_control_panel.alarmo') != states('input_select.previous_alarm_mode') }}"
+
+    - condition: template
+      alias: Occupancy mode or alarm mode has changed
+      value_template: "{{ occ_diff or alarm_diff }}"
+
     - choose:
         - conditions:
             - condition: state
               entity_id: input_boolean.occupancy_announcements
               state: 'on'
           sequence:
-            - choose:
-                - conditions: "{{ trigger.to_state.state in ['Home','Guest','disarmed'] }}"
-                  sequence:
-                    - wait_template: >
-                        {{ is_state('binary_sensor.someone_home','off')
-                            or not is_state('alarm_control_panel.alarmo','disarmed')
-                            or not states('input_select.occupancy_mode') in ['Home','Guest'] }}
-                      timeout: 300 # wait for announcement unless person leaves, alarm is armed, occupancy mode changes
-
-            - delay: 5 # allow occupancy mode/alarm to set if person has left
+            - delay: 5 # allow occupancy mode/alarm to set if person has left (avoid duplicate announcement)
 
             - service: script.turn_on
               data:
                 entity_id: script.tts_play
                 variables:
                   play_message: |
-                    {%- set occ_mode = not states('input_select.occupancy_mode') == states('input_select.previous_occupancy_mode') -%}
-                    {%- set alarm = not states('alarm_control_panel.alarmo') == states('input_select.previous_alarm_mode') -%}
-
-                    {%- if occ_mode -%}
-                    The house is now in {{ states('input_select.occupancy_mode') }} mode
+                    {%- if occ_diff -%}
+                    The house is now in {{ occ_mode }} mode
                     {%- endif -%}
 
-                    {%- if occ_mode and alarm -%}, and {% endif -%}
+                    {%- if occ_diff and alarm_diff -%}, and {% endif -%}
 
-                    {%- if alarm and is_state('input_boolean.alarm_announcements','on') -%}
+                    {%- if alarm_diff and is_state('input_boolean.alarm_announcements','on') -%}
                       The house alarm is {{ states('sensor.alarm_status') -}}
                     {%- endif -%}.
-                    {{ 'Personalized occupant automations are disabled in Guest mode.' if is_state('input_select.occupancy_mode','Guest') }}
+                    {{ 'Personalized occupant automations are disabled in Guest mode.' if is_state(occ_mode,'Guest') }}
                   ignore_away: true
                   min_volume: "{{ 20 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 30 }}"
 
@@ -107,7 +106,7 @@
               data:
                 title: Home Occupancy Mode
                 message: >-
-                  Mode: {{ states('input_select.occupancy_mode') }} | {{ states('sensor.alarm_status') }}.
+                  Mode: {{ states('input_select.occupancy_mode') }} | {{ alarm_mode }}.
                   {%- if is_state('input_boolean.alarm_triggered','on') -%}
                     Alarm Trigger: {{ states('input_text.current_alarm') -}}
                     <br/>Disarmed By: {{ states('input_text.alarm_disarmed_by') -}}
@@ -117,7 +116,7 @@
                   {%- if is_state('binary_sensor.sheri_home','on') -%}<br/> Sheri is home. {%- endif -%}
                   {%- if is_state('input_boolean.guest_home','on') -%}<br/> A guest is home. {%- endif -%}
                 data:
-                  subject: "Mode: {{ states('input_select.occupancy_mode') }} | Alarm: {{ states('sensor.alarm_status') }}."
+                  subject: "Mode: {{ states('input_select.occupancy_mode') }} | Alarm: {{ alarm_mode }}."
                   tag: occupancy_notification
                   group: General
                   channel: General
@@ -136,7 +135,8 @@
                       action: URI
                       uri: app://com.flir.consumer.flir.lorexcloud
 
-    # set prev selects after announcement -> they will be prev value next time triggered
+    # set prev selects after announcement -> this will be prev value next time triggered
+    # WARNING (MainThread) [homeassistant.components.input_select] Invalid option: arming (possible options: disarmed, armed_home, armed_night, armed_away)
     - service: input_select.select_option
       data:
         entity_id: input_select.previous_alarm_mode
@@ -146,8 +146,6 @@
       data:
         entity_id: input_select.previous_occupancy_mode
         option: "{{  states('input_select.occupancy_mode') }}"
-
-    - delay: 10 # prevent double notifications from occupancy mode/alarm
 
 #######################################################################################################################
 ## Presence - Turn Off Occupancy Notifications

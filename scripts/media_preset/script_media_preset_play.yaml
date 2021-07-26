@@ -12,117 +12,84 @@ media_preset_play:
   variables:
     media_type: "{{ states('input_select.media_preset_type_' ~ preset)|lower }}"
   sequence:
-    # - service: system_log.write
-    #   data:
-    #     message: |
-    #       *
-    #       preset: {{ preset }}
-    #       media_type: {{ media_type }}
-    #     level: error
-    #     logger: script.media_preset_play
-
     - choose:
-        - conditions: "{{ preset in ['wake','sleep'] }}" # make sure these preset booleans are on
-          sequence:
-            - service: automation.turn_off
-              data:
-                entity_id: automation.media_preset_turned_on
-                stop_actions: false
-
-            - service: input_boolean.turn_on
-              data:
-                entity_id: "input_boolean.media_preset_{{ preset }}"
-
-            - service: automation.turn_on
-              entity_id: automation.media_preset_turned_on
-      default: # all other presets are momentary switches
-        - service: input_boolean.turn_off
-          data:
-            entity_id: "input_boolean.media_preset_{{ preset }}"
-
-    - choose: # cancel sleep timer if active and sleep preset boolean is not on
         - conditions:
             - condition: state
-              entity_id: timer.media_preset_sleep
-              state: active
-
-            - condition: state
-              entity_id: input_boolean.media_preset_sleep
-              state: 'off'
-
+              entity_id: input_boolean.mute_all
+              state: 'on'
           sequence:
-            - service: timer.cancel
-              entity_id: timer.media_preset_sleep
-
-    - service: automation.turn_off
-      data:
-        entity_id: &media_automations
-          - automation.media_player_media_auto_resume
-          - automation.media_player_media_volume_changed
-        stop_actions: false
-
-    - choose:
-        - conditions: "{{ media_type == 'radio' }}"
-          sequence:
-            - service: input_select.select_option
+            - service: browser_mod.toast
               data:
-                entity_id: input_select.radio_media_player
-                option: "{{ states('input_select.media_preset_speaker_' ~ preset) }}"
+                message: Media preset cannot not be played. System is muted.
+      default:
+        - choose: # cancel sleep timer if active and not sleep preset
+            - conditions: "{{ preset != 'sleep' and not is_state('timer.media_preset_sleep','idle') }}"
+              sequence:
+                - service: timer.cancel
+                  entity_id: timer.media_preset_sleep
 
-            - service: input_select.select_option
-              data:
-                entity_id: input_select.radio_station
-                option: "{{ states('input_select.media_preset_radio_' ~ preset) }}"
+        - service: automation.turn_off
+          data:
+            entity_id: &media_automations
+              - automation.media_player_media_auto_resume
+              - automation.media_player_media_volume_changed
+            stop_actions: false
 
-            - service: input_number.set_value
-              data:
-                entity_id: input_number.radio_volume
-                value: "{{ states('input_number.media_preset_volume_' ~ preset)|float }}"
+        - service: input_select.select_option # set media player options to preset values
+          data:
+            entity_id: "input_select.{{ media_type }}_media_player"
+            option: "{{ states('input_select.media_preset_speaker_' ~ preset) }}"
 
-        - conditions: "{{ media_type == 'spotify' }}"
-          sequence:
-            - service: input_select.select_option
-              data:
-                entity_id: input_select.spotify_media_player
-                option: "{{ states('input_select.media_preset_speaker_' ~ preset) }}"
+        - service: input_select.select_option
+          data:
+            entity_id: >
+              {% if media_type == 'radio' %} input_select.radio_station
+              {% elif media_type == 'spotify' %} input_select.spotify_playlist_hassio
+              {% endif %}
+            option: "{{ states('input_select.media_preset_' ~ media_type ~ '_' ~ preset) }}"
 
-            - service: input_select.select_option
-              data:
-                entity_id: input_select.spotify_playlist_hassio
-                option: "{{ states('input_select.media_preset_spotify_' ~ preset) }}"
+        - service: input_number.set_value
+          data:
+            entity_id: "input_number.{{ media_type }}_volume"
+            value: "{{ states('input_number.media_preset_volume_' ~ preset)|float }}"
 
-            - service: input_number.set_value
-              data:
-                entity_id: input_number.spotify_volume
-                value: "{{ states('input_number.media_preset_volume_' ~ preset)|float }}"
+        - service: automation.turn_on
+          entity_id: *media_automations
 
-    - service: automation.turn_on
-      entity_id: *media_automations
+        - service: script.turn_on
+          data:
+            entity_id: script.media_play
+            variables:
+              media_type: "{{ media_type }}"
+              account: >
+                {% if preset == 'jason' %} jazzyisj
+                {% elif preset == 'sheri' %} sherigagnon
+                {% else %} hassio
+                {% endif %}
 
-    - choose:
-        - conditions: "{{ media_type in ['radio','spotify'] }}"
-          sequence:
-            - service: script.turn_on
-              data:
-                entity_id: script.media_play
-                variables:
-                  media_type: "{{ media_type }}"
+        - choose: #SPOTIFY - redo spotify account logic
+            - conditions: "{{ media_type == 'spotify' and preset in ['jason','sheri'] }}"
+              sequence:
+                - service: automation.turn_off
+                  data:
+                    entity_id: automation.media_player_media_turned_off
+                    stop_actions: false
 
-            - wait_template: "{{ is_state(states('sensor.' ~ media_type ~ '_media_player'),'playing') }}"
-              timeout: 60 # wait for radio to start play
-              continue_on_timeout: false # don't start timers if media doesn't play
+                - service: input_boolean.turn_off
+                  entity_id: input_boolean.spotify
 
-    - choose:
-        - conditions: # sleep preset and timer is idle - start timer
-            - condition: template
-              value_template: "{{ preset == 'sleep' }}"
+                - service: automation.turn_on
+                  entity_id: automation.media_player_media_turned_off
 
-            - condition: state
-              entity_id: timer.media_preset_sleep
-              state: idle
-          sequence:
-            - service: timer.start
-              data:
-                entity_id: timer.media_preset_sleep
-                duration:
-                  minutes: "{{ states('input_number.media_preset_sleep_time')|int }}"
+        - wait_template: "{{ is_state(states('sensor.' ~ media_type ~ '_media_player'),'playing') }}"
+          timeout: 60 # wait for radio to start play
+          continue_on_timeout: false # don't start timers if media doesn't play
+
+        - choose: # if sleep preset and sleep timer is idle start timer
+            - conditions: "{{ preset == 'sleep' and is_state('timer.media_preset_sleep','idle') }}"
+              sequence:
+                - service: timer.start
+                  data:
+                    entity_id: timer.media_preset_sleep
+                    duration:
+                      minutes: "{{ states('input_number.media_preset_sleep_time')|int }}"

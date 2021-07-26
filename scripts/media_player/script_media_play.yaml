@@ -45,22 +45,27 @@ media_play:
       {% elif media_type in ['radio','spotify'] %}{% set vol = states('input_number.' ~ media_type ~ '_volume')|float %}
       {% endif %}
       {{ qvol if (is_state('binary_sensor.quiet_hours','on') and vol > qvol) and is_state('input_boolean.volume_override','off') else vol }}
-    account: "{{ account|default('hassio') }}" # spotify
-    playlist: > # spotify
+    account: >
+      {% if is_state('input_select.spotify_account','Jason') %}{% set spacct = 'jazzyisj' %}
+      {% elif is_state('input_select.spotify_account','Sheri') %}{% set spacct = 'sherigagnon' %}
+      {% else %}{% set spacct = 'hassio' %}
+      {% endif %}
+      {{ account|default(spacct) }}
+    playlist: >
       {% if playlist not in ['',empty] %}{{ playlist }}
       {% else %}{{ states('input_select.spotify_playlist_hassio') }}
       {% endif %}
-    device: > # spotify
+    device: >
       {% if device not in ['',empty] %}{{ device }}
       {% else %}{{ states('input_select.spotify_media_player') }}
       {% endif %}
-    repeat: "{{ repeat if repeat not in ['',empty] else is_state('input_boolean.spotify_repeat','on') }}" # spotify
-    random: "{{ random if random not in ['',empty] else is_state('input_boolean.spotify_random','on') }}" # spotify
-    shuffle: "{{ shuffle if shuffle not in ['',empty] else is_state('input_boolean.spotify_shuffle','on') }}" # spotify
+    repeat: "{{ repeat if repeat not in ['',empty] else is_state('input_boolean.spotify_repeat','on') }}"
+    random: "{{ random if random not in ['',empty] else is_state('input_boolean.spotify_random','on') }}"
+    shuffle: "{{ shuffle if shuffle not in ['',empty] else is_state('input_boolean.spotify_shuffle','on') }}"
     speaker_groups: "{{ state_attr('sensor.media_player_groups','players') }}"
     radio_player: "{{ states('sensor.radio_media_player') }}"
     radio_players: "{{ state_attr('sensor.radio_media_player','players') }}"
-    #SPOTIFY sensor.spotify_media_player not populated until playing so determine media player from selected device
+    # sensor.spotify_media_player not populated until playing so determine media player from selected device
     spotify_player: "{{ expand(state_attr('sensor.media_players','players'))|selectattr('name','eq',device)|map(attribute='entity_id')|list|join('') }}"
     spotify_players: "{{ expand(state_attr('sensor.media_players','players'))|selectattr('attributes.' ~ spotify_player.split('.')[1],'eq',true)|map(attribute='entity_id')|list }}"
     alarm_player: "{{ states('sensor.alarm_clock_media_player') }}"
@@ -103,27 +108,6 @@ media_play:
         {% endif %}
       {% endif %}
   sequence:
-    # - service: system_log.write
-    #   data:
-    #     message: |
-    #       *
-    #       device: {{ device }}
-    #       player: {{ player }}
-    #       players: {{ players }}
-    #       radio_player: {{ radio_player }}
-    #       radio_players: {{ radio_players }}
-    #       spotify_player: {{ spotify_player }}
-    #       spotify_players: {{ spotify_players }}
-    #       playlist: {{ playlist }}
-    #       state: {{ states(player) }}
-    #       media_type: {{ media_type }}
-    #       old_player: {{ old_player }}
-    #       old_type: {{ old_type }}
-    #       resume: {{ resume }}
-    #       in media: {{ old_type in media_types }}
-    #     level: error
-    #     logger: script.media_play
-
     - service: input_boolean.turn_off
       data:
         entity_id: "input_boolean.resume_{{ media_type }}"
@@ -179,10 +163,10 @@ media_play:
                 duration: 30000
                 message: >
                   {% set message = 'Media cannot be played. ' %}
-                  {% if media_type not in media_types %}{% set message = message ~ 'ERROR: Invalid media type specified.' %}{% endif %}
-                  {% if is_state('input_boolean.mute_all','on') %}{% set message = message ~ 'The system has been muted.' %}{% endif %}
+                  {% if media_type not in media_types %}{% set message = message ~ 'Invalid media type specified.' %}{% endif %}
+                  {% if is_state('input_boolean.mute_all','on') %}{% set message = message ~ 'The system is muted.' %}{% endif %}
                   {% if is_state('input_select.occupancy_mode','Vacation') %}{% set message = message ~ 'The house is in Away mode.' %}{% endif %}
-                  {% if is_state('alarm_control_panel.alarmo','triggered') or is_state('input_boolean.alarm_triggered','on')%}
+                  {% if is_state('alarm_control_panel.alarmo','triggered') or is_state('input_boolean.alarm_triggered','on') %}
                     {% set message = message ~ 'The house alarm has been triggered.' %}
                   {% endif %}
                   {{ message }}
@@ -268,6 +252,15 @@ media_play:
                             entity_id: "{{ player }}"
                             media_content_id: !include /config/include/template/radio_station_selection_template.yaml
                             media_content_type: music
+                            extra:
+                              title: "{{ states('input_select.radio_station') }}"
+                              thumb: >
+                                {% if states('sensor.radio_status') in [ 'on','off','failed','unknown'] %} {% set status = 'on' %}
+                                {% elif states('sensor.radio_status') == 'wake' %}{% set status = 'wake' %}
+                                {% elif states('sensor.radio_status') == 'sleep' %}{% set status = 'sleep' %}
+                                {% else %} {% set status = 'on' %}
+                                {% endif %}
+                                https://82l1mjsgl3dp23jw4nd1sh0n7ykww05d.ui.nabu.casa/local/images/glance/radio_{{ status }}.png
 
                     - conditions: "{{ media_type == 'spotify' }}"
                       sequence:
@@ -288,7 +281,6 @@ media_play:
                                     repeat: "{{ repeat }}"
                                     shuffle: "{{ shuffle }}"
                                     ignore_fully_played: true
-                                    # start_volume: 0 #SPOTIFY {{ 0 if resume == 'player' else volume }}
                                     force_playback: true
 
                             - conditions: "{{ resume != false }}"
@@ -301,7 +293,6 @@ media_play:
                                     repeat: "{{ repeat }}"
                                     shuffle: "{{ shuffle }}"
                                     ignore_fully_played: true
-                                    # start_volume: 0 #SPOTIFY "{{ volume }}"
                                     force_playback: true
 
                           default:
@@ -319,7 +310,6 @@ media_play:
                                 repeat: "{{ repeat }}"
                                 shuffle: "{{ shuffle }}"
                                 ignore_fully_played: true
-                                # start_volume: 0 #SPOTIFY "{{ volume }}"
                                 force_playback: true
 
                 - wait_template: "{{ is_state(player,'playing') }}" # wait for spotify media player to begin playing
@@ -351,7 +341,7 @@ media_play:
                           sequence:
                             - service: script.set_media_player_volumes
                               data:
-                                source: "{{ media_type }}"
+                                source: "{{ media_type ~ '_tts' if resume == 'tts' else media_type }}"
                                 player_volume: "{{ volume }}"
 
                     - service: input_boolean.turn_off

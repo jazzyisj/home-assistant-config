@@ -1,0 +1,73 @@
+#######################################################################################################################
+## Bedtime Notification
+#######################################################################################################################
+bedtime_notification:
+  alias: Bedtime Notification
+  description: Send bedtime notification.
+  sequence:
+    - condition: state
+      entity_id: binary_sensor.owner_home
+      state: 'on'
+
+    - service: >
+        {% if is_state('binary_sensor.jason_home','on') and is_state('binary_sensor.sheri_home','on') %} notify.mobile
+        {% elif is_state('binary_sensor.jason_home','on') %} notify.jason
+        {% elif is_state('binary_sensor.sheri_home','on') %} notify.sheri
+        {% endif %}
+      data:
+        title: Time For Bed!
+        message: >-
+          {%- set time = states('sensor.time') -%}
+          {%- set wake = states('sensor.waketime_today') -%}
+          {% set new_time = (as_timestamp((states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|as_datetime)
+            + states('input_number.stay_awake_delay')|int * 60)|timestamp_custom('%_I:%M %p', true) %}
+          {%- set src = state_attr('sensor.alarm_clock_next_alarm','alarm_source') -%}
+          {% if not is_state('sensor.alarm_clock_next_alarm','Off') -%}
+            <br/>Alarm Time: {{ states('sensor.alarm_clock_next_alarm_display') -}}
+            <br/>Alarm Source:
+            {%- if src == 'auto' %} Auto Alarm Clock
+            {%- elif src == 'manual' %} Manual Alarm Clock
+            {%- elif src == 'nap' %} Nap Alarm Clock
+            {%- elif src == 'jphone' %} Jason's  Phone
+            {%- elif src == 'sphone' %} Sheri's Phone
+            {%- else %} None
+            {%- endif -%}
+            {% if src in ['auto','manual','nap'] %}
+              <br/>Alarm Player:
+              {%- if src == 'auto' %} {{ states('input_select.alarm_clock_media_player_auto') }}
+              {%- elif src == 'manual' %} {{ states('input_select.alarm_clock_media_player_manual') }}
+              {%- elif src == 'nap' %} {{ states('input_select.alarm_clock_media_player_nap') }}
+              {%- endif -%}
+            {% endif %}
+          {%- else -%} Alarm: No alarm clock set.
+          {%- endif %}
+          {%- if is_state('input_boolean.bedtime_delayed','on') -%}
+            <br/>Bedtime Delayed: {{ states('input_number.stay_awake_delay')|int }} minutes
+          {%- else -%}
+            <br/>Delay Bedtime: {{ states('input_number.stay_awake_delay')|int }} minutes
+          {%- endif -%}
+        data:
+          tag: bedtime_alert
+          group: General
+          channel: Alert
+          importance: max
+          ttl: 0
+          priority: high
+          persistent: true
+          sticky: true
+          timeout: 5400 # 90min
+          color: !secret NOTIFY_COLOR
+          icon_url: !secret ALARM_CLOCK_ICON
+          chronometer: true
+          when: >
+            {% if is_state('input_boolean.bedtime_delayed','on') %}{{ (as_timestamp(now()) + states('input_number.stay_awake_delay')|int * 60 )|int }}
+            {% else %}{{ (as_timestamp(now()) + states('input_number.bedtime_delay')|int * 60 )|int }}
+            {% endif %}
+          clickAction: /lovelace/schedule
+          actions:
+            - action: bedtime_delayed
+              title: Stay Up
+            - action: bedtime_delay_off
+              title: Go To Bed
+            - action: next_alarm_off
+              title: Next Alarm Off

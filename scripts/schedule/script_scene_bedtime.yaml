@@ -3,11 +3,9 @@
 #######################################################################################################################
 scene_bedtime:
   alias: Bedtime Scene
-  description: Bedtime lights, night mode.
+  description: Turn on bedtime lights and activate night mode.
   icon: mdi:bed-empty
   mode: restart # can be retriggered from automation.schedule_bedtime_delayed
-  variables:
-    speaker_group: "{{ is_state_attr(states('sensor.tts_media_player'),'type','group') }}"
   sequence:
     - choose:
         - conditions:
@@ -37,19 +35,23 @@ scene_bedtime:
       default:
         - choose:
             - conditions:
-                - condition: state
+                - condition: state # bedtime_active is delayed on at bedtime to force this first time
                   entity_id: binary_sensor.bedtime_active
                   state: 'off'
               sequence:
-                - service: script.tts_play
-                  data:
-                    play_message: !include /config/include/template/bedtime_message_template.yaml
-                    quiet_play: true
-                    min_volume: "{{ 30 if speaker_group else 40 }}"
+                - service: script.bedtime_notification
 
-                # user must turn boolean on before this delay expires to delay night mode
-                - delay:
-                    minutes: "{{ states('input_number.bedtime_delay')|int }}"
+                - service: script.turn_on
+                  data:
+                    entity_id: script.tts_play
+                    variables:
+                      play_message: !include /config/include/template/bedtime_message_template.yaml
+                      quiet_play: true
+                      min_volume: 35
+
+                - wait_template: "{{ is_state('input_boolean.bedtime_delayed','on') }}"
+                  timeout: # user must turn boolean on before this delay expires to delay night mode
+                     minutes: "{{ states('input_number.bedtime_delay')|int }}"
 
                 - choose:
                     - conditions:
@@ -57,99 +59,58 @@ scene_bedtime:
                           entity_id: input_boolean.bedtime_delayed
                           state: 'on'
                       sequence:
-                        # this is the first main bedtime delay
-                        - delay:
-                            minutes: "{{ states('input_number.stay_awake_delay')|int }}"
-                - repeat:
-                    while:
-                      - condition: state
-                        entity_id: input_boolean.bedtime_delayed
-                        state: 'on'
-                    sequence:
-                      # keep delaying until scene scripts are off
-                      - choose:
-                          - conditions:
-                              - condition: state
-                                entity_id:
-                                  - script.scene_company
-                                  - script.scene_movie
-                                state: 'off'
-                            sequence:
-                              # turn off automation to prevent unwanted trigger
-                              - service: automation.turn_off
-                                entity_id: automation.schedule_bedtime_delayed
-
-                              - service: input_boolean.turn_off
-                                entity_id: input_boolean.bedtime_delayed
-
-                              - service: automation.turn_on
-                                entity_id: automation.schedule_bedtime_delayed
-
-                              - service: script.tts_play
-                                data:
-                                  play_message: |
-                                    Hey there!
-                                    Are you still awake?
-                                    I'm going to turn the lights off soon!
-                                    Let me know if you'll be staying up a while longer.
-                                  quiet_play: true
-                                  min_volume: "{{ 20 if speaker_group else 30 }}"
-
-                              # user must turn boolean back on before this delay expires to delay night mode
-                              - delay:
-                                  minutes: "{{ states('input_number.bedtime_delay')|int }}"
-
-                      - condition: state
-                        entity_id: input_boolean.bedtime_delayed
-                        state: 'on'
-
-                      # this is the main bedtime delay
-                      - delay:
-                          minutes: "{{ states('input_number.stay_awake_delay')|int }}"
-
-        # check occupancy mode again, might be already night or away
-        - condition: or
-          conditions:
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state: Home
-
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state: Guest
-
-        - service: script.tts_play
-          data:
-            play_message: Time to head to bed.  Good night!
-            quiet_play: true
-            min_volume: "{{ 30 if speaker_group else 40 }}"
-
-        - service: script.turn_on
-          entity_id: script.scene_bedtime_lights
-
-        # delay before night mode
-        - delay:
-            minutes: "{{ states('input_number.bedtime_night_mode_delay')|int }}"
-
-        - service: input_select.select_option
-          data:
-            entity_id: input_select.occupancy_mode
-            option: Night
-
-        - choose:
-            - conditions:
+                        - service: timer.start
+                          data:
+                            entity_id: timer.bedtime_delay
+                            duration:
+                              minutes: "{{ states('input_number.stay_awake_delay')|int }}"
+          default:
+            - condition: or
+              alias: Occupancy mode is still Home/Guest
+              conditions: # check occupancy mode again, might be already have been changed to night or away
                 - condition: state
-                  entity_id: input_boolean.media_preset_enabled_sleep
-                  state: 'on'
+                  entity_id: input_select.occupancy_mode
+                  state: Home
 
-                # only when less than 15 minutes after bedtime or someone might be in bed!
-                - condition: template
-                  value_template: >
-                    {{ is_state('sensor.bedtime_today','off') or states('sensor.time') < (as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|int
-                        + (states('input_number.bedtime_night_mode_delay')|int * 60 ) + 900)|timestamp_custom('%H:%M',true) }}
-              sequence:
-                - delay: 60 # delay to start radio until after night mode or it shuts off via media players auto off
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Guest
 
-                # turn on night radio
-                - service: input_boolean.turn_on
-                  entity_id: input_boolean.media_preset_sleep
+            - service: script.tts_play
+              data:
+                play_message: Time to head to bed. Good night!
+                quiet_play: true
+                min_volume: 35
+
+            - service: script.turn_on
+              entity_id: script.scene_bedtime_lights
+
+            - delay: # delay before night mode
+                minutes: "{{ states('input_number.bedtime_night_mode_delay')|int }}"
+
+            - condition: state
+              entity_id: input_boolean.bedtime_delayed
+              state: 'off'
+
+            - service: input_select.select_option
+              data:
+                entity_id: input_select.occupancy_mode
+                option: Night
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id:
+                        - input_boolean.media_player_automation
+                        - input_boolean.media_preset_enabled_sleep
+                      state: 'on'
+
+                    - condition: template
+                      value_template: > # only when less than 15 minutes after bedtime or someone might be in bed!
+                        {{ is_state('sensor.bedtime_today','off') or states('sensor.time') < (as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|int
+                            + (states('input_number.bedtime_night_mode_delay')|int * 60 ) + 900)|timestamp_custom('%H:%M',true) }}
+                  sequence:
+                    - delay: 60 # delay to start radio until after night mode or it shuts off via media players auto off
+
+                    - service: input_boolean.turn_on # turn on sleep radio
+                      entity_id: input_boolean.media_preset_sleep

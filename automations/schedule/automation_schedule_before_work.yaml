@@ -7,14 +7,12 @@
   initial_state: true
   trigger:
     - platform: state
-      entity_id: binary_sensor.prework_active
+      entity_id: binary_sensor.prework_active # 30 min
       to: 'on'
-
   condition:
     - condition: state
       entity_id: binary_sensor.owner_home
       state: 'on'
-
   action:
     #OPTION - choose:
     #     - conditions: "{{ is_state('sensor.current_shift','Days') }}"
@@ -31,8 +29,10 @@
             {% set minutes = ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.days_leave_home_time'))|int - as_timestamp(now())|int) / 60) %}
           {% elif is_state('sensor.current_shift','Afternoons') %}
             {% set minutes =  ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.afternoons_leave_home_time'))|int - as_timestamp(now())|int) / 60) %}
+          {% else %}
+            {% set minutes = 1 %}
           {% endif %}
-          Get your ass in gear there big fella.  You need to leave for work in {{ minutes|int }} minutes!
+          You better get yer ass in gear there, big fella.  You need to leave for work in {{ minutes|int }} minutes!
         quiet_play: true
         min_volume: 40
         media_player: media_player.broadcast_speakers
@@ -49,7 +49,7 @@
             brightness: "{{ state_attr('light.dining_room_rgb_light','brightness')|int }}"
             rgb_color: "{{ state_attr('light.dining_room_rgb_light','rgb_color') }}"
 
-    - choose: #IDEA cold? commute?
+    - choose:
         - conditions:
             - condition: state
               entity_id: input_boolean.weather_automation
@@ -57,17 +57,17 @@
 
             - condition: template
               value_template: >
-                {{ states('sensor.dark_sky_precip_probability_0h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_1h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_2h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_3h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_4h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_5h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_6h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_7h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_8h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_9h')| int > 30
-                    or states('sensor.dark_sky_precip_probability_10h')| int > 30 }}
+                {{ states('sensor.climacell_precipitation_probability_0h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_1h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_2h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_3h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_4h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_5h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_6h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_7h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_8h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_9h')| int > 30
+                    or states('sensor.climacell_precipitation_probability_10h')| int > 30 }}
           sequence:
             - service: switch.turn_off
               entity_id: switch.light_flux_dining_room
@@ -78,15 +78,51 @@
                 brightness: 255
                 rgb_color: [0,0,255]
 
-    - delay:
-        minutes: 60
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_boolean.commute_alerts
+              state: 'on'
+          sequence:
+            - repeat: # commute alert, must be last, repeat here to keep checking commute alert
+                sequence:
+                  - choose:
+                      - conditions:
+                          - condition: or
+                            conditions:
+                              - condition: state
+                                entity_id:
+                                  - binary_sensor.jason_home
+                                  - binary_sensor.work_commute_jason_alert
+                                state: 'on'
+
+                              - condition: state
+                                entity_id:
+                                  - binary_sensor.sheri_home
+                                  - binary_sensor.work_commute_sheri_alert
+                                state: 'on'
+                        sequence:
+                          - service: switch.turn_off
+                            entity_id: switch.light_flux_dining_room
+
+                          - service: light.turn_on
+                            data:
+                              entity_id: light.dining_room_rgb_light
+                              brightness: 255
+                              rgb_color: [56,125,255]
+
+                  - delay: 60 # check every minute
+                until: "{{ is_state('input_select.occupancy_mode','Away') or repeat.index == 60 }}"  # 1h total
+      default:
+        - wait_template: "{{ is_state('input_select.occupancy_mode','Away') }}"
+          timeout:
+            minutes: 60
 
     - choose:
         - conditions:
             - condition: state
               entity_id: binary_sensor.light_scene_active
               state: 'off'
-
           sequence:
             - service: switch.turn_on
               entity_id: switch.light_flux_dining_room
@@ -100,8 +136,12 @@
                 - Guest
                 - Override
           sequence:
-            - service: script.turn_on
+            - service: script.activate_scene
               data:
-                entity_id: script.activate_scene
-                variables:
-                  scene: scene.prework_active
+                scene: scene.rgb_reset # req because rgb won't reset if light was off
+
+            - delay: 1 # allow light states to change
+
+            - service: script.activate_scene
+              data:
+                scene: scene.prework_active

@@ -5,60 +5,35 @@
   alias: "[Alarm] Triggered Reset"
   description: Reset alarm triggered state.
   initial_state: true
-  mode: queued
+  max_exceeded: silent # recursive call
   trigger:
+    - platform: state
+      id: 'boolean'
+      entity_id: input_boolean.alarm_triggered
+      to: 'off'
+
     - platform: event
+      id: 'finished'
       event_type: timer.finished
       event_data:
         entity_id: timer.alarm_triggered_reset
 
-    - platform: state
-      entity_id:
-        - input_boolean.alarm_triggered
-        - input_boolean.alarm_pending # turned off in pending if not triggered else turned off in triggered
-      to: 'off'
+    - platform: event
+      id: 'cancelled'
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.alarm_triggered_reset
+
   action:
-    - repeat:
-        count: 3
-        sequence:
-          - service: notify.alarm
-            data:
-              message: clear_notification
-              data:
-                tag: "alarm_pending{{ repeat.index }}"
-
-          - service: notify.alarm
-            data:
-              message: clear_notification
-              data:
-                tag: "alarm_triggered{{ repeat.index }}"
-
-    - service: input_text.set_value
-      data:
-        entity_id: input_text.current_alarm
-        value: cleared
-
     - choose:
-        - conditions: "{{ trigger.entity_id != 'input_boolean.alarm_pending' }}"
+        - conditions: "{{ trigger.id == 'boolean' and not is_state('timer.alarm_triggered_reset','idle') }}"
           sequence:
-            - service: automation.turn_off
-              data:
-                entity_id: automation.alarm_triggered_reset
-                stop_actions: false
-
-            - service: timer.cancel
+            - service: timer.finish # recursive call
               entity_id: timer.alarm_triggered_reset
 
-            - service: input_boolean.turn_off
-              entity_id: input_boolean.alarm_triggered
+      default:
+        - service: input_boolean.turn_off
+          entity_id: input_boolean.alarm_triggered
 
-            - delay: 5
 
-            - service: input_boolean.turn_off
-              entity_id: input_boolean.alarm_pending # turns pending light scene on
 
-            - service: automation.turn_on
-              entity_id: automation.alarm_triggered_reset
-
-            - service: script.turn_on
-              entity_id: script.tts_play_saved_messages

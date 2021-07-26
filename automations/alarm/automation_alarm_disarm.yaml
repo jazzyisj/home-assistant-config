@@ -28,23 +28,18 @@
   initial_state: true
   mode: queued
   variables:
-    lock_sensors: "{{ ['sensor.side_door_lock_status','sensor.front_door_lock_status','sensor.back_door_lock_status','sensor.garage_door_lock_status'] }}"
+    prev_alarm_state: "{{ states('input_select.previous_alarm_mode') }}"
     person: >
-      {% if trigger.event is defined %}{% set action = trigger.event.data['action'] %}
-      {% else %}{% set action = 'none' %}
+      {% if trigger.id == 'lock_keypad' %}{% set to_state = trigger.to_state.state %}
+      {% else %}{% set action = trigger.event.data['action'] %}
       {% endif %}
-      {% if trigger.entity_id is defined %}
-        {% if trigger.entity_id in lock_sensors %}{% set to_state = trigger.to_state.state %}
-        {% else %}{% set to_state = 'none' %}
-        {% endif %}
-      {% else %}{% set to_state = 'none' %}
-      {% endif %}
-      {% if action in ['disarm_alarm_jason','open_garage_jason','panic_alarm_jason'] or to_state == 'Unlocked (Jason)' %} jason
-      {% elif action in ['disarm_alarm_sheri','open_garage_sheri','panic_alarm_sheri'] or to_state == 'Unlocked (Sheri)' %} sheri
+      {% if action in ['disarm_alarm_jason','open_garage_jason'] or to_state == 'Unlocked (Jason)' %} jason
+      {% elif action in ['disarm_alarm_sheri','open_garage_sheri'] or to_state == 'Unlocked (Sheri)' %} sheri
       {% elif to_state in ['Unlocked (Dawn)'] %} dawn
       {% endif %}
   trigger:
     - platform: state
+      id: lock_keypad
       entity_id:
         - sensor.side_door_lock_status
         - sensor.front_door_lock_status
@@ -74,34 +69,14 @@
       event_type: mobile_app_notification_action
       event_data:
         action: open_garage_sheri
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: panic_alarm_jason
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: panic_alarm_sheri
   condition:
     - condition: state
-      entity_id:  input_boolean.alarm_automation
+      entity_id: input_boolean.alarm_automation
       state: 'on'
 
-    - condition: template
-      value_template: "{{ is_state('input_boolean.lock_automation','on') if trigger.entity_id in lock_sensors else true }}"
+    - "{{ is_state('input_boolean.lock_automation','on') if trigger.id == 'lock_keypad' else true }}"
   action:
-    # - service: system_log.write
-    #   data:
-    #     logger: automation.alarm_disarm_arrive_home
-    #     level: error
-    #     message: |
-    #       *
-    #       person: {{ person }}
-    #       trigger.entity_id: {{ trigger.entity_id }}
-
-    - choose: # if triggered from mobile notification, dismiss notification on trigger device
+    - choose:
         - conditions: "{{ person in ['jason','sheri'] }}"
           sequence:
             - service: "notify.{{ person }}"
@@ -110,77 +85,88 @@
                 data:
                   tag: "{{ person }}_almost_home"
 
+    - condition: not
+      alias: Alarm is not already disarmed.
+      conditions:
+        - condition: state
+          entity_id: alarm_control_panel.alarmo
+          state: disarmed
+
     - choose:
         - conditions:
-            - condition: not
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.alarmo
-                  state: disarmed
+            - condition: trigger
+              alias: Alarm was disarmed with a lock keypad.
+              id: lock_keypad
           sequence:
-            - wait_template: > #UNLOCKED
-                {% if person == 'jason' %}
-                  {{ is_state('binary_sensor.jphone_device_locked','off')
-                      and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')) }}
-                {% elif person == 'sheri' %}
-                  {{ is_state('binary_sensor.sphone_device_locked','off')
-                      and (is_state('binary_sensor.sheri_home','on') or is_state('input_boolean.sheri_almost_home','on')) }}
-                {% elif trigger.entity_id in lock_sensors %} true
-                {% endif %}
-              timeout: 600
+            - service: script.disarm_alarm
+              data:
+                person: "{{ person }}"
+      default:
+        - wait_template: > #UNLOCKED
+            {% if person == 'jason' %}
+              {{ is_state('binary_sensor.jphone_device_locked','off')
+                  and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')) }}
+            {% elif person == 'sheri' %}
+              {{ is_state('binary_sensor.sphone_device_locked','off')
+                  and (is_state('binary_sensor.sheri_home','on') or is_state('input_boolean.sheri_almost_home','on')) }}
+            {% elif trigger.id == 'lock_keypad' %} true
+            {% endif %}
+          timeout: 600
 
-            - choose:
-                - conditions: "{{ wait.completed }}"
-                  sequence:
-                    - service: script.disarm_alarm
-                      data:
-                        person: "{{ person }}"
-              default:
-                - service: browser_mod.toast
+        - choose:
+            - conditions: "{{ wait.completed }}" # device unlocked
+              sequence:
+                - service: script.disarm_alarm
                   data:
-                    duration: 30000
-                    message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
+                    person: "{{ person }}"
 
-                - service: notify.mobile
-                  data:
-                    title: House Alarm Alert
-                    message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
-                    data:
-                      tag: "{{ person }}_almost_home"
-                      group: Alarm
-                      channel: General
-                      importance: max
-                      ttl: 0
-                      priority: high
-                      timeout: 3600
-                      clickAction: /lovelace/alarm
-                      color: !secret WARNING_COLOR
-                      icon_url: !secret ALERT_ICON
-                      actions:
-                        - title: Disarm
-                          action: "disarm_alarm_{{ person }}"
-                        - title: Garage
-                          action: "open_garage_{{ person }}"
-                        - title: Cameras
-                          action: URI
-                          uri: app://com.flir.consumer.flir.lorexcloud
+                - delay: 15 # wait for alarm to disarm
 
-            - wait_template: "{{ not is_state('alarm_control_panel.alarmo','disarmed') }}"
-              timeout: # alarm was armed, wait then rearm alarm if still disarmed
-                minutes: 10
+                - wait_template: "{{ not is_state('alarm_control_panel.alarmo','disarmed') }}"
+                  timeout: # wait then rearm alarm if wasn't rearmed
+                    minutes: 5
 
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: alarm_control_panel.alarmo
-                      state: disarmed
-                  sequence:
-                    - service: script.arm_alarm
-                      data:
-                        mode: >
-                          {% if is_state('binary_sensor.someone_home','off') %} away
-                          {% elif is_state('input_select.occupancy_mode','Night') %} night
-                          {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %} home
-                          {% endif %}
+                - choose:
+                    - conditions:
+                        - condition: state
+                          entity_id: alarm_control_panel.alarmo
+                          state: disarmed
+                      sequence:
+                        - service: script.arm_alarm
+                          data:
+                            mode: >
+                              {% if is_state('binary_sensor.someone_home','off') %} away
+                              {% elif is_state('input_select.occupancy_mode','Night') %} night
+                              {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %} home
+                              {% endif %}
 
+          default:
+            - service: browser_mod.toast
+              data:
+                duration: 30000
+                message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
+
+            - service: notify.mobile
+              data:
+                title: House Alarm Alert
+                message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
+                data:
+                  tag: "{{ person }}_almost_home"
+                  group: Alarm
+                  channel: General
+                  importance: max
+                  ttl: 0
+                  priority: high
+                  timeout: 3600
+                  clickAction: /lovelace/alarm
+                  color: !secret WARNING_COLOR
+                  icon_url: !secret ALERT_ICON
+                  actions:
+                    - title: Disarm
+                      action: "disarm_alarm_{{ person }}"
+                    - title: Garage
+                      action: "open_garage_{{ person }}"
+                    - title: Cameras
+                      action: URI
+                      uri: app://com.flir.consumer.flir.lorexcloud
 

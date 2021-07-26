@@ -1,0 +1,145 @@
+#######################################################################################################################
+## Alarm - Notifications
+#######################################################################################################################
+- id: alarm_notifications
+  alias: "[Alarm] Notifications"
+  description: Send alarm notifications.
+  initial_state: true
+  mode: queued
+  variables:
+    type: "{{ states('sensor.alarm_type') }}"
+  trigger:
+    - platform: state
+      id: pending
+      entity_id: alarm_control_panel.alarmo
+      to: pending
+      for: 10 # allow alarm_type, current_alarm, snapshots to set
+
+    - platform: state
+      id: triggered
+      entity_id: alarm_control_panel.alarmo
+      to: triggered
+      for: 10 # allow alarm_type, current_alarm, snapshots to set
+
+    - platform: state
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      to: 'off'
+
+  action:
+    - choose:
+        - conditions: "{{ trigger.id == 'pending' }}"
+          sequence:
+            - repeat: # must have a repeat.index for image/icon templates
+                count: 1
+                sequence:
+                  - service: notify.alarm # not an alert entity becasuse of icon/image template
+                    data:
+                      title: House Alarm Pending
+                      message: "Alarm Pending: {{ states('input_text.current_alarm') }}"
+                      data:
+                        tag: alarm_pending
+                        group: Alarm
+                        channel: Alert
+                        importance: max
+                        ttl: 0
+                        priority: high
+                        clickAction: /lovelace/alarm
+                        color: !secret CRITICAL_COLOR
+                        image: !secret ALARM_IMAGE
+                        icon_url: !secret ALARM_ICON
+                        chronometer: true
+                        when: >
+                          {% if state_attr('alarm_control_panel.alarmo','delay')|lower not in ['unknown','unavailable','none'] %}
+                            {{ (as_timestamp(now()) + state_attr('alarm_control_panel.alarmo','delay')|float )|int }}
+                          {% else %} 0
+                          {% endif %}
+                        actions:
+                          - title: Disarm
+                            action: disarm_alarm
+                          - title: Cameras
+                            action: URI
+                            uri: app://com.flir.consumer.flir.lorexcloud
+
+        - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_pending' }}"
+          sequence:
+            - service: notify.mobile # do not send clear_notifications to TVs
+              data:
+                message: clear_notification
+                data:
+                  tag: alarm_pending
+
+        - conditions: "{{ trigger.id == 'triggered' }}"
+          sequence:
+            - service: persistent_notification.create
+              data:
+                title: >
+                  {% if type == 'smoke' %} Smoke Detected!
+                  {% elif type == 'co' %} CO Detected!
+                  {% elif type == 'tornado' %} Tornado Alert!
+                  {% elif type == 'burglar' %} Burglar Alarm!
+                  {% endif %}
+                message: >
+                  {% if type == 'smoke' %} Smoke detected! Leave the house now!
+                  {% elif type == 'co' %} CO detected! Leave the house now!
+                  {% elif type == 'tornado' %} Tornado Alert - Take Cover!
+                  {% elif type == 'burglar' %} Trigger: {{ states('input_text.current_alarm') }}
+                  {% endif %}
+                  {{ now().strftime('%H:%M  %Y-%m-%d') }}
+                notification_id: alarm_triggered
+
+            - repeat:
+                sequence:
+                  - service: notify.alarm # not an alert entity becasuse of icon/image template
+                    data:
+                      title: >
+                        {% set type = states('sensor.alarm_type') %}
+                        {% if type == 'smoke' %} Smoke Detected!
+                        {% elif type == 'co' %} CO Detected!
+                        {% elif type == 'tornado' %} Tornado Alert!
+                        {% elif type == 'burglar' %} Burglar Alarm!
+                        {% endif %}
+                      message: >
+                        {%- set type = states('sensor.alarm_type') -%}
+                        {%- if type == 'smoke' -%} Smoke detected - Leave the house now!
+                        {%- elif type == 'co' -%} CO detected - Leave the house now!
+                        {%- elif type == 'tornado'-%} Tornado Alert - Take Cover!
+                        {%- elif type == 'burglar' -%} Alarm - {{ states('input_text.current_alarm') }}
+                        {%- endif -%}
+                      data:
+                        tag: "alarm_triggered{{ repeat.index }}"
+                        group: Alarm
+                        channel: alarm_stream
+                        importance: max
+                        ttl: 0
+                        priority: high
+                        persistent: true
+                        clickAction: /lovelace/alarm
+                        color: !secret CRITICAL_COLOR
+                        icon_url: !secret ALARM_ICON
+                        image: !secret ALARM_IMAGE
+                        actions:
+                          - title: Disarm
+                            action: disarm_alarm
+                          - title: Cameras
+                            action: URI
+                            uri: app://com.flir.consumer.flir.lorexcloud
+
+                  - wait_template: "{{ not is_state('alarm_control_panel.alarmo','triggered') }}"
+                    timeout: 60 # delay between notifications
+                until: "{{ not is_state('alarm_control_panel.alarmo','triggered') or repeat.index == 3 }}"
+
+        - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_triggered' }}"
+          sequence:
+            - repeat:
+                count: 3
+                sequence:
+                  - delay: 1 # throttle notifications
+                  - service: notify.mobile # do not send clear_notifications to TVs
+                    data:
+                      message: clear_notification
+                      data:
+                        tag: "alarm_triggered{{ repeat.index }}"
+
+

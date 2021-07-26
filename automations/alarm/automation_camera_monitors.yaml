@@ -4,7 +4,6 @@
 - id: alarm_camera_monitors
   alias: "[Alarm] Camera Monitors"
   description: Turn camera monitors on.
-  initial_state: true
   trigger:
     - platform: state
       entity_id: alarm_control_panel.alarmo
@@ -12,19 +11,25 @@
   condition:
     - condition: state
       entity_id:
+        - input_boolean.alarm_automation
         - input_boolean.media_player_automation
         - binary_sensor.someone_home
       state: 'on'
   action:
-    - service: media_player.turn_on
+    - service: media_player.turn_on #ISSUE TV's don't always turn on
       entity_id:
         - media_player.living_room_tv
         - media_player.bedroom_tv
 
-    - wait_template: "{{ is_state('media_player.living_room_tv','on') and is_state('media_player.bedroom_tv','on') }}"
+    - wait_template: >
+        {{ is_state('media_player.living_room_tv','on')
+            and is_state('media_player.bedroom_tv','on') }}
       timeout: 10
 
-    - delay: 2 #VERIFY wait for HDMI to be available
+    - wait_template: > # wait for HDMI to be available
+        {{ 'HDMI 1' in state_attr('media_player.living_room_tv','source_list')
+            and 'HDMI 1' in state_attr('media_player.bedroom_tv','source_list') }}
+      timeout: 5
 
     - service: media_player.select_source
       data:
@@ -35,35 +40,14 @@
 
     - wait_template: "{{ is_state('input_boolean.alarm_triggered','off') }}"
 
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: binary_sensor.someone_home
-              state: 'off'
+    - choose: # tv is still on security cam is still source, turn it off
+        - conditions: "{{ is_state_attr('media_player.living_room_tv','source','HDMI 1') }}"
           sequence:
-            - choose: # nobody home, turn off tv's
-                - conditions:
-                    - condition: state
-                      entity_id: input_boolean.media_player_automation
-                      state: 'on'
+            - service: media_player.turn_off
+              entity_id: media_player.living_room_tv
 
-                    - condition: state
-                      entity_id: input_boolean.alarm_triggered
-                      state: 'on'
-                  sequence:
-                    - service: media_player.turn_off
-                      entity_id:
-                        - media_player.living_room_tv
-                        - media_player.bedroom_tv
-      default:
-        - choose: # tv is still on security cam source, turn it off
-            - conditions: "{{ is_state_attr('media_player.living_room_tv','source','HDMI 1') }}"
-              sequence:
-                - service: media_player.turn_off
-                  entity_id: media_player.living_room_tv
-
-        - choose:
-            - conditions: "{{ is_state_attr('media_player.bedroom_tv','source','HDMI 1') }}"
-              sequence:
-                - service: media_player.turn_off
-                  entity_id: media_player.bedroom_tv
+    - choose:
+        - conditions: "{{ is_state_attr('media_player.bedroom_tv','source','HDMI 1') }}"
+          sequence:
+            - service: media_player.turn_off
+              entity_id: media_player.bedroom_tv
