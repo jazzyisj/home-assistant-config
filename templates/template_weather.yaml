@@ -49,7 +49,7 @@
       state: "{{ is_state('binary_sensor.noaa_weather_alert','on') or is_state('binary_sensor.envcan_weather_alert','on') }}"
 
     - unique_id: air_quality_alert
-      state: "{{ states('sensor.waqi_windsor')|int > 100  and is_state('input_boolean.weather_alerts','on') }}"
+      state: "{{ states('sensor.uv_index')|int > 100  and is_state('input_boolean.weather_alerts','on') }}"
 
     - unique_id: uv_risk_alert
       state: "{{ states('sensor.sensor.max_uv_index')|int > 6 and is_state('input_boolean.weather_alerts','on') }}"
@@ -63,20 +63,37 @@
             or is_state('binary_sensor.storm_approaching_alert','on') }}
 
     - unique_id: outdoor_high_temperature_alert
+      delay_on: 30 # avoid alert on temporary spike
       state: >
-        {{ states('sensor.climacell_feels_like')|int > states('input_number.outdoor_high_temperature_threshold')|int
+        {{ states('sensor.outdoor_apparent_temperature')|int > states('input_number.outdoor_high_temperature_threshold')|int
             and is_state('input_boolean.weather_alerts','on') }}
-      availability: >
-        {{ is_state('binary_sensor.climacell_connected','on')
-            and not states('sensor.climacell_feels_like')|lower in ['unknown','unavailable','none'] }}
+      availability: > # just to be consistent
+        {{ states('sensor.outdoor_apparent_temperature')|lower not in ['unknown','unavailable','none'] }}
 
     - unique_id: outdoor_low_temperature_alert
+      delay_on: 30 # avoid alert on temporary spike, template reload
       state: >
-        {{ states('sensor.climacell_feels_like')|int < states('input_number.outdoor_low_temperature_threshold')|int
+        {{ states('sensor.outdoor_apparent_temperature')|int < states('input_number.outdoor_low_temperature_threshold')|int
             and is_state('input_boolean.weather_alerts','on') }}
-      availability: >
-        {{ is_state('binary_sensor.climacell_connected','on')
-            and not states('sensor.climacell_feels_like')|lower in ['unknown','unavailable','none'] }}
+      availability: > # req unknown|int = 0
+        {{ states('sensor.outdoor_apparent_temperature')|lower not in ['unknown','unavailable','none'] }}
+
+    - unique_id: outdoor_temperature_alert # for weather card
+      name: Outdoor Temperature Alert
+      icon: >
+        {% if is_state('binary_sensor.outdoor_high_temperature_alert','on') %} mdi:thermometer-alert
+        {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} mdi:thermometer-alert
+        {% else %} mdi:thermometer
+        {% endif %}
+      state: >
+        {{ is_state('binary_sensor.outdoor_high_temperature_alert','on')
+            or is_state('binary_sensor.outdoor_low_temperature_alert','on') }}
+      attributes:
+        type: >
+          {% if is_state('binary_sensor.outdoor_high_temperature_alert','on') %} Heat
+          {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} Cold
+          {% else %} Off
+          {% endif %}
 
     - unique_id: asthma_risk_alert
       state: "{{ is_state('sensor.asthma_risk_today','High') and is_state('input_boolean.weather_alerts','on') }}"
@@ -85,9 +102,8 @@
       state: "{{ is_state('sensor.allergy_risk_today','High') and is_state('input_boolean.weather_alerts','on') }}"
 
     - unique_id: flu_risk_alert
-      state: > # No Data, Minimal, Low, Moderate, High, None  #IDEA kill CDC?
-        {{ (states('sensor.cdc_level')|lower in ['moderate','high']
-            or states('sensor.cold_flu_index_today')|float > 4.9
+      state: > # No Data, Minimal, Low, Moderate, High, None
+        {{ (states('sensor.cold_flu_index_today')|float > 4.9
             or states('sensor.cold_flu_forecasted_average')|float > 4.9)
               and is_state('input_boolean.weather_alerts','on') }}
 
@@ -104,33 +120,20 @@
       icon: mdi:weather-hurricane
       device_class: safety
       state: >
-        {{ 'tornado' in states('sensor.warnings')|lower
+        {{ 'tornado' in states('sensor.envcan_warnings')|lower
             or (is_state_attr('binary_sensor.noaa_weather_alert','condition','tornado')
               and states('input_select.current_noaa_alert_severity') in ['severe','extreme']) }}
 - sensor:
-    - unique_id: temperature_alert # for weather card
-      name: Temperature Alert
-      icon: >
-        {% if is_state('binary_sensor.outdoor_high_temperature_alert','on') %} mdi:thermometer-alert
-        {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} mdi:thermometer-alert
-        {% else %} mdi:thermometer
-        {% endif %}
-      state: >
-        {% if is_state('binary_sensor.outdoor_high_temperature_alert','on') %} Heat
-        {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} Cold
-        {% else %} Off
-        {% endif %}
-
     - unique_id: temperature_trend # for weather card
       name: Temperature Trend
       icon: >
-        {% if is_state('binary_sensor.climacell_temperature_rising','on') %} mdi:arrow-up-circle
-        {% elif is_state('binary_sensor.climacell_temperature_falling','on') %} mdi:arrow-down-circle
+        {% if is_state('binary_sensor.temperature_rising','on') %} mdi:arrow-up-circle
+        {% elif is_state('binary_sensor.temperature_falling','on') %} mdi:arrow-down-circle
         {% else %} mdi:minus-circle
         {% endif %}
       state: >
-        {% if is_state('binary_sensor.climacell_temperature_rising','on') %} Rising
-        {% elif is_state('binary_sensor.climacell_temperature_falling','on') %} Falling
+        {% if is_state('binary_sensor.temperature_rising','on') %} Rising
+        {% elif is_state('binary_sensor.temperature_falling','on') %} Falling
         {% else %} Steady
         {% endif %}
 
@@ -239,7 +242,7 @@
       name: AQI Risk Level
       icon: mdi:smog
       state: >
-        {% set level = states('sensor.waqi_windsor')|int %}
+        {% set level = states('sensor.air_quality_index')|int %}
         {% if level < 51 %} Good
         {% elif level < 101 %} Moderate
         {% elif level < 101 %} Unhealthy Sensitive Groups
@@ -247,13 +250,11 @@
         {% elif level < 301 %} Very Unhealthy
         {% else %} Hazardous
         {% endif %}
-      availability: >
-        {{ is_state('binary_sensor.waqi_connected','on')
-            and not states('sensor.waqi_windsor')|lower in ['unknown','unavailable','none'] }}
+      availability: "{{ not states('sensor.air_quality_index')|lower in ['unknown','unavailable','none'] }}"
 
     - unique_id: flu_risk_level
       name: Flu Risk Level
-      icon: mdi:biohazard
+      icon: mdi:virus
       state: >
         {% set level = states('sensor.cold_flu_index_today')|int %}
         {% if level < 2.5 %} Low
@@ -262,3 +263,164 @@
         {% elif level < 9.7 %} Medium-High
         {% else %} High
         {% endif %}
+
+    # overload weather integration sensors #IDEA second integration as backup?
+    - unique_id: current_condition
+      name: Current Condition
+      icon: mdi:weather-partly-rainy
+      state: "{{ states('sensor.climacell_current_condition') }}"
+
+    - unique_id: outdoor_temperature
+      name: Outdoor Temperature
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: "{{ states('sensor.climacell_temperature')|int }}"
+      availability: "{{ states('sensor.climacell_temperature')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: outdoor_apparent_temperature
+      name: Outdoor Apparent Temperature
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: "{{ states('sensor.climacell_feels_like')|int }}"  # unknown|int = 0
+      availability: "{{ states('sensor.climacell_feels_like')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: dew_point
+      name: Dew Point
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: "{{ states('sensor.climacell_dew_point')|int }}"
+      availability: "{{ states('sensor.climacell_dew_point')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: outdoor_humidity
+      name: Outdoor Humidity
+      device_class: humidity
+      state_class: measurement
+      unit_of_measurement: '%'
+      state: "{{ states('sensor.climacell_humidity') }}"
+
+    - unique_id: precipitation_probability
+      name: Precipitation Probability
+      icon: mdi:weather-rainy
+      state_class: measurement
+      unit_of_measurement: '%'
+      state: "{{ states('sensor.climacell_precipitation_probability') }}"
+
+    - unique_id: precipitation_intensity
+      name: Precipitation Intensity
+      icon: mdi:weather-pouring
+      state_class: measurement
+      unit_of_measurement: mm/hr
+      state: "{{ states('sensor.climacell_precipitation_intensity') }}"
+
+    - unique_id: barometric_pressure
+      name: Barometric Pressure
+      device_class: pressure
+      state_class: measurement
+      unit_of_measurement: hPa
+      state: "{{ states('sensor.climacell_pressure_surface_level') }}"
+
+    - unique_id: wind_speed
+      name: Wind Speed
+      icon: mdi:weather-windy
+      state_class: measurement
+      unit_of_measurement: m/s
+      state: "{{ states('sensor.climacell_wind_speed')|int }}"
+      availability: "{{ states('sensor.climacell_wind_speed')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: wind_gust
+      name: Wind Gust
+      icon: mdi:weather-windy
+      state_class: measurement
+      unit_of_measurement: m/s
+      state: "{{ states('sensor.climacell_wind_gust')|int }}"
+      availability: "{{ states('sensor.climacell_wind_gust')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: wind_bearing
+      name: Wind Bearing
+      icon: mdi:compass
+      state_class: measurement
+      unit_of_measurement: °
+      state: "{{ states('sensor.climacell_wind_bearing') }}"
+
+    - unique_id: cloud_cover
+      name: Cloud Cover
+      icon: mdi:cloud
+      state_class: measurement
+      unit_of_measurement: '%'
+      state: "{{ states('sensor.climacell_cloud_cover') }}"
+
+    - unique_id: visibility
+      name: Visibility
+      icon: mdi:eye
+      state_class: measurement
+      unit_of_measurement: km
+      state: "{{ states('sensor.climacell_visibility') }}"
+
+    - unique_id: air_quality_index
+      name: Air Quality Index
+      device_class: aqi
+      state_class: measurement
+      unit_of_measurement: AQI
+      state: "{{ states('sensor.waqi_windsor') }}"
+      #OPTION  sensor.envcan_air_quality_health_index
+
+    - unique_id: uv_index
+      name: UV Index
+      icon: mdi:brightness-6
+      state_class: measurement
+      state: "{{ states('sensor.current_uv_index') }}" # open uv
+      #OPTION sensor.climacell_global_horizontal_irradiance ?
+      #OPTION sensor.envcan_uv_index
+
+    - unique_id: ozone
+      name: Ozone
+      device_class: ozone
+      state_class: measurement
+      unit_of_measurement: ppb # µg/m³
+      state:  "{{ states('sensor.climacell_ozone') }}"
+      #OPTION sensor.current_ozone_level  openuv unit: du <- pay attention
+      #OPTION sensor.waqi_windsor attribute: ozone unit: AQI <- pay attention
+
+    - unique_id: carbon_monoxide
+      name: Carbon Monoxide
+      device_class: carbon_monoxide
+      state_class: measurement
+      unit_of_measurement: ppm # Gas CNG/LPG
+      state: "{{ states('sensor.climacell_carbon_monoxide') }}"
+      #OPTION sensor.waqi_windsor attribute: co
+
+    - unique_id: nitrogen_dioxide
+      name: Nitrogen Dioxide
+      device_class: nitrogen_dioxide
+      state_class: measurement
+      unit_of_measurement: ppb # µg/m³
+      state: "{{ states('sensor.climacell_nitrogen_dioxide') }}"
+      #OPTION sensor.waqi_windsor attribute: nitrogen_dioxide  unit: AQI <- pay attention
+
+    - unique_id: sulphur_dioxide
+      name: Sulphur Dioxide
+      device_class: sulphur_dioxide
+      state_class: measurement
+      unit_of_measurement: ppb # µg/m³
+      state: "{{ states('sensor.climacell_sulfur_dioxide') }}"
+      #OPTION sensor.waqi_windsor attribute: sulfur_dioxide   unit: AQI <- pay attention
+
+    - unique_id: particulate_matter_10
+      name: Particulate Matter 10
+      device_class: pm10
+      state_class: measurement
+      unit_of_measurement: μg/m³
+      state: "{{ states('sensor.climacell_particulate_matter_10_mm') }}"
+      #OPTION sensor.waqi_windsor attribute: pm_10  unit: AQI <- pay attention
+
+    - unique_id: particulate_matter_2_5
+      name: Particulate Matter 2.5
+      device_class: pm25
+      state_class: measurement
+      unit_of_measurement: μg/m³
+      state: "{{ states('sensor.climacell_particulate_matter_2_5_mm') }}"
+      #OPTION sensor.waqi_windsor attribute: pm_2_5  unit: AQI <- pay attention
+

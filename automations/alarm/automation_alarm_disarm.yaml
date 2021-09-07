@@ -86,7 +86,7 @@
                   tag: "{{ person }}_almost_home"
 
     - condition: not
-      alias: Alarm is not already disarmed.
+      alias: Alarm is not already disarmed
       conditions:
         - condition: state
           entity_id: alarm_control_panel.alarmo
@@ -95,78 +95,85 @@
     - choose:
         - conditions:
             - condition: trigger
-              alias: Alarm was disarmed with a lock keypad.
+              alias: Alarm was disarmed with a lock keypad
               id: lock_keypad
           sequence:
             - service: script.disarm_alarm
               data:
                 person: "{{ person }}"
       default:
-        - wait_template: > #UNLOCKED
+        - wait_template: > #UNLOCKED #ISSUE device_locked takes a while to update
             {% if person == 'jason' %}
-              {{ is_state('binary_sensor.jphone_device_locked','off')
-                  and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')) }}
+              {{ (is_state('binary_sensor.jphone_device_locked','off')
+                    and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')))
+                  or is_state('alarm_control_panel.alarmo','disarmed') }}
             {% elif person == 'sheri' %}
-              {{ is_state('binary_sensor.sphone_device_locked','off')
-                  and (is_state('binary_sensor.sheri_home','on') or is_state('input_boolean.sheri_almost_home','on')) }}
+              {{ (is_state('binary_sensor.sphone_device_locked','off')
+                    and (is_state('binary_sensor.sheri_home','on') or is_state('input_boolean.sheri_almost_home','on')))
+                  or is_state('alarm_control_panel.alarmo','disarmed') }} }}
             {% elif trigger.id == 'lock_keypad' %} true
             {% endif %}
           timeout: 600
 
         - choose:
-            - conditions: "{{ wait.completed }}" # device unlocked
+            - conditions: "{{ not is_state('alarm_control_panel.alarmo','disarmed') }}"
               sequence:
-                - service: script.disarm_alarm
-                  data:
-                    person: "{{ person }}"
-
-                - delay: 15 # wait for alarm to disarm
-
-                - wait_template: "{{ not is_state('alarm_control_panel.alarmo','disarmed') }}"
-                  timeout: # wait then rearm alarm if wasn't rearmed
-                    minutes: 5
-
                 - choose:
-                    - conditions:
-                        - condition: state
-                          entity_id: alarm_control_panel.alarmo
-                          state: disarmed
+                    - conditions: "{{ wait.completed }}" # device unlocked
                       sequence:
-                        - service: script.arm_alarm
+                        - service: script.turn_on
                           data:
-                            mode: >
-                              {% if is_state('binary_sensor.someone_home','off') %} away
-                              {% elif is_state('input_select.occupancy_mode','Night') %} night
-                              {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %} home
-                              {% endif %}
+                            entity_id: script.disarm_alarm
+                            variables:
+                              person: "{{ person }}"
 
-          default:
-            - service: browser_mod.toast
-              data:
-                duration: 30000
-                message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
+                        - delay: 15 # wait for alarm to disarm
 
-            - service: notify.mobile
-              data:
-                title: House Alarm Alert
-                message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
-                data:
-                  tag: "{{ person }}_almost_home"
-                  group: Alarm
-                  channel: General
-                  importance: max
-                  ttl: 0
-                  priority: high
-                  timeout: 3600
-                  clickAction: /lovelace/alarm
-                  color: !secret WARNING_COLOR
-                  icon_url: !secret ALERT_ICON
-                  actions:
-                    - title: Disarm
-                      action: "disarm_alarm_{{ person }}"
-                    - title: Garage
-                      action: "open_garage_{{ person }}"
-                    - title: Cameras
-                      action: URI
-                      uri: app://com.flir.consumer.flir.lorexcloud
+                        - wait_template: "{{ not is_state('alarm_control_panel.alarmo','disarmed') }}"
+                          timeout: # wait then rearm alarm if wasn't rearmed
+                            minutes: 5
+
+                        - choose:
+                            - conditions:
+                                - condition: state
+                                  entity_id: alarm_control_panel.alarmo
+                                  state: disarmed
+                              sequence:
+                                - service: script.arm_alarm
+                                  data:
+                                    mode: >
+                                      {% if is_state('binary_sensor.someone_home','off') %} away
+                                      {% elif is_state('input_select.occupancy_mode','Night') %} night
+                                      {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %} home
+                                      {% endif %}
+
+                  default:
+                    - service: browser_mod.toast
+                      data:
+                        duration: 30000
+                        message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
+
+                    - service: notify.mobile
+                      data:
+                        title: House Alarm Alert
+                        message: "{{ person|title }} attempted to disarm the house alarm with a locked device."
+                        data:
+                          tag: "{{ person }}_almost_home"
+                          group: Alarm
+                          channel: General
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          timeout: 3600
+                          clickAction: /lovelace/alarm
+                          color: !secret WARNING_COLOR
+                          icon_url: !secret ALERT_ICON
+                          actions:
+                            - title: Disarm
+                              action: "disarm_alarm_{{ person }}"
+                            - title: Garage
+                              action: "open_garage_{{ person }}"
+                            - title: Cameras
+                              action: URI
+                              uri: app://com.flir.consumer.flir.lorexcloud
 

@@ -1,0 +1,81 @@
+#######################################################################################################################
+## Radio - Station Update
+#######################################################################################################################
+- id: radio_station_update
+  alias: "[Radio] Station Update"
+  description: Update radio station input options.
+  mode: restart
+  variables:
+    selected_stations: "{{ expand('group.radio_selected_stations')|map(attribute='entity_id')|list }}"
+    stored_stations: "{{ expand('group.radio_stored_stations')|map(attribute='entity_id')|list }}"
+  trigger:
+    - platform: state
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: state
+      entity_id: sensor.streaming_radio_stations
+      attribute: stations
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: &radio_automations
+          - automation.radio_store_station_selection # don't overwrite stored values
+          - automation.media_player_media_auto_resume # triggered by input_select.radio_station
+      data:
+        stop_actions: false
+
+    - service: input_select.set_options
+      target:
+        entity_id: &radio_selects
+          - input_select.radio_station
+          - input_select.media_preset_radio_wake
+          - input_select.media_preset_radio_morning
+          - input_select.media_preset_radio_sleep
+          - input_select.media_preset_radio_jason
+          - input_select.media_preset_radio_sheri
+          - input_select.media_preset_radio_shower
+          - input_select.media_preset_radio_company
+          - input_select.alarm_clock_radio_auto_alarm
+          - input_select.alarm_clock_radio_manual_alarm
+          - input_select.alarm_clock_radio_nap_alarm
+      data:
+        options: >
+          [{% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
+            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+
+    - repeat: # restore previous selection (values reset when options reloaded)
+        count: "{{ selected_stations|count|int }}"
+        sequence:
+          - choose:
+              - conditions: "{{ states(stored_stations[repeat.index-1])|lower not in ['','unknown','unavailable','none'] }}"
+                sequence:
+                  - service: input_select.select_option
+                    target:
+                      entity_id: "{{ selected_stations[repeat.index-1] }}"
+                    data:
+                      option: "{{ states(stored_stations[repeat.index-1]) }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: *radio_automations
+
+#######################################################################################################################
+## Radio - Store Station Selection
+#######################################################################################################################
+- id: radio_store_station_selection
+  alias: "[Radio] Store Station Selection"
+  description: Update stored radio station selection.
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: *radio_selects
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: "{{ trigger.entity_id|replace('input_select','input_text') }}"
+      data:
+        value: "{{ states(trigger.entity_id) }}"
+
+

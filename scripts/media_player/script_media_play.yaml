@@ -45,7 +45,7 @@ media_play:
       {% elif media_type in ['radio','spotify'] %}{% set vol = states('input_number.' ~ media_type ~ '_volume')|float %}
       {% endif %}
       {{ qvol if (is_state('binary_sensor.quiet_hours','on') and vol > qvol) and is_state('input_boolean.volume_override','off') else vol }}
-    account: >
+    account: > #SPOTIFY - redo spotify account logic
       {% if is_state('input_select.spotify_account','Jason') %}{% set spacct = 'jazzyisj' %}
       {% elif is_state('input_select.spotify_account','Sheri') %}{% set spacct = 'sherigagnon' %}
       {% else %}{% set spacct = 'hassio' %}
@@ -65,7 +65,7 @@ media_play:
     speaker_groups: "{{ state_attr('sensor.media_player_groups','players') }}"
     radio_player: "{{ states('sensor.radio_media_player') }}"
     radio_players: "{{ state_attr('sensor.radio_media_player','players') }}"
-    # sensor.spotify_media_player not populated until playing so determine media player from selected device
+    #SPOTIFY sensor.spotify_media_player not populated until playing so determine media player from selected device
     spotify_player: "{{ expand(state_attr('sensor.media_players','players'))|selectattr('name','eq',device)|map(attribute='entity_id')|list|join('') }}"
     spotify_players: "{{ expand(state_attr('sensor.media_players','players'))|selectattr('attributes.' ~ spotify_player.split('.')[1],'eq',true)|map(attribute='entity_id')|list }}"
     alarm_player: "{{ states('sensor.alarm_clock_media_player') }}"
@@ -156,7 +156,6 @@ media_play:
                       {{ found.value|int == 1 }}
                     {% else %} false
                     {% endif %}
-
           sequence:
             - service: browser_mod.toast
               data:
@@ -171,11 +170,21 @@ media_play:
                   {% endif %}
                   {{ message }}
 
-            - service: script.media_stop
-              data:
-                media_type: "{{ media_type }}"
-                reset_volume: false
+            - condition: template
+              alias: Valid media type.
+              value_template: "{{ media in media_types }}"
 
+            - service: automation.turn_off
+              data:
+                entity_id: automation.media_player_media_turned_off
+                stop_actions: false
+
+            - service: input_boolean.turn_off
+              data:
+                entity_id: "input_boolean.{{ media_type }}"
+
+            - service: automation.turn_on
+              entity_id: automation.media_player_media_turned_off
       default:
         - wait_template: "{{ is_state('input_boolean.tts_playing','off') and is_state('script.media_stop','off') }}"
           timeout:  # wait for tts/previous stop script to finish
@@ -191,16 +200,15 @@ media_play:
                   data:
                     duration: 30000
                     message: "{{ media_type|title }} cannot play. Something has gone wrong."
-
           default:
             - choose:
-                - conditions: "{{ is_state_attr('binary_sensor.phone_in_use','speaker_on','on') }}"
+                - conditions: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on','on') }}"
                   sequence:
                     - service: browser_mod.toast
                       data:
                         duration: 30000
                         message: "{{ media_type|title }} will play when the mobile speakerphone has turned off."
-                    - wait_template: "{{ is_state_attr('binary_sensor.phone_in_use','speaker_on','off') }}"
+                    - wait_template: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on','off') }}"
                       timeout:
                         minutes: 15
                       continue_on_timeout: false # after timeout media will not play
@@ -250,17 +258,28 @@ media_play:
                         - service: media_player.play_media
                           data:
                             entity_id: "{{ player }}"
-                            media_content_id: !include /config/include/template/radio_station_selection_template.yaml
+                            media_content_id: >
+                              {% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
+                                {% if is_state('input_select.radio_station',item.name) %}
+                                  {{ item.url }}
+                                {% endif %}
+                              {% endfor %}
                             media_content_type: music
                             extra:
                               title: "{{ states('input_select.radio_station') }}"
                               thumb: >
-                                {% if states('sensor.radio_status') in [ 'on','off','failed','unknown'] %} {% set status = 'on' %}
-                                {% elif states('sensor.radio_status') == 'wake' %}{% set status = 'wake' %}
-                                {% elif states('sensor.radio_status') == 'sleep' %}{% set status = 'sleep' %}
-                                {% else %} {% set status = 'on' %}
-                                {% endif %}
-                                https://82l1mjsgl3dp23jw4nd1sh0n7ykww05d.ui.nabu.casa/local/images/glance/radio_{{ status }}.png
+                                {% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
+                                  {% if is_state('input_select.radio_station',item.name) %}
+                                    {{ item.image_url }}
+                                  {% endif %}
+                                {% endfor %}
+
+                          #DELETE {% if states('sensor.radio_status') in [ 'on','off','failed','unknown'] %} {% set status = 'on' %}
+                          # {% elif states('sensor.radio_status') == 'wake' %}{% set status = 'wake' %}
+                          # {% elif states('sensor.radio_status') == 'sleep' %}{% set status = 'sleep' %}
+                          # {% else %} {% set status = 'on' %}
+                          # {% endif %}
+                          # https://82l1mjsgl3dp23jw4nd1sh0n7ykww05d.ui.nabu.casa/local/images/glance/radio_{{ status }}.png
 
                     - conditions: "{{ media_type == 'spotify' }}"
                       sequence:
@@ -271,10 +290,10 @@ media_play:
                                   data:
                                     account: "{{ account }}"
                                     device_name: "{{ device }}"
-                                    uri: > #SPOTIFY
-                                      {% for item in state_attr('sensor.spotcast_hassio','playlists')|from_json -%}
+                                    uri: >
+                                      {% for item in state_attr('sensor.playlists_sensor','playlists') -%}
                                         {% if item.name == playlist %}
-                                          spotify:{{ item.type }}:{{ item.uri }}
+                                          {{ item.uri }}
                                         {% endif %}
                                       {% endfor %}
                                     random_song: "{{ random }}"
@@ -294,16 +313,15 @@ media_play:
                                     shuffle: "{{ shuffle }}"
                                     ignore_fully_played: true
                                     force_playback: true
-
                           default:
                             - service: spotcast.start
                               data:
                                 account: "{{ account }}"
                                 device_name: "{{ device }}"
-                                uri: > #SPOTIFY
-                                  {% for item in state_attr('sensor.spotcast_hassio','playlists')|from_json -%}
+                                uri: >
+                                  {% for item in state_attr('sensor.playlists_sensor','playlists') -%}
                                     {% if item.name == playlist %}
-                                      spotify:{{ item.type }}:{{ item.uri }}
+                                      {{ item.uri }}
                                     {% endif %}
                                   {% endfor %}
                                 random_song: "{{ random }}"

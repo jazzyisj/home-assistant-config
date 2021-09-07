@@ -105,6 +105,7 @@ class CustomFanPercentRow extends Polymer.Element {
 			customSetpoints: false,
 			reverseButtons: false,
 			isTwoSpeedFan: false,
+			sendStateWithSpeed: false,
 			offPercentage: 0,
 			lowPercentage: 33,
 			medPercentage: 66,
@@ -132,6 +133,7 @@ class CustomFanPercentRow extends Polymer.Element {
 		const custSetpoint = config.customSetpoints;
 		const revButtons = config.reverseButtons;
 		const twoSpdFan = config.isTwoSpeedFan;
+		const sendStateWithSpeed = config.sendStateWithSpeed;
 		const buttonWidth = config.width;
 		const buttonHeight = config.height;
 		const OnLowClr = config.isOnLowColor;
@@ -342,12 +344,21 @@ class CustomFanPercentRow extends Polymer.Element {
 			param.percentage = this._offSP;
 			this.hass.callService('fan', 'set_percentage', param);
 		} else if (level == 'low') {
+			if(this._config.sendStateWithSpeed){
+			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity});
+			}
 			param.percentage = this._lowSP;
 			this.hass.callService('fan', 'set_percentage', param);
 		} else if (level == 'medium') {
+			if(this._config.sendStateWithSpeed){
+			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity});
+			}
 			param.percentage = this._medSP;
 			this.hass.callService('fan', 'set_percentage', param);
 		} else if (level == 'high') {
+			if(this._config.sendStateWithSpeed){
+			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity});
+			}
 			param.percentage = this._highSP;
 			this.hass.callService('fan', 'set_percentage', param);
 		}

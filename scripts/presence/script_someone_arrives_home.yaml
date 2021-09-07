@@ -25,9 +25,11 @@ someone_arrives_home:
                         {% elif person == 'sheri' %}{{ is_state('input_boolean.sheri_almost_home','off') }}
                         {% endif %}
                   sequence:
-                    - service: script.arriving_home_notification
+                    - service: script.turn_on
                       data:
-                        person: "{{ person }}"
+                        entity_id: script.arriving_home_notification
+                        variables:
+                          person: "{{ person }}"
 
               default:
                 - service: input_boolean.turn_off
@@ -35,6 +37,10 @@ someone_arrives_home:
                     entity_id: "input_boolean.{{ person }}_almost_home"
 
             - service: script.update_traffic_sensors # update traffic sensors to ensure time to home is zeroed out
+
+    - service: input_boolean.turn_on
+      data:
+        entity_id: "input_boolean.{{ person }}_just_arrived_home"
 
     - service: input_select.select_option
       data: # clear last_person_to_arrive so last_changed attribute gets updated if set value didn't change
@@ -93,6 +99,8 @@ someone_arrives_home:
       timeout:
         minutes: 5
 
+    - delay: 60 # let person get in house
+
     - choose: # only if person still home (may have come and gone)
         - conditions: "{{ is_state('binary_sensor.' ~ person ~ '_home','on') }}"
           sequence:
@@ -109,13 +117,16 @@ someone_arrives_home:
                     - condition: template
                       value_template: "{{ first_home }}"
 
-                    - condition: numeric_state
-                      entity_id: variable.tts_saved_messages
-                      above: 0
                   sequence:
-                    - service: script.tts_play_saved_messages
+                    - choose:
+                        - conditions:
+                            - condition: numeric_state
+                              entity_id: variable.tts_saved_messages
+                              above: 0
+                          sequence:
+                            - service: script.tts_play_saved_messages
 
-                    - delay: 1
+                            - delay: 1 # let saved messages start
 
                     - wait_template: "{{ is_state('script.tts_play_saved_messages','off') }}"
                       timeout:
@@ -126,10 +137,6 @@ someone_arrives_home:
                             - condition: state
                               entity_id: input_boolean.media_player_automation
                               state: 'on'
-
-                            - condition: state
-                              entity_id: binary_sensor.quiet_hours
-                              state: 'off'
 
                             - condition: template
                               value_template: >

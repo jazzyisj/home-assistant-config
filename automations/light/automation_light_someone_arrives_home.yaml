@@ -6,6 +6,8 @@
   description: Save current light scene, turn on arrive home lights.
   initial_state: true
   mode: restart
+  variables:
+    prev_mode: "{{ states('input_select.previous_occupancy_mode') }}"
   trigger:
     - platform: state
       entity_id:
@@ -13,9 +15,12 @@
         - binary_sensor.sheri_home
         - input_boolean.guest_home
       to: 'on'
+      from: 'off'
   condition:
     - condition: state
-      entity_id: input_boolean.alarm_triggered
+      entity_id:
+        - input_boolean.alarm_triggered
+        - input_boolean.startup_pending
       state: 'off'
 
     - condition: state
@@ -78,35 +83,23 @@
                   {% else %}{{ b }}
                   {% endif %}
 
-#######################################################################################################################
-## Light - Arrive Home Lights Restore
-#######################################################################################################################
-- id: light_arrive_home_lights_restore
-  alias: "[Light] Arrive Home Lights Restore"
-  description: Restore arrive home lights.
-  initial_state: true
-  trigger:
-    - platform: event
-      event_type: timer.finished
-      event_data:
-        entity_id: timer.arrive_home_lights
-  condition:
+    - alias: "Wait for arrive home timer to finish"
+      wait_for_trigger:
+        - platform: state
+          entity_id: timer.arrive_home_lights
+          to: 'idle'
+
     - condition: state
       entity_id: input_boolean.alarm_triggered
       state: 'off'
 
-    - condition: state
-      entity_id:
-        - input_boolean.presence_automation
-        - input_boolean.light_automation
-      state: 'on'
+    - condition: template  # don't restore if nobody was home (lights were off)
+      alias: "Previous occupancy mode is home or guest"
+      value_template: "{{ prev_mode == 'Home','Guest' }}"
 
-    - condition: state # don't restore if lights were off!
-      entity_id: input_select.previous_occupancy_mode
-      state:
-        - Home
-        - Guest
-  action:
+#ISSUE if running when restarted, timer restarts and fires this but no restore scene!
+#WARNING (MainThread) [homeassistant.helpers.service] Unable to find referenced entities scene.arrive_home_lights_restore
+
     - service: script.activate_scene
       data:
         scene: scene.arrive_home_lights_restore
