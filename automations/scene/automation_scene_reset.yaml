@@ -3,7 +3,7 @@
 #######################################################################################################################
 - id: scene_reset #OCC
   alias: "[Scene] Reset"
-  description: Reset to scene to default scene when scene turned off.
+  description: "Reset to scene to default scene when scene turned off."
   initial_state: true
   mode: restart
   trigger:
@@ -36,71 +36,48 @@
     - platform: state
       id: scene_off
       entity_id:
-        - script.scene_company
-        - script.scene_movie
+        - switch.company_mode
+        - switch.movie_mode
       to: 'off'
-      from: 'on' # req it triggers on script reload
 
     - platform: state
       id: scene_on
       entity_id:
         - script.scene_wake_up
         - script.scene_bedtime
-        - script.scene_movie
-        - script.scene_company
+        - switch.company_mode
+        - switch.movie_mode
       to: 'on'
   condition:
     - condition: template
-      alias: Precence automation is on if triggered by occupancy mode
+      alias: "Precence automation is on if triggered by occupancy mode"
       value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.id in ['home','away'] else true }}"
   action:
-    - choose:
-        - conditions: "{{ trigger.entity_id == 'script.scene_movie' }}"
-          sequence:
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: input_boolean.media_player_automation
-                      state: 'on'
-                  sequence:
-                    - service: input_boolean.turn_off
-                      entity_id:
-                        - input_boolean.mute_all
-                        - input_boolean.bedtime_delayed
-                        - input_boolean.volume_override
-                        #IDEA turn off tv if movie
-                        #IDEA play saved messages if movie
-      default:
-        - service: script.turn_off
-          entity_id: script.scene_movie
+    - service: automation.turn_off
+      target:
+        entity_id: "{{ this.entity_id }}"
+      data:
+        stop_actions: false
 
     - choose:
-        - conditions: "{{ trigger.entity_id == 'script.scene_company' }}"
+        - conditions: "{{ trigger.entity_id != 'switch.movie_mode' }}"
           sequence:
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: input_boolean.media_player_automation
-                      state: 'on'
-                  sequence:
-                    - service: input_boolean.turn_off
-                      entity_id:
-                        - input_boolean.mute_all
-                        - input_boolean.bedtime_delayed
-                        - input_boolean.volume_override
-                        - input_boolean.radio
-                        - input_boolean.spotify
-      default:
-        - service: script.turn_off
-          entity_id: script.scene_company
+            - service: switch.turn_off
+              entity_id: switch.movie_mode
+
+    - choose:
+        - conditions: "{{ trigger.entity_id != 'switch.company_mode' }}"
+          sequence:
+            - service: switch.turn_off
+              entity_id: switch.company_mode
 
     - choose:
         - conditions: "{{ trigger.id == 'away' }}"
           sequence:
-            - service: script.turn_off
+            - service: homeassistant.turn_off
               entity_id:
                 - script.someone_arrives_home
-                - script.shower_on
+                - switch.shower_mode
 
     - choose:
         - conditions: "{{ trigger.entity_id != 'script.scene_wake_up' }}"
@@ -108,7 +85,7 @@
             - service: script.turn_off
               entity_id:
                 - script.scene_wake_up
-                - script.scene_morning_lights
+                - script.morning_lights
 
     - choose:
         - conditions: "{{ trigger.entity_id != 'script.scene_bedtime' }}"
@@ -116,40 +93,54 @@
             - service: script.turn_off
               entity_id:
                 - script.scene_bedtime
-                - script.scene_bedtime_lights
+                - script.bedtime_lights
 
     - choose:
         - conditions:
-            - condition: state
-              entity_id: input_boolean.light_automation
-              state: 'on'
-
             - condition: template
-              alias: Wakup/Bedtime script is not running
+              alias: "Wakup/Bedtime script is not running"
               value_template: "{{ is_state('script.scene_wake_up','off') and is_state('script.scene_bedtime','off') }}"
 
             - condition: template
-              alias: Trigger is not scene_wake_up/scene_bedtime # duplicates home/night
+              alias: "Trigger is not scene_wake_up/scene_bedtime" # duplicates home/night
               value_template: "{{ trigger.entity_id not in ['script.scene_wake_up','script.scene_bedtime'] }}"
+
+            - condition: template
+              alias: "Media mode switch not on"
+              value_template: "{{ is_state('switch.movie_mode','off') and is_state('switch.company_mode','off') }}"
           sequence:
-            - service: scene.turn_on
-              entity_id: scene.rgb_reset # reset rgb lights to warm
-
-            - delay: 1 # allow light states to chnage
-
-            - service: scene.turn_on
-              entity_id: scene.rgb_reset_off # turn rgb lights off
-
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state:
-                - Home
-                - Guest
+            - delay: 1 # allow before mode scenes to run on switches
 
             - service: script.activate_scene
               data:
-                scene: >
-                  {% if is_state('binary_sensor.auto_light_on','on') %} scene.evening
-                  {% elif is_state('binary_sensor.illuminance_light_on','on') %} scene.day_lights
-                  {% else %} scene.reset_daytime
-                  {% endif %}
+                scene: rgb_reset # reset rgb lights to warm profile
+
+            - delay: 1 # allow light states to change
+
+            - service: script.activate_scene
+              data:
+                scene: rgb_reset_off # turn rgb lights off
+
+            - choose:
+                conditions:
+                  - condition: state
+                    entity_id: input_select.occupancy_mode
+                    state:
+                      - Home
+                      - Guest
+                sequence:
+                  # auto_light/illuminance sensor may have come on while scene script was active
+                  - service: script.activate_scene
+                    data:
+                      scene: >
+                        {% if is_state('binary_sensor.auto_light_on','on') %}
+                          {{ 'quiet_hours' if is_state('binary_sensor.quiet_hours','on') else 'evening' }}
+                        {% elif is_state('binary_sensor.illuminance_light_on','on') %}
+                          day_lights
+                        {% else %}
+                          reset_daytime
+                        {% endif %}
+
+    - service: automation.turn_on
+      target:
+        entity_id: "{{ this.entity_id }}"

@@ -1,47 +1,151 @@
 #######################################################################################################################
-## Presence - Override Changed
+## Presence - Override Auto On Home
 #######################################################################################################################
-- id: presence_override_changed
-  alias: "[Presence] Override Changed"
-  description: Notifications when presence override has changed.
+- id: presence_override_auto_on_home
+  alias: "[Presence] Override Auto On Home"
+  description: "Turn on override booleans when alarm unlocked by code if person tracker not home."
+  variables:
+    person: "{{ trigger.to_state.state[10:-1]|lower }}"
+    owner: "{{ person in ['jason','sheri'] }}"
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+        - sensor.garage_door_lock_status # use garage for override on
+      to: #LOCK_USER
+        - Unlocked (Jason)
+        - Unlocked (Sheri)
+        - Unlocked (Dawn)
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.lock_automation
+        - input_boolean.presence_automation
+      state: 'on'
+
+    - "{{ (is_state('input_boolean.guest_home','off') if not owner
+            else is_state('binary_sensor.' ~ person ~ '_home','off'))
+           and is_state(trigger.entity_id,'Unlocked (' ~ person|title ~ ')') }}"
+  action:
+    - choose:
+        - conditions: "{{ owner }}" # person still shows home
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.home_override_{{ person }}"
+
+    - service: input_boolean.turn_on
+      target:
+        entity_id: "input_boolean.{{ person if owner else 'guest' }}_home"
+
+#######################################################################################################################
+## Presence - Override Auto On Away
+#######################################################################################################################
+- id: presence_override_auto_on_away
+  alias: "[Presence] Override Auto On Away"
+  description: "Turn override on, turn presence boolean off if locked by keypad and tracker still home."
+  variables:
+    person: "{{ trigger.to_state.state[8:-1]|lower }}"
+    owner: "{{ person in ['jason','sheri'] }}"
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+      to: #LOCK_USER
+        - Locked (Jason)
+        - Locked (Sheri)
+        - Locked (Dawn)
+      for:
+        minutes: 2
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.lock_automation
+        - input_boolean.presence_automation
+      state: 'on'
+
+    - "{{ is_state('binary_sensor.' ~ person ~ '_home','on') if owner else is_state('input_boolean.guest_home','on') }}"
+  action:
+    - choose:
+        - conditions: "{{ owner }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.home_override_{{ person }}"
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: "input_boolean.{{ person if owner else 'guest' }}_home"
+
+#######################################################################################################################
+## Presence - Reset Override
+#######################################################################################################################
+- id: presence_reset_override
+  alias: "[Presence] Reset Override"
+  description: "Reset override boolean when tracker to/from home."
   initial_state: true
-  mode: queued
-  max: 5
+  variables:
+    person: "{{ trigger.entity_id.split('.')[1] }}"
+  trigger:
+    - platform: state
+      entity_id:
+        - person.jason
+        - person.sheri
+      to: home
+
+    - platform: state
+      entity_id:
+        - person.jason
+        - person.sheri
+      from: home
+  condition:
+    - condition: state
+      entity_id: input_boolean.presence_automation
+      state: 'on'
+
+    - "{{ is_state('input_boolean.home_override_' ~ person,'on') }}"
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: "input_boolean.home_override_{{ person }}"
+
+#######################################################################################################################
+## Presence - Override Alert
+#######################################################################################################################
+- id: presence_override_alert
+  alias: "[Presence] Override Alert"
+  description: "Play notification when presence override boolean turns on."
   trigger:
     - platform: state
       entity_id:
         - input_boolean.home_override_jason
         - input_boolean.home_override_sheri
+      for:
+        minutes: 5 # allow override to turn off before notifications
   action:
     - service: browser_mod.toast
       data:
-        duration: 30000
         message: >
           {% if trigger.entity_id == 'input_boolean.home_override_jason' %}
               Jason's presence override has been turned {{ states('input_boolean.home_override_jason') }}.
           {% elif trigger.entity_id == 'input_boolean.home_override_sheri' %}
               Sheri's presence override has been turned {{ states('input_boolean.home_override_sheri') }}.
           {% endif %}
+        duration: 30000
 
-#######################################################################################################################
-## Presence - Presence Override Alert
-#######################################################################################################################
-- id: presence_presence_override_alert
-  alias: "[Presence] Presence Override Alert"
-  description: Play announcement when alert is active.
-  initial_state: true
-  trigger:
-    - platform: state
-      entity_id: alert.presence_override
-      to: 'on'
-
-  action:
     - service: script.tts_play
       data:
         play_message: |
           Attention!
-          {% if is_state('input_boolean.home_override_jason','on') %} Jason's presence override has been turned on. {% endif %}
-          {% if is_state('input_boolean.home_override_sheri','on') %} Sheri's presence override has {{ 'also' if is_state('input_boolean.home_override_jason','on') }} been turned on. {% endif %}
+          {% if trigger.entity_id == 'input_boolean.home_override_jason' %}
+              Jason's presence override has been turned {{ states('input_boolean.home_override_jason') }}.
+          {% elif trigger.entity_id == 'input_boolean.home_override_sheri' %}
+              Sheri's presence override has been turned {{ states('input_boolean.home_override_sheri') }}.
+          {% endif %}
         ignore_away: true
 
 #######################################################################################################################
@@ -49,14 +153,13 @@
 #######################################################################################################################
 - id: presence_turn_off_presence_override
   alias: "[Presence] Turn Off Presence Override"
-  description: Turn off presence override booleans when notification action clicked.
+  description: "Turn off override booleans."
   initial_state: true
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: turn_off_presence_override
-
   action:
     - service: input_boolean.turn_off
       entity_id:
@@ -68,14 +171,13 @@
 #######################################################################################################################
 - id: presence_pause_presence_override_alert
   alias: "[Presence] Pause Presence Override Alert"
-  description: Pause alert.
+  description: "Pause alert."
   initial_state: true
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: pause_presence_override
-
   action:
     - service: alert.turn_off
       entity_id: alert.presence_override

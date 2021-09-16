@@ -8,60 +8,71 @@
   mode: restart
   trigger:
     - platform: state
+      id: disarmed
+      entity_id: alarm_control_panel.alarmo
+      to: disarmed
+      for: # wait to see if someone comes home (almost home, plug in dead phone)
+        minutes: 5
+
+    - platform: state
+      id: away
       entity_id: input_select.occupancy_mode
       to:
-        - Night
         - Away
         - Vacation
 
     - platform: state
-      id: disarmed
-      entity_id: alarm_control_panel.alarmo
-      to: disarmed
-      for: # wait to see if someone comes home (almost home, plug in dead phone, turn on override etc.)
-        minutes: 10
+      id: night
+      entity_id: input_select.occupancy_mode
+      to:  Night
 
     - platform: state
       id: lock_keypad
-      entity_id:
+      entity_id: # do not auto arm with garage side door
         - sensor.back_door_lock_status
         - sensor.front_door_lock_status
         - sensor.side_door_lock_status
-      to: Locked (Keypad)
+      to:  #LOCK_USER
+        - Locked (Keypad)
+        - Locked (Jason)
+        - Locked (Sheri)
+        - Locked (Dawn)
   condition:
     - condition: state
-      entity_id: input_boolean.alarm_auto_arming
+      entity_id:
+        - input_boolean.alarm_automation
+        - input_boolean.alarm_auto_arming
       state: 'on'
 
     - condition: state
       entity_id: input_boolean.alarm_temp_override
       state: 'off'
+
+    - "{{ is_state('input_boolean.lock_automation','on') if trigger.id in ['unlock_keypad','lock_keypad'] else true }}"
+    - "{{ is_state('input_boolean.presence_automation','on') if trigger.id in ['away','night'] else true }}"
   action:
     - choose:
-        - conditions: # rearm alarm if disarmed but nobody is home
-            - condition: and
-              alias: Alarm was disarmed but nobody is home
-              conditions:
-                - "{{ trigger.id == 'disarmed' }}"
-
-                - condition: state
-                  entity_id: alarm_control_panel.alarmo
-                  state: disarmed
-
-                - condition: state
-                  entity_id: binary_sensor.someone_home
-                  state: 'off'
+        - conditions: "{{ trigger.id == 'disarmed' }}"
           sequence:
-            - service: script.arm_alarm
+            - wait_template: "{{ is_state('binary_sensor.someone_home','on') }}"
+              timeout: # wait to see if presence override to turns on
+                minutes: 5
+
+            - condition: state
+              entity_id: alarm_control_panel.alarmo
+              state: disarmed
+
+            - condition: state
+              entity_id: binary_sensor.someone_home
+              state: 'off'
+
+            - service: script.arm_alarm # rearm alarm if still disarmed and nobody home
               data:
                 mode: away
                 code: !secret ALARMO_HA
 
-        - conditions: "{{ trigger.id == 'lock_keypad' and is_state('input_boolean.lock_automation','on') }}"
-          sequence:
-            - wait_template: "{{ is_state('binary_sensor.owner_home','off') }}" # arm right away if only guest was home
-              timeout: 300 # wait to see if owner leaves
-              continue_on_timeout: false
+        - conditions:
+            - "{{ trigger.id in ['lock_keypad','away'] }}"
 
             - condition: not
               alias: Alarm not already armed_away
@@ -69,16 +80,38 @@
                 - condition: state
                   entity_id: alarm_control_panel.alarmo
                   state: armed_away
+          sequence:
+            - choose: #LOCK_USER
+                - conditions: "{{ trigger.id == 'away' or trigger.to_state.state == 'Locked (Keypad)' }}"
+                  sequence:
+                    - service: script.arm_alarm
+                      data:
+                        mode: away
+                        code: !secret ALARMO_HA
 
-            - service: script.arm_alarm
-              data:
-                mode: away
-                code: !secret ALARMO_HA
+                - conditions: "{{ trigger.to_state.state == 'Locked (Jason)' }}"
+                  sequence:
+                    - service: script.arm_alarm
+                      data:
+                        mode: away
+                        code: !secret ALARMO_JASON
+
+                - conditions: "{{ trigger.to_state.state == 'Locked (Sheri)' }}"
+                  sequence:
+                    - service: script.arm_alarm
+                      data:
+                        mode: away
+                        code: !secret ALARMO_SHERI
+
+                - conditions: "{{ trigger.to_state.state == 'Locked (Dawn)' }}"
+                  sequence:
+                    - service: script.arm_alarm
+                      data:
+                        mode: away
+                        code: !secret ALARMO_DAWN
 
         - conditions:
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state: Night
+            - "{{ trigger.id == 'night' }}"
 
             - condition: not
               alias: Alarm not already armed_night
@@ -90,23 +123,4 @@
             - service: script.arm_alarm
               data:
                 mode: night
-                code: !secret ALARMO_HA
-
-        - conditions:
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state:
-                - Away
-                - Vacation
-
-            - condition: not
-              alias: Alarm not already armed_away
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.alarmo
-                  state: armed_away
-          sequence:
-            - service: script.arm_alarm
-              data:
-                mode: away
                 code: !secret ALARMO_HA

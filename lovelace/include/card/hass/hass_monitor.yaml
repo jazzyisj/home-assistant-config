@@ -79,7 +79,7 @@ entities:
           deviceID: this
           title: Wired Network Devices
           hide_header: true
-          card: !include /config/lovelace/include/card/system/zwave_devices.yaml
+          card: !include /config/lovelace/include/card/zwave/zwave_devices.yaml
       card_mod:
         style: |
           :host {
@@ -180,9 +180,20 @@ entities:
   - !include /config/lovelace/include/entity/hass/browser_monitor.yaml
 
   - entity: sensor.connected_clients
-  - entity: sensor.last_successful_authentication
 
-  - entity: binary_sensor.system_update
+  - type: custom:template-entity-row
+    entity: sensor.last_successful_authentication
+    state: "{{ state_attr('sensor.last_successful_authentication','Hostname') }}"
+    secondary: "User: {{ state_attr('sensor.last_successful_authentication','Username') }}"
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color: var(--entity-ok-color);
+        }
+
+  - type: custom:template-entity-row
+    entity: binary_sensor.system_update
+    secondary: "Home Assistant v{{ states('sensor.home_assistant_version') }}"
     tap_action:
       action: fire-dom-event
       browser_mod:
@@ -253,14 +264,24 @@ entities:
         icon: mdi:database-sync
         action_name: PURGE
 
-  - entity: sensor.home_assistant_log #STYLE
-
+  - entity: sensor.home_assistant_log
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color:
+            {% if states('sensor.home_assistant_log')|int > 100 %} var(--entity-critical-color)
+            {% elif states('sensor.home_assistant_log')|int > 50 %} var(--entity-warning-color)
+            {% else %} var(--entity-ok-color)
+            {% endif %}
+            ;
+        }
   - entity: sensor.home_assistant_alerts
     card_mod:
       style: |
         :host {
           --paper-item-icon-color:
-            {% if 'persistent_notification.hass_alert' in states.persistent_notification|map(attribute='entity_id')|list  %} var(--entity-warning-color)
+            {% if 'persistent_notification.hass_alert' in states.persistent_notification|map(attribute='entity_id')|list %} var(--entity-warning-color)
+            {% elif states('sensor.home_assistant_alerts')|lower in ['unknown','unavailable','none'] %} var(--entity-warning-color)
             {% else %} var(--entity-ok-color)
             {% endif %}
           ;
@@ -272,5 +293,89 @@ entities:
         deviceID: this
         title: Home Assistant Alerts
         card: !include /config/lovelace/include/markdown/hass_alerts_markdown.yaml
+
+  - type: custom:fold-entity-row
+    head:
+      entity: sensor.disk_use_percent_home
+    padding: 5
+    card_mod:
+      style: |
+        {% if is_state('binary_sensor.disk_use_alert','on') %}
+        @keyframes blink {
+          50% {
+            --paper-item-icon-color: var(--entity-warning-color);
+          }
+        }
+        {% endif %}
+        :host {
+          --paper-item-icon-color:
+            {% if is_state('binary_sensor.disk_use_alert','on') %} var(--entity-critical-color)
+            {% elif states('sensor.disk_use_percent_home')|int < 40 %} var(--entity-ok-color)
+            {% elif states('sensor.disk_use_percent_home')|int < 50 %} var(--entity-minor-color)
+            {% elif states('sensor.disk_use_percent_home')|int < 70 %} var(--entity-warning-color)
+            {% elif states('sensor.disk_use_percent_home')|int < 80 %} var(--entity-severe-color)
+            {% else %} var(--entity-critical-color)
+            {% endif %}
+          ;
+        }
+        {% if is_state('binary_sensor.disk_use_alert','on') %}animation: blink 2s linear infinite;{% endif %}
+
+    entities:
+      - type: custom:template-entity-row
+        name: Snapshot Backup Disk Use
+        icon: mdi:folder-sync
+        state: "{{ state_attr('sensor.snapshot_backup','size_in_home_assistant') }}"
+        card_mod:
+          style: |
+            :host {
+              --paper-item-icon-color:
+                {% if states('sensor.alarm_snapshots')|int > 5 %} var(--entity-warning-color)
+                {% else %} var(--state-icon-color)
+                {% endif %}
+                ;
+            }
+
+      - type: custom:fold-entity-row
+        head:
+          entity: sensor.alarm_snapshots
+          name: Alarm Snapshot Disk Use
+          card_mod:
+            style: |
+              :host {
+                --paper-item-icon-color:
+                  {% if states('sensor.alarm_snapshots')|int > 100 %} var(--entity-warning-color)
+                  {% else %} var(--state-icon-color)
+                  {% endif %}
+                  ;
+              }
+        padding: 5
+        entities:
+          - type: call-service
+            service: shell_command.alarm_snapshots_purge_all
+            icon: mdi:database-sync
+            name: Purge Motion Capture
+            action_name: PURGE
+
+      - type: custom:fold-entity-row
+        head:
+          entity: sensor.tts
+          name: TTS Cache Disk Use
+          card_mod:
+            style: |
+              :host {
+                --paper-item-icon-color:
+                  {% if states('sensor.tts')|int > 100 %} var(--entity-warning-color)
+                  {% else %} var(--state-icon-color)
+                  {% endif %}
+                  ;
+              }
+        padding: 5
+        entities:
+          - type: call-service
+            service: shell_command.tts_purge_all
+            icon: mdi:database-sync
+            name: Purge TTS Cache
+            action_name: PURGE
+
 card_mod:
   class: basic

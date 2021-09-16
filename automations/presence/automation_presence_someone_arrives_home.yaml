@@ -1,21 +1,24 @@
 #######################################################################################################################
-## Presence - Someone Arrives Home -  script so we can turn off with scene_reset
+## Presence - Someone Arrives Home - use script so we can turn off with scene_reset
 #######################################################################################################################
 - id: presence_someone_arrives_home
   alias: "[Presence] Someone Arrives Home"
-  description: Determine arrived home and run arrive home script.
-  initial_state: true
+  description: "Determine who arrived home and run arrive home script."
   mode: parallel
   variables:
-    person: >
-      {% if trigger.entity_id == 'binary_sensor.jason_home' %} jason
-      {% elif trigger.entity_id == 'binary_sensor.sheri_home' %} sheri
-      {% else %} guest
-      {% endif %}
+    people: "{{ ['jason','sheri'] }}"
+    person: "{{ trigger.entity_id.split('.')[1]|replace('_home','') }}"
     first_home: >
+      {% set home = namespace(val=false) %}
+      {% for item in people %}
+        {% if item != person %}
+          {% if is_state('binary_sensor.' ~ item ~ '_home','on') %}
+            {% set home.val = true %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
       {{ (person == 'guest' and is_state('binary_sensor.owner_home','off'))
-          or (person == 'jason' and is_state('binary_sensor.sheri_home','off') and is_state('input_boolean.guest_home','off'))
-          or (person == 'sheri' and is_state('binary_sensor.jason_home','off') and is_state('input_boolean.guest_home','off')) }}
+          or (not home.val and is_state('input_boolean.guest_home','off')) }}
   trigger:
     - platform: state
       entity_id:
@@ -34,38 +37,3 @@
         person: "{{ person }}"
         first_home: "{{ first_home }}"
 
-#######################################################################################################################
-## Presence - Reset Arrived Home
-#######################################################################################################################
-- id: presence_reset_arrived_home
-  alias: "[Presence] Reset Arrived Home"
-  description: Reset arrived home boolean.
-  initial_state: true
-  mode: parallel
-  variables:
-    person: >
-      {% if trigger.entity_id in ['input_boolean.jason_just_arrived_home','binary_sensor.jason_home'] %} jason
-      {% elif trigger.entity_id in ['binary_sensor.sheri_just_arrived_home','binary_sensor.sheri_home'] %} sheri
-      {% elif trigger.entity_id in ['binary_sensor.guest_just_arrived_home','input_boolean.guest_home'] %} guest
-      {% endif %}
-  trigger:
-    - platform: state
-      entity_id:
-        - input_boolean.jason_just_arrived_home
-        - input_boolean.sheri_just_arrived_home
-        - input_boolean.guest_just_arrived_home
-      to: 'on'
-      for:
-        minutes: 15
-
-    - platform: state # turn off if person leaves
-      entity_id:
-        - binary_sensor.jason_home
-        - binary_sensor.sheri_home
-        - input_boolean.guest_home
-      to: 'off'
-
-  action:
-    - service: input_boolean.turn_off
-      data:
-        entity_id: "input_boolean.{{ person }}_just_arrived_home"

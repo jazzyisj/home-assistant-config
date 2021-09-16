@@ -1,9 +1,10 @@
 #######################################################################################################################
 ## Hass - Save Timers
+#NOTE too many timers - state > 255 char error
 #######################################################################################################################
   - id: hass_save_timers
     alias: "[Hass] Save Timers"
-    description: Save timers for system restart.
+    description: "Save timers for system restart."
     initial_state: true
     mode: queued
     max: 25
@@ -17,26 +18,8 @@
         - timer.arrive_home_lights
         - timer.fan_schedule
         - timer.bedtime_delay
-        #ISSUE too many timers - error state > 255
-        # - timer.dining_room_light
-        # - timer.dining_room_potlights
-        # - timer.kitchen_potlights
-        # - timer.kitchen_sink_light
-        # - timer.living_room_pot_lights
-        # - timer.master_bedroom_light
         - timer.media_preset_sleep
-        # - timer.office_fan
-        # - timer.office_light
-        # - timer.office_potlights
-        # - timer.side_entrance_light
         - timer.timed_mute_duration
-        # - timer.upstairs_bathroom_fan
-        # - timer.upstairs_bathroom_shower_light
-        # - timer.upstairs_bathroom_vanity_light
-        # - timer.upstairs_bedroom_fan
-        # - timer.upstairs_bedroom_light
-        # - timer.upstairs_bedroom_potlights
-        # - timer.upstairs_hallway_potlights
     action:
     - variables:
         timers: *restart_timers
@@ -49,23 +32,24 @@
         - variables:
             mode: '{{ modes[repeat.index-1] }}'
         - service: input_text.set_value
-          data:
+          target:
             entity_id: 'input_text.timers_{{ mode }}'
+          data:
             value: >
               {% set ns = namespace(timers = []) %}
-              {% for t in expand(timers) | selectattr('state', 'eq', mode) | list  %}
-                {% set d = t.attributes.remaining.split(':') | map('int') | list %}
+              {% for t in expand(timers)|selectattr('state', 'eq', mode)|list  %}
+                {% set d = t.attributes.remaining.split(':')|map('int')|list %}
                 {% set s = d[0]*3600 + d[1]*60 + d[2] + (t.last_changed.timestamp()|int if mode == 'active' else 0) %}
                 {% set ns.timers = ns.timers + ['{} {}'.format(t.object_id, s)] %}
               {% endfor %}
-              {{ ns.timers | join(',')}}
+              {{ ns.timers|join(',') }}
 
 #######################################################################################################################
 ## Hass - Restore Timers
 #######################################################################################################################
   - id: hass_restore_timers
     alias: "[Hass] Restore Timers"
-    description: Restore saved timers on system restart.
+    description: "Restore saved timers on system restart."
     initial_state: true
     trigger:
       platform: homeassistant
@@ -79,28 +63,35 @@
         count: 2
         sequence:
         - variables:
-            mode: '{{ modes[repeat.index-1] }}'
+            mode: "{{ modes[repeat.index-1] }}"
             timers_text: "{{ states('input_text.timers_' ~ mode) }}"
+
         - choose:
-          - conditions: '{{ timers_text | length > 0 }}'
+          - conditions: "{{ timers_text|length > 0 }}"
             sequence:
             - variables:
                 timers: "{{ timers_text.split(',') }}"
+
             - repeat:
-                count: '{{ timers | count }}'
+                count: "{{ timers|count }}"
                 sequence:
                 - variables:
-                    t: '{{ timers[repeat.index-1].split() }}'
-                    id: 'timer.{{t[0]}}'
+                    t: "{{ timers[repeat.index-1].split() }}"
+                    id: "timer.{{t[0]}}"
                     d: "{{ t[1]|int - (now().timestamp()|int if mode == 'active' else 0) }}"
+
                 - condition: template
-                  value_template: '{{ d > 0 }}'
+                  value_template: "{{ d > 0 }}"
+
                 - service: timer.start
+                  target:
+                    entity_id: "{{ id }}"
                   data:
-                    entity_id: '{{ id }}'
-                    duration: '{{ d }}'
+                    duration: "{{ d }}"
+
                 - condition: template
                   value_template: "{{ mode == 'paused' }}"
+
                 - service: timer.pause
-                  data:
-                    entity_id: '{{ id }}'
+                  target:
+                    entity_id: "{{ id }}"

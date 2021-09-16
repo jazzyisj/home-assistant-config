@@ -1,0 +1,67 @@
+##################################################################################################
+## Inovelli LED Control
+##################################################################################################
+inovelli_led_control:
+  alias: Inovelli LED Control
+  description: Sets the LED effects for the Inovelli Red series of switches, dimmers
+  mode: queued
+  max: 100
+  max_exceeded: error
+  fields:
+    duration:
+      description: Duration (1-255) 255 is indefinite
+      example: "255"
+    color:
+      description: Color value (1-255) or color string value
+      example: "Red"
+    effect:
+      description: Effect string value (off,solid,slow blink,fast blink,pulse,chase)
+      example: "pulse"
+    brightness:
+      description: LED brightness value (1-10)
+      example: "3"
+    entities:
+      description: One or more entities to control
+      example: "['light.dining_room_light','switch.kitchen_sink_light']"
+  variables: #ZWAVE device ready (state on/off)
+    dimmer_entities: "{{ expand(entities)|selectattr('domain','eq','light')|selectattr('state','in',['on','off'])|map(attribute='entity_id')|list }}"
+    switch_entities: "{{ expand(entities)|selectattr('domain','eq','switch')|selectattr('state','in',['on','off'])|map(attribute='entity_id')|list }}"
+    duration: "{{ duration|int if duration is defined else 255 }}"
+    color: "{{ color if color is defined else 'Blue' }}"
+    brightness: "{{ brightness|int if brightness is defined else 3 }}"
+    effect: "{{ effect if effect is defined else 'off' }}"
+  sequence:
+    - condition: template
+      alias: Entities not null # prevent template reload error
+      value_template: "{{ entities|lower not in ['','unknown','unavailable','none'] }}"
+
+    - choose:
+        - conditions: "{{ dimmer_entities|length > 0 }}"
+          sequence:
+            - service: zwave_js.bulk_set_partial_config_parameters
+              target:
+                entity_id: "{{ dimmer_entities }}"
+              data:
+                parameter: 16
+                value:
+                  "LED Effect Color": "{{ color|title }}"
+                  "LED Effect Brightness": "{{ brightness|int }}"
+                  "LED Effect Duration": "{{ duration|int }}"
+                  "LED Effect Type": "{{ effect|title }}"
+
+    - choose:
+        - conditions: "{{ switch_entities|length > 0  }}"
+          sequence:
+            - variables:
+                effect: "{{ 'fast blink' if effect == 'chase' else effect }}" # no chase effect for switches, swap for fast blink
+
+            - service: zwave_js.bulk_set_partial_config_parameters
+              target:
+                entity_id: "{{ switch_entities }}"
+              data:
+                parameter: 8
+                value:
+                  "LED Effect Color": "{{ color|title }}"
+                  "LED Effect Brightness": "{{ brightness|int }}"
+                  "LED Effect Duration": "{{ duration|int }}"
+                  "LED Effect Type": "{{ effect|title }}"

@@ -1,0 +1,204 @@
+#######################################################################################################################
+## Hot Tub Maintenance Reminder Package
+#######################################################################################################################
+input_boolean:
+  hot_tub_maintenance_enabled:
+    name: Hot Tub Maintenance Enabled
+    icon: mdi:spa
+
+  hot_tub_maintenance_active:
+    name: Hot Tub Maintenance Active
+    icon: mdi:spa
+
+input_datetime:
+  hot_tub_maintenance_days:
+    name: Hot Tub Maintenance Days
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  hot_tub_maintenance_afternoons:
+    name: Hot Tub Maintenance Afternoons
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+  hot_tub_maintenance_weekends:
+    name: Hot Tub Maintenance Weekends
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+input_number:
+  hot_tub_maintenance_interval:
+    name: Hot Tub Maintenance Interval
+    icon: mdi:calendar-range
+    unit_of_measurement: days
+    min: 1
+    max: 7
+    step: 1
+
+automation:
+#######################################################################################################################
+## Schedule - Turn Off Hot Tub Maintenance Reminder
+#######################################################################################################################
+  - id: schedule_turn_off_hot_tub_maintenance_reminder
+    alias: "[Schedule] Turn Off Hot Tub Maintenance Reminder"
+    description: Turn off active boolean.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.hot_tub_maintenance_active
+        to: "on"
+
+      - platform: state
+        entity_id: input_boolean.hot_tub_maintenance_enabled
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: hot_tub_maintenance_done
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.hot_tub_maintenance_enabled
+            state: "off"
+
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+
+          - condition: template
+            value_template: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'hot_tub_maintenance_done' }}{% endif %}"
+    action:
+      - service: input_boolean.turn_off
+        entity_id: input_boolean.hot_tub_maintenance_active
+
+  #######################################################################################################################
+  ## Schedule - Turn On Hot Tub Maintenance Reminder
+  #######################################################################################################################
+  - id: schedule_turn_on_hot_tub_maintenance_reminder
+    alias: "[Schedule] Turn On Hot Tub Maintenance Reminder"
+    description: Turn on hot tub maintenance reminder.
+    initial_state: true
+    trigger:
+      - platform: template
+        value_template: >
+          {% set time = states('sensor.time') %}
+          {% set days = is_state('sensor.current_shift','Days') and is_state('binary_sensor.work_today','on') %}
+          {% set afts = is_state('sensor.current_shift','Afternoons') and is_state('binary_sensor.work_today','on') %}
+          {% set wknd = is_state('binary_sensor.work_today','off') or states('sensor.current_shift') in ['Off','unknown','unknown','none'] %}
+
+          {{ (days and time == states('input_datetime.hot_tub_maintenance_days')[0:5])
+            or (afts and time == states('input_datetime.hot_tub_maintenance_afternoons')[0:5])
+            or (wknd and time == states('input_datetime.hot_tub_maintenance_weekends')[0:5]) }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.hot_tub_maintenance_enabled
+        state: "on"
+
+      - condition: template # only run every specified days
+        value_template: >
+          {% set last_run = state_attr('automation.hot_tub_maintenance_activate_reminder','last_triggered') %}
+          {{ last_run is none or (now().date() - last_run.date()).days >= states('input_number.hot_tub_maintenance_interval')|int }}
+
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state: Vacation
+    action:
+      - service: input_boolean.turn_on
+        entity_id: input_boolean.hot_tub_maintenance_active
+
+  #######################################################################################################################
+  ## Schedule - Hot Tub Maintenance Alert
+  #######################################################################################################################
+  - id: schedule_hot_tub_maintenance_alert
+    alias: "[Schedule] Hot Tub Maintenance Alert"
+    description: Sent alert every 15 minutes until jason active turns off.
+    initial_state: true
+    trigger:
+      - platform: state
+        entity_id: input_boolean.hot_tub_maintenance_active
+        to: "on"
+        for:
+          seconds: 5 # allow boolean to turn back off if disabled
+    condition:
+      - condition: state
+        entity_id: input_boolean.hot_tub_maintenance_enabled
+        state: "on"
+    action:
+      - repeat:
+          sequence:
+            - service: script.tts_play
+              data:
+                play_message: Attention! The hot tub is due for a little maintenance.
+                quiet_play: true
+                save_message: true
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.schedule_alerts
+                      state: "on"
+                  sequence:
+                    - service: notify.jason
+                      data:
+                        title: Hot Tub Maintenance
+                        message: Hot tub maintenance is due!
+                        data:
+                          tag: hot_tub_maintenance
+                          group: General
+                          channel: General
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          persistent: true
+                          clickAction: /lovelace/schedule
+                          color: !secret NOTIFY_COLOR
+                          icon_url: !secret HOTTUB_ICON
+                          image: !secret HOTTUB_IMAGE
+                          actions:
+                            - action: hot_tub_maintenance_done
+                              title: Maintenance Done
+                              uri: /lovelace/schedule
+
+            - wait_template: "{{ is_state('input_boolean.hot_tub_maintenance_active','off') }}"
+              timeout: # wait for alert to turned off/dismissed
+                minutes: 15
+          until:
+            - condition: state
+              entity_id: input_boolean.hot_tub_maintenance_active
+              state: "off"
+
+  #######################################################################################################################
+  ## Schedule - Hot Tub Maintenance Close Notifications
+  #######################################################################################################################
+  - id: schedule_hot_tub_maintenance_close_notifications
+    alias: "[Schedule] Hot Tub Maintenance Close Notifications"
+    description: Dismiss notifications on all devices.
+    initial_state: true
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.hot_tub_maintenance_active
+        to: "off"
+
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: hot_tub_maintenance
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: hot_tub_maintenance_done
+    action:
+      - service: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: hot_tub_maintenance

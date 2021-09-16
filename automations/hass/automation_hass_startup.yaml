@@ -2,8 +2,8 @@
 ## Hass - Startup
 #######################################################################################################################
 - id: hass_startup
-  alias: '[Hass] Startup'
-  description: Turn on delayed automations, send restart notification.
+  alias: "[Hass] Startup"
+  description: "Turn on delayed automations, send restart notification."
   initial_state: true
   trigger:
     - platform: homeassistant
@@ -19,7 +19,7 @@
               data:
                 level: critical
                 logger: automation.hass_startup
-                message: '**** HOME ASSISTANT START ****'
+                message: "**** HOME ASSISTANT START ****"
 
     - service: persistent_notification.create
       data:
@@ -30,8 +30,10 @@
     # wait for entities to initialize before continuing
     # use integration group state - binary sensor will always be on at startup
     # use offline devices sensor - binary sensor will always be on at startup
+    # use offline zwave devices sensor - binary sensor will always be on at startup
     - wait_template: >
         {{ is_state('group.integration_online_sensors','on')
+            and is_state('sensor.offline_zwave_devices','0')
             and is_state('sensor.offline_devices','0')
             and is_state('sensor.unavailable_sensors','0') }}
       timeout:
@@ -39,11 +41,6 @@
 
     - service: input_boolean.turn_off
       entity_id: input_boolean.startup_pending
-
-    #TEST - service: browser_mod.window_reload #BUGFIX browser unresponsive sometimes after startup
-
-    # - service: script.turn_on
-    #   entity_id: script.internet_speedtest # manually update, unknown at startup
 
     - choose:
         - conditions:
@@ -55,7 +52,20 @@
               data:
                 level: critical
                 logger: automation.hass_startup
-                message: '**** HOME ASSISTANT STARTUP COMPLETE ****'
+                message: "**** HOME ASSISTANT STARTUP COMPLETE ****"
+
+    - variables:
+        hass_leds: >
+          {{ states.light|selectattr('attributes.led_hass','eq',true)
+              |selectattr('state','in',['on','off'])|map(attribute='entity_id')|list }}
+
+    - service: script.inovelli_led_control
+      data:
+        duration: 255
+        color: 105
+        effect: solid
+        brightness: 10
+        entities: "{{ hass_leds }}"
 
     - service: persistent_notification.dismiss
       data:
@@ -63,7 +73,7 @@
 
     - service: persistent_notification.create
       data:
-        title: &start_title Home Assistant Restarted
+        title: &start_title "Home Assistant Restarted"
         message: &start_message "Startup completed at {{ now().strftime('%H:%M %p') }}."
         notification_id: hass_restart
 
@@ -122,22 +132,17 @@
                           actions:
                             - title: Close
                               action: close_hass_restart
-    - delay:
-        minutes: 5 # must delay automation reload so all other hass startup automations can run
-
-    #BUG Zwave Scene Automations not firing after restart unless reloaded
-    #TEST - service: automation.reload #BUGFIX
 
 #######################################################################################################################
 ## Hass - Close Restart Notification
 #######################################################################################################################
 - id: hass_close_restart_notifications
-  alias: '[Hass] Close Restart Notifications'
-  description: Dismiss notifications on all devices.
+  alias: "[Hass] Close Restart Notifications"
+  description: "Dismiss notifications on all devices."
   initial_state: true
   max_exceeded: silent
   trigger:
-    - platform: event  # from_state of dismissed persistent notifcations is unknown, use state_changed event
+    - platform: event  # from_state of dismissed persistent notifcations is null, use state_changed event
       event_type: state_changed
       event_data:
         entity_id: persistent_notification.hass_restart
@@ -180,3 +185,34 @@
 
     - delay:
         seconds: 30 # prevent recursive triggers
+
+# {
+#     "event_type": "state_changed",
+#     "data": {
+#         "entity_id": "persistent_notification.startup_delay",
+#         "old_state": {
+#             "entity_id": "persistent_notification.startup_delay",
+#             "state": "notifying",
+#             "attributes": {
+#                 "title": "Automation Startup",
+#                 "friendly_name": "Automation Startup",
+#                 "message": "Waiting for startup to complete."
+#             },
+#             "last_changed": "2021-09-11T23:00:34.650562+00:00",
+#             "last_updated": "2021-09-11T23:00:34.650562+00:00",
+#             "context": {
+#                 "id": "66468a6efef1c1630e6f88361aa061f5",
+#                 "parent_id": null,
+#                 "user_id": null
+#             }
+#         },
+#         "new_state": null
+#     },
+#     "origin": "LOCAL",
+#     "time_fired": "2021-09-11T23:01:55.726371+00:00",
+#     "context": {
+#         "id": "c40958059060a3e52d6843a3c6b662f9",
+#         "parent_id": null,
+#         "user_id": "e57d4fdfccce4e7e98ec86526571b6f6"
+#     }
+# }

@@ -1,0 +1,133 @@
+#######################################################################################################################
+## Schedule - Work Shift Change
+#######################################################################################################################
+- id: schedule_work_shift_change
+  alias: "[Schedule] Work Shift Change"
+  description: Logbook entry, notification when work shift changes.
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - calendar.days
+        - calendar.afternoons
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.schedule_automation
+        - input_boolean.work_schedule
+      state: 'on'
+  action:
+    - delay: # prevent double notification when shifts on/off, sent on lastest change (current shift)
+        minutes: 15
+
+    - service: logbook.log #VERIFY
+      data:
+        name: Day Shift
+        message: has changed
+        entity_id: calendar.days
+        domain: calendar
+
+    - service: logbook.log
+      data:
+        name: Afternoon Shift
+        message: has changed
+        entity_id: calendar.afternoons
+        domain: calendar
+
+    - service: notify.jason
+      data:
+        title: Work Shift Change
+        message: "Shift: {{ states('sensor.current_shift') }}"
+        data:
+          tag: shift_change
+          group: General
+          channel: General
+          importance: max
+          ttl: 0
+          priority: high
+          color: !secret NOTIFY_COLOR
+          icon_url: !secret WORK_ICON
+          actions:
+            - title: Work Schedule Off
+              action: work_schedule_off
+            - title: Open Schedule
+              action: URI
+              uri: /lovelace/schedule
+
+#######################################################################################################################
+## Schedule - Work Shift Auto Select
+#######################################################################################################################
+- id: schedule_work_shift_auto_select
+  alias: "[Schedule] Work Shift Auto Select"
+  description: Select current shift when calendar/selection changes.
+  initial_state: true
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.google_calendar_connected
+        - calendar.days
+        - calendar.afternoons
+        - input_select.work_shift_selection
+
+    - platform: state
+      entity_id: input_boolean.work_shift_override
+      to: 'off'
+
+    - platform: state
+      entity_id: input_boolean.work_schedule
+      to: 'on'
+
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.schedule_automation
+        - binary_sensor.google_calendar_connected
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.work_shift_override
+      state: 'off'
+
+    - condition: state
+      entity_id: input_boolean.startup_pending
+      state: 'off'
+  action:
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.work_shift_selection
+      data:
+        option: >
+          {% if is_state('input_boolean.work_schedule','off') %} Off
+          {% elif is_state('calendar.afternoons','on') %} Afternoons
+          {% elif is_state('calendar.days','on') %} Days
+          {% else %} {{ states('input_select.work_shift_selection') }}
+          {% endif %}
+
+#######################################################################################################################
+## Schedule - Turn Off Work Shift Override
+#######################################################################################################################
+- id: schedule_work_shift_override_off
+  alias: "[Schedule] Turn Off Work Shift Override"
+  description: Turn work shift override off.
+  initial_state: true
+  trigger:
+    - platform: state # always reset when work schedule turns on
+      entity_id: input_boolean.work_schedule
+      to: 'on'
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: shift_override_off
+  condition:
+    - condition: state
+      entity_id: binary_sensor.google_calendar_connected
+      state: 'on'
+  action:
+    - service: input_boolean.turn_off
+      entity_id: input_boolean.work_shift_override
