@@ -1,124 +1,108 @@
 #######################################################################################################################
 ## Weather Report
-## - use|replace("<"," less than ")|replace(">","greater than") filter to prevent malformed SSML
+## - use|replace("<"," less than ")|replace(">","greater than") filter to prevent malformed tts message
 #######################################################################################################################
 weather_report:
-  alias: Weather Report
-  description: Play daily weather report.
+  alias: "Weather Report"
+  description: "Play daily weather report."
   icon: mdi:weather-lightning-rainy
   sequence:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: binary_sensor.dark_sky_connected
-              state: 'off'
+    - service: script.tts_play
+      data: #DARKSKY
+        play_message: >
+          {% set temp = states('sensor.outdoor_temperature')|int %}
+          {% set app_temp = states('sensor.outdoor_apparent_temperature')|int %}
+          {% set high_temp = states('sensor.outdoor_high_temperature')|int %}
+          {% set app_high_temp = states('sensor.dark_sky_daytime_high_apparent_temperature_0d')|int %}
+          {% set low_temp = states('sensor.outdoor_low_temperature')|int %}
+          {% set app_low_temp = states('sensor.dark_sky_daytime_low_apparent_temperature_0d')|int %}
+          {% set both_alerts = is_state('binary_sensor.envcan_weather_alert','on') and is_state('binary_sensor.noaa_weather_alert','on') %}
+          {% set humidity = states('sensor.outdoor_humidity')|int %}
+          {% set humidty_today = states('sensor.outdoor_humidity_today')|int  %}
+          {% set pop = states('sensor.precipitation_probability_today')|int %}
+          {% set precip_type = states('sensor.precipitation_type') %}
+          {% set wind_max = states('sensor.wind_gust_today')|int %}
+          {% set current = states('sensor.dark_sky_summary')|replace('<',' less than ')|replace('>','greater than')|lower %}
+          {% set minute_summary = states('sensor.dark_sky_minutely_summary')|replace('<',' less than ')|replace('>','greater than')|lower %}
+          {% set hourly_summary = states('sensor.dark_sky_hourly_summary')[:-1]|replace('<',' less than ')|replace('>','greater than')|lower %}
+          {% set daily_summary = states('sensor.dark_sky_daily_summary')|replace('<',' less than ')|replace('>','greater than')|lower %}
+          {{ states('sensor.tod_greeting') }}!
 
-          sequence:
-            - service: browser_mod.toast
-              data:
-                message: The weather service is not connected.
-                duration: 30000
+          {%- if is_state('binary_sensor.envcan_weather_alert','on') %}
+          There is an Environment Canada {{ state_attr('binary_sensor.envcan_weather_alert','title') }} in effect until {{ state_attr('binary_sensor.envcan_weather_alert','expires') }}.
+          {%- endif %}
+          {%- if is_state('binary_sensor.noaa_weather_alert','on') %}
+          There is {{ 'also' if both_alerts }} a National Weather Service {{ state_attr('binary_sensor.envcan_weather_alert','severity') }} {{ state_attr('binary_sensor.envcan_weather_alert','title') }} warning in effect until {{ state_attr('binary_sensor.noaa_weather_alert','expires') }}.
+          {%- endif %}
 
-      default:
-        - service: script.tts_play
-          data: #DARKSKY
-            play_message: >
-              Good {{ 'Morning' if states('sensor.time') < '12:00' else ('Evening' if states('sensor.time') > '18:00' else 'Afternoon') }}!
+          It is currently {{ temp }} degrees
+          {%- if (temp - app_temp )|abs > 2 -%}
+            , but the {{ 'humidex' if temp > 10 else 'windchill' }} is around {{ app_temp }} degress. It is
+          {%- else %} and
+          {%- endif %}
+          {{- ' ' ~ current }}, and will be {{ minute_summary }}
 
-              {%- if is_state('binary_sensor.weather_alert_active','on') %}
-              There is a
-              {% if is_state('binary_sensor.envcan_weather_alert','on') %}{{ state_attr('binary_sensor.envcan_weather_alert','title')|title }}
-              {% else %}{{ states.sensor.noaa_alerts_miz076.attributes.alerts[0].severity|title }} {{ states.sensor.noaa_alerts_miz076.attributes.alerts[0].event }}
-              {% endif %} in effect until
-              {% if is_state('binary_sensor.envcan_weather_alert','on') %}{{ state_attr('sensor.dark_sky_alerts','expires_2')|timestamp_custom('%a %D %-I:%M %p',true) }}
-              {% else %}{{ as_timestamp(states.sensor.noaa_alerts_miz076.attributes.alerts[0].ends)|timestamp_custom('%A %B %d at %_I:%M %p',true) }}
-              {% endif %}.
-              {%- endif %}
+          {%- if high_temp > states('input_number.outdoor_high_temperature_threshold')|int %}
+          It will be bloody hot
+          {%- if humidty_today > 70 %} and humid today, with a humdity level around {{ humidty_today }} percent and
+          {%- else -%}
+          {{' '}}today, with
+          {%- endif -%}
+          {{' '}}a humidex topping {{ app_high_temp }} ball sweatin degrees.
 
-              It is currently {{ states('sensor.outdoor_temperature')|round }} degrees
-              {%- if ( states('sensor.outdoor_temperature')|float - states('sensor.outdoor_apparent_temperature')|float )|abs > 5 -%}
-              {{' '}}but it feels more like around {{ states('sensor.outdoor_apparent_temperature')|round }} with the
-              {{ ' humidex' if states('sensor.outdoor_temperature')|float > 50 else ' windchill' -}}.
-              It is
-              {%- else -%},
-              {%- endif -%}
+          {%- if wind_max > 15 -%}
+          {{' '}}It will be {{- ' rather' if wind_max <  25 else ' very' }} windy with wind speeds approaching {{ wind_max }} miles per hour.
+          {%- endif -%}
 
-              {{- ' ' ~ states('sensor.dark_sky_summary')|replace('<',' less than ')|replace('>','greater than')|lower -}},
-              {{' '}}and will be {{ states('sensor.dark_sky_minutely_summary')|replace('<',' less than ')|replace('>','greater than')|lower }}
+          {%- elif low_temp < states('input_number.outdoor_low_temperature_threshold')|int %}
+          Today will be friggin cold
+          {%- if humidty_today > 70 %}{{ ' and' if wind_max <= 15 else ','}} damp {% endif %}
+          {%- if wind_max > 15 %} and {{ 'rather' if wind_max <  25 else 'very' }} windy, with wind speeds topping {{ wind_max }} kilometers per hour and
+          {%- else -%}
+          , with
+          {%- endif -%}
+          {{' '}}a high of {{ high_temp }}, and a low of {{ low_temp }} degrees.
 
-              {%- if states('sensor.climacell_high_temperature_0d')|int > states('input_number.outdoor_high_temperature_threshold')|int %}
+          {%- else %}
+          Today's high temperature will be {{ high_temp }} degrees, and the overnight low will be {{ low_temp }} degrees.
 
-              It will be bloody hot {%- if states('sensor.dark_sky_humidity_0d')|round|int > 70 -%} and humid today, with a humdity level around {{ states('sensor.dark_sky_humidity_0d')|round }} percent and
-              {%- else -%}
-              {{' '}}today, with
-              {%- endif -%}
-              {{' '}}a humidex topping {{ states('sensor.dark_sky_daytime_high_apparent_temperature_0d')|round }} ball sweatin degrees.
-              {%- if states('sensor.dark_sky_wind_gust_0d')|round|int > 15 -%}
-              {{' '}}It will be {{- ' rather' if states('sensor.dark_sky_wind_gust_0d')|round|int <  25 else ' very' }} windy with wind speeds approaching {{ states('sensor.dark_sky_wind_gust_0d')|round }} miles per hour.
-              {%- endif -%}
-              {%- elif states('sensor.climacell_low_temperature_0d')|int < states('input_number.outdoor_low_temperature_threshold')|int %}
+          {%- if wind_max > 15 -%}
+          It will be {{ 'rather' if wind_max <  25 else 'very' }} windy today,
+          {{' '}}with wind speeds approaching {{ wind_max }} kilometers per hour.
+          {%- endif -%}
+          {%- endif %}
+          The current humidity level is {{ humidity }} percent and there
+          {{- ' will be no ' if pop < 10 else ' is a ' ~ pop  ~ ' percent chance of ' }}{{ precip_type }} today.
+          The forecast calls for {{ hourly_summary }} with {{ daily_summary }}
 
-              {{' '}}Today will be friggin cold
-              {%- if states('sensor.dark_sky_humidity_0d')|round|int > 70 %} and damp {% endif %}
-              {%- if states('sensor.dark_sky_wind_gust_0d')|round|int > 15 %} and windy, with wind speeds topping {{ states('sensor.dark_sky_wind_gust_0d')|round }} miles per hour and
-              {%- else -%}
-              , with
-              {%- endif -%}
-              {{' '}}a wind chill of {{ states('sensor.climacell_low_temperature_0d')|round }} degrees.
-              {%- else %}
+          {%- if states('sensor.current_uv_level')|lower in ['high','very high'] %}
+          The current UV risk is {{ states('sensor.current_uv_level') -}}{%- endif %}
+          {%- if states('sensor.uv_risk_today')|lower in ['high','very high'] -%}
+          {{ ' and todays ' if states('sensor.current_uv_level')|lower in ['high','very high'] else ' Todays ' -}}
+          forecasted UV risk is {{ states('sensor.uv_risk_today') -}}, so you should try to keep all you're pastey red-headed step children indoors today
+          {%- endif %}.
 
-              Today's high temperature will be {{ states('sensor.climacell_high_temperature_0d')|round }} degrees,
-              and the overnight low will be {{ states('sensor.climacell_low_temperature_0d')|round }} degrees.
-              {%- if states('sensor.dark_sky_wind_gust_0d')|round|int > 15 %}
+          {%- if not states('sensor.aqi_risk_level')|lower in ['good','unknown'] %}
+          The current air quality index is, {{ states('sensor.aqi_risk_level') }}.
+          {%- endif -%}
 
-              It will be {{ 'rather' if states('sensor.dark_sky_wind_gust_0d')|round|int <  25 else 'very' }} windy today,
-              {{' '}}with wind speeds approaching {{ states('sensor.dark_sky_wind_gust_0d')|round }} miles per hour.
-              {%- endif -%}
-              {%- endif %}
+          {%- if states('sensor.asthma_risk_today')|lower in ['medium-high','high'] %}
+          Today's asthma risk is {{ states('sensor.asthma_risk_today') }} so spark up a fag and char your lungs up some more, you stuuupid wanckah!
+          {%- endif %}
 
-              The current humidity level is {{ states('sensor.outdoor_humidity')|round }} percent and there
-              {%- if states('sensor.climacell_precipitation_probability_0d')|int < 10 -%}
-              {{' '}}will be no {{ states('sensor.dark_sky_precip_0d') if not states('sensor.dark_sky_precip_0d') == 'unknown' else 'precipitation' }} today.
-              {%- else -%}
-              {{' '}}is a {{ states('sensor.climacell_precipitation_probability_0d')|round }} percent chance of {{ states('sensor.dark_sky_precip_0d') if not states('sensor.dark_sky_precip_0d') == 'unknown' else 'precipitation' }} today.
-              {%- endif %}
+          {%- if states('sensor.allergy_risk_today')|lower in ['medium-high','high'] %}
+          Get your snot rags ready because today's allergy risk is {{ states('sensor.allergy_risk_today') }}.
+          {%- endif %}
 
-              The forecast calls for {{ states('sensor.dark_sky_hourly_summary')[:-1]|replace('<',' less than ')|replace('>','greater than')|lower }} with {{ states('sensor.dark_sky_daily_summary')|replace('<',' less than ')|replace('>','greater than')|lower }}
+          {%- if states('sensor.flu_risk_level')|lower in ['medium-high','high'] %}
+          Today's cold and flu risk is {{ states('sensor.flu_risk_level') }}.
+          {%- endif %}
+          The sun will set this evening at {{ states('sensor.sun_set') -}}
+          , and with any luck will rise tomorrow morning at {{ states('sensor.sun_rise') }}.
 
-              {%- if states('sensor.current_uv_level')|lower in ['high','very high'] %}
-
-              The current UV risk is {{ states('sensor.current_uv_level') -}}{%- endif %}
-              {%- if states('sensor.uv_risk_today')|lower in ['high','very high'] -%}
-              {{ ' and todays ' if states('sensor.current_uv_level')|lower in ['high','very high'] else ' Todays ' -}}
-              forecasted UV risk is {{ states('sensor.uv_risk_today') -}}, so you should try to keep all you're pastey red-headed step children indoors today
-              {%- endif %}.
-
-              {%- if not states('sensor.aqi_risk_level')|lower in ['good','unknown'] %}
-
-              The current air quality index is, {{ states('sensor.aqi_risk_level') }}.
-              {%- endif -%}
-
-              {%- if states('sensor.asthma_risk_today')|lower in ['medium-high','high'] %}
-
-              Today's asthma risk is {{ states('sensor.asthma_risk_today') }} so spark up a fag and char your lungs up some, you stuuupid wanckah!
-              {%- endif %}
-
-              {%- if states('sensor.allergy_risk_today')|lower in ['medium-high','high'] %}
-
-              Get your snot rags ready because today's allergy risk is {{ states('sensor.allergy_risk_today') }}.
-              {%- endif %}
-
-              {%- if states('sensor.flu_risk_level')|lower in ['medium-high','high'] %}
-
-              Today's cold and flu risk is {{ states('sensor.flu_risk_level') }}.
-              {%- endif %}
-
-              The sun will set this evening at {{ states('sensor.sun_set') }}
-              and with any luck will rise tomorrow morning at {{ states('sensor.sun_rise') }}.
-
-              Have a peachy day!  Cheerio!
-            quiet_play: true
-            media_player: media_player.broadcast_speakers
-            min_volume: 40
+          Have a peachy day!  Cheerio!
+        quiet_play: true
+        media_player: media_player.broadcast_speakers
+        min_volume: 40
 
 #IDEA something funny for flu index

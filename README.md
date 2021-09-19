@@ -33,6 +33,7 @@ Home Assistant (Hassio) configuration, updated to v2021.9.6
     #WEBOS - waiting for volume_level fix
     #VIRTUAL - replace virtual entities
 
+    #INFLUXDB - sensor for influx_db
     #ZWAVE - note for zwave
     #BLOOP - google home bloop fixes
     #UNLOCKED - code related to phone locked status for alarm disarming

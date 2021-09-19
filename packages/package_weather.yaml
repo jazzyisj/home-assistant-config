@@ -72,6 +72,29 @@ camera:
     still_image_url: https://www.yr.no/place/Canada/Ontario/Windsor/meteogram.png
     content_type: image/png
 
+weather:
+  - platform: template
+    name: "Windsor"
+    unique_id: windsor_current
+    condition_template: "{{ states('sensor.current_condition') }}"
+    temperature_template: "{{ states('sensor.outdoor_temperature')|int }}"
+    humidity_template: "{{ states('sensor.outdoor_humidity')|int }}"
+    pressure_template: "{{ states('sensor.barometric_pressure')|int }}"
+    wind_speed_template: "{{ states('sensor.wind_speed')|int }}"
+    wind_bearing_template: "{{ states('sensor.wind_bearing')|int }}"
+    visibility_template: "{{ states('sensor.visibility')|int }}"
+    forecast_template: >
+      {% if state_attr('weather.envcan_daily','forecast')|lower not in ['unknown','unavailable','none'] %}
+        {{ state_attr('weather.envcan_daily','forecast') }}
+      {% elif state_attr('weather.home','forecast')|lower not in ['unknown','unavailable','none'] %}
+        {{ state_attr('weather.home','forecast') }}
+      {% elif state_attr('weather.kdtw_daynight','forecast')|lower not in ['unknown','unavailable','none'] %}
+        {{ state_attr('weather.kdtw_daynight','forecast') }}
+      {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['unknown','unavailable','none'] %}
+        {{ state_attr('weather.climacell_daily','forecast') }}
+      {% endif %}
+    attribution_template: "jazzyisj"
+
 input_boolean:
   weather_automation:
     name: Weather Automation
@@ -135,17 +158,97 @@ sensor:
 
   - platform: statistics # https://www.home-assistant.io/components/sensor.statistics/
     entity_id: sensor.outdoor_temperature
-    name: Outdoor Temperature Statistics
+    name: "Outdoor Temperature: Annual"
     max_age:
       days: 365
     precision: 1
     sampling_size: 500
 
   - platform: statistics
-    entity_id: sensor.barometric_pressure
-    name: Barometric Pressure Statistics
+    entity_id: sensor.outdoor_temperature # for min/max template sensors
+    name: "Outdoor Temperature: Daily"
+    max_age:
+      days: 1
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.outdoor_humidity
+    name: "Outdoor Humidity: Annual"
     max_age:
       days: 365
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.outdoor_humidity
+    name: "Outdoor Humidity: Daily"
+    max_age:
+      days: 1
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.barometric_pressure
+    name: "Barometric Pressure: Annual"
+    max_age:
+      days: 365
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.wind_speed
+    name: "Wind Speed: Annual"
+    max_age:
+      days: 365
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.wind_gust
+    name: "Wind Gust: Annual"
+    max_age:
+      days: 365
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.cloud_cover
+    name: "Cloud Cover: Annual"
+    max_age:
+      days: 365
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.precipitation_yesterday_rain # for max template sensor
+    name: "Rain Yesterday: Annual"
+    max_age:
+      days: 365
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.precipitation_yesterday_rain # for daily max template sensor - graph
+    name: "Rain Accumulation: Daily"
+    max_age:
+      days: 1
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.precipitation_intensity # for daily max template sensor - graph #TODO - graph weather statistics
+    name: "Rain Intensity: Daily"
+    max_age:
+      days: 1
+    precision: 1
+    sampling_size: 500
+
+  - platform: statistics
+    entity_id: sensor.precipitation_yesterday_rain # for weekly total sensor
+    name: "Rain Accumulation: Weekly"
+    max_age:
+      days: 7
     precision: 1
     sampling_size: 500
 
@@ -292,14 +395,15 @@ alert:
     name: Storm Approaching
     title: Storm Approaching
     message: > #DARKSKY
-      {%- if not states('sensor.dark_sky_nearest_storm_distance')|int == 0 -%}
-        <p/>There is a {% if not states('sensor.dark_sky_precip') == 'unknown' %}{{ states('sensor.dark_sky_precip') }}{%- endif -%} storm {{ states('sensor.dark_sky_nearest_storm_distance') }}
-        {{- ' mile ' if states('sensor.dark_sky_nearest_storm_distance')|int == 1 else ' miles ' -}} away,
-        {%- if not states('sensor.storm_full_cardinal_direction') == 'unknown' -%} approaching from the {{ states('sensor.storm_full_cardinal_direction') }}{%- endif -%}.
-      {%- else -%}There is a {% if not states('sensor.dark_sky_precip') == 'unknown' -%}
-        {{- states('sensor.dark_sky_precip') }}{%- endif -%} storm in the immediate vicinity.
+      {%- set dir = states('sensor.storm_full_cardinal_direction') %}
+      {%- set dist = states('sensor.dark_sky_nearest_storm_distance') %}
+      There is a {{ states('sensor.precipitation_type') }} storm
+      {%- if dist|float >= 1 %} {{ dist|int }} {{ 'kilometer' if dist|int == 1 else 'kilometers' }} away
+      {%- if not dir|lower in ['unknown','unavailable','none'] %}, approaching from the {{ dir }} {% endif -%}.
+      {%- else %} in the immediate vicinity.
       {%- endif %}
-      <p/>The current forecast is {{ states('sensor.dark_sky_minutely_summary')|replace('<',' less than ')|replace('>','greater than') }}
+      The current forecast is {{ states('sensor.dark_sky_minutely_summary')|replace('<',' less than ')|replace('>','greater than')|lower }}
+
     done_message: clear_notification
     entity_id: binary_sensor.storm_approaching_alert
     state: 'on'
