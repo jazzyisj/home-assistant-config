@@ -10,17 +10,17 @@
 # skip TV if source is tts - really annoying
 #######################################################################################################################
 set_media_player_volumes:
-  alias: Set Media Player Volumes
-  description: Set media player volumes.
+  alias: "Set Media Player Volumes"
+  description: "Set media player volumes."
   icon: mdi:play-box-multiple-outline
   mode: queued
   max: 10
   fields:
     source:
-      description: Source calling this script.
+      description: "Source calling this script."
       example: tts_off
     media_players:
-      description: Media player list.
+      description: "Media player list."
       example: "[media_player.dining_room_display, media_player.bedroom_display]"
     player_volume:
       description: Volume level (%)
@@ -30,7 +30,7 @@ set_media_player_volumes:
     player_volume: "{{ player_volume|default(0) }}"
     media_tts: "{{ source[-4:] == '_tts' }}"
     source_off: "{{ source[-4:] == '_off' or media_tts and source not in ['radio_off','spotify_off'] }}"
-    #WEBOS - reject tvs in reset/phone - no volume attribute
+    #TV_VOL - reject tvs in reset/phone - no volume_level attribute
     #tts_off - skip alarm_clock, radio, spotify media players - volumes are set on resume
     players: >
       {% if media_players not in ['',empty] %}
@@ -85,8 +85,9 @@ set_media_player_volumes:
       state: 'off'
 
     - service: automation.turn_off
-      data:
+      target:
         entity_id: automation.media_player_volume_changed
+      data:
         stop_actions: false
 
     - choose:
@@ -95,8 +96,9 @@ set_media_player_volumes:
                 and is_state('binary_sensor.mobile_phone_in_use','on') }}
           sequence:
             - service: script.turn_on # checks if phone on to save values
-              data:
+              target:
                 entity_id: script.save_media_player_volumes
+              data:
                 variables:
                   source: phone
                   media_player: "{{ players }}"
@@ -104,17 +106,20 @@ set_media_player_volumes:
         - conditions: "{{ source in ['phone_all','tts_all'] }}"
           sequence:
             - service: script.turn_on # checks if phone on to save values
-              data:
+              target:
                 entity_id: script.save_media_player_volumes
+              data:
                 variables:
                   source: "{{ source[0:-4] }}"
                   media_player: "{{ players }}"
+
+#ISSUE on template reload
+#WARNING (MainThread) [homeassistant.helpers.script] Error in 'while[0]' evaluation: In 'template' condition: TypeError: object of type 'NoneType' has no len()
 
     - repeat:
         while:
           - condition: template
             value_template: "{{ repeat.index <= players|count }}"
-
         sequence:
           - variables:
               player: "{{ players[repeat.index-1] }}"
@@ -134,11 +139,11 @@ set_media_player_volumes:
                   #BLOOP don't restore zero volumes when source off (media player volume may have been adjusted in off state by user)
                   - condition: template
                     value_template: "{{ states(source_entity)|float > 0 if source_off else true }}"
-
                 sequence:
                   - service: media_player.volume_set
-                    data:
+                    target:
                       entity_id: "{{ player }}"
+                    data:
                       volume_level: >
                         {# SET CURRENT VOLUME #}
                         {% if states[player].attributes.volume_level is defined %}{% set current = state_attr(player,'volume_level')|float|round(2) %}
@@ -202,7 +207,6 @@ set_media_player_volumes:
                         {% endif %}
 
                   # if source off do not balance, balanced volume/manually set volume was stored
-
     - delay: 1 # allow volumes to set
 
     - service: automation.turn_on

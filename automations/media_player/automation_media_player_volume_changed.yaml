@@ -4,10 +4,10 @@
 #######################################################################################################################
 - id: media_player_volume_changed
   alias: "[Media Player] Volume Changed"
-  description: Change stored volume when media player volume changes.
+  description: "Change stored volume value when media player volume changes."
   initial_state: true
   mode: queued
-  max: 5
+  max: 20
   max_exceeded: error
   variables:
     media_type: >
@@ -21,7 +21,7 @@
       {% endif %}
     is_media: "{{ media_type in ['radio','spotify'] }}"
     is_group: "{{ trigger.entity_id in state_attr('sensor.media_player_groups','players') }}"
-    is_tv: "{{ 'media_player.living_room_tv' in states.media_player|selectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list }}"
+    is_tv: "{{ trigger.entity_id in states.media_player|selectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list }}"
     volume_entity: >
       {% if is_media %} input_number.{{ media_type }}_volume
       {% elif not is_group %} input_number.{{ trigger.entity_id.split('.')[1] }}_current_volume
@@ -47,7 +47,7 @@
   trigger:
     - platform: state
       entity_id: !include /config/include/entities/media_player_entities.yaml
-      attribute: volume_level
+      attribute: volume_level  #TV_VOL - lg tv, roku tv don't report volume_level in media player
       for: 2
   condition:
     - condition: state
@@ -58,19 +58,19 @@
       state: 'off'
 
     - condition: template
-      alias: Volume not changed by media player turning off or unavailable (sets volume to 0)
+      alias: "Volume not changed by media player turning off or unavailable (sets volume to 0)"
       value_template: "{{ states(trigger.entity_id)|lower not in ['off','unknown','unavailable','none'] }}"
 
     - condition: template
-      alias: Trigger is not a group unless group is radio/spotify player.
+      alias: "Trigger is not a group unless group is radio/spotify player."
       value_template: "{{ false if (is_group and not is_media) or (is_media and not trigger.entity_id == media_entity) else true }}"
 
     - condition: template
-      alias: New volume is not already equal to set volume.
+      alias: "New volume is not already equal to set volume."
       value_template: "{{ current_volume != states(volume_entity)|float/100|round(2) if is_media else current_volume != states(volume_entity)|float|round(1) }}"
 
     - condition: template
-      alias: Volume not changed by any active alarm clock media player.
+      alias: "Volume not changed by any active alarm clock media player"
       value_template: >
         {% if is_state('binary_sensor.alarm_clock_active','off') %} true
         {% else %}
@@ -86,7 +86,7 @@
         {% endif %}
 
     - condition: template
-      alias: Volume not changed by any active tts media player.
+      alias: "Volume not changed by any active tts media player"
       value_template: >
         {% if is_state('input_boolean.tts_playing','off') %} true
         {% else %}
@@ -105,13 +105,15 @@
         - conditions: "{{ not is_group }}"
           sequence:
             - service: automation.turn_off
-              data:
+              target:
                 entity_id: automation.media_player_media_volume_changed
+              data:
                 stop_actions: false
 
             - service: input_number.set_value
-              data:
+              target:
                 entity_id: "{{ volume_entity }}"
+              data:
                 value: "{{ new_volume }}"
 
             - service: automation.turn_on
@@ -121,31 +123,36 @@
         - conditions: "{{ limit_volume and not is_group and not is_tv }}"
           sequence:
             - service: automation.turn_off
+              target:
+                entity_id: "{{ this.entity_id }}"
               data:
-                entity_id: automation.media_player_volume_changed
                 stop_actions: false
 
             - service: media_player.volume_set
-              data:
+              target:
                 entity_id: "{{ trigger.entity_id }}"
+              data:
                 volume_level: "{{ quiet_volume }}"
 
             - service: automation.turn_on
-              entity_id: automation.media_player_volume_changed
+              target:
+                entity_id: "{{ this.entity_id }}"
 
     - choose:  # if media type media player, set media type volume
         - conditions: "{{ is_media and trigger.entity_id == media_entity }}"
           sequence:
             - service: automation.turn_off
+              target:
+                entity_id: "{{ this.entity_id }}"
               data:
-                entity_id: automation.media_player_media_volume_changed
                 stop_actions: false
 
             - service: input_number.set_value
-              data:
+              target:
                 entity_id: "input_number.{{ media_type }}_volume"
+              data:
                 value: "{{ new_volume }}"
 
             - service: automation.turn_on
-              entity_id: automation.media_player_media_volume_changed
-
+              target:
+                entity_id: "{{ this.entity_id }}"

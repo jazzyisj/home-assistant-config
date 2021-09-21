@@ -99,6 +99,8 @@
           {% else %} Off
           {% endif %}
 
+    #IDEA wind alert
+
     - unique_id: asthma_risk_alert
       state: >
         {{ is_state('sensor.asthma_risk_today','High')
@@ -134,6 +136,26 @@
         {{ 'tornado' in states('sensor.envcan_warnings')|lower
             or (is_state_attr('binary_sensor.noaa_weather_alert','condition','tornado')
               and state_attr('binary_sensor.noaa_weather_alert','severity') in ['severe','extreme']) }}
+
+    - name: "Rain Today"
+      unique_id: rain_today
+      icon: mdi:weather-pouring
+      state: >
+        {% set threshold = 24 %}
+        {% set sensor = states.weather.kdtw_hourly.attributes %}
+        {{ sensor.forecast[0].precipitation_probability|int > threshold
+          or sensor.forecast[1].precipitation_probability| int > threshold
+          or sensor.forecast[2].precipitation_probability| int > threshold
+          or sensor.forecast[3].precipitation_probability| int > threshold
+          or sensor.forecast[4].precipitation_probability| int > threshold
+          or sensor.forecast[5].precipitation_probability| int > threshold
+          or sensor.forecast[6].precipitation_probability| int > threshold
+          or sensor.forecast[7].precipitation_probability| int > threshold
+          or sensor.forecast[8].precipitation_probability| int > threshold
+          or sensor.forecast[9].precipitation_probability| int > threshold
+          or sensor.forecast[10].precipitation_probability| int > threshold }}
+      availability: "{{ states('weather.climacell_hourly') not in ['unknown','unavailable','none'] }}"
+
 - sensor:
     - name: "Temperature Trend"
       unique_id: temperature_trend # for weather card
@@ -166,6 +188,10 @@
 
     - unique_id: outdoor_temperature_daily_min # INFLUXDB
       state: "{{ state_attr('sensor.outdoor_temperature_daily','max_value') }}"
+
+    - unique_id: nws_precipitation_probability
+      state: "{{ states.weather.kdtw_daynight.attributes.forecast[0].precipitation_probability }}"
+      availability: "{{ states.weather.kdtw_daynight.attributes.forecast is defined }}"
 
     - name: "Moon Phases"
       unique_id: moon_phases
@@ -297,6 +323,8 @@
 # --weather-icon-windy-variant
 # --weather-icon-exceptional
 
+#IDEA add icons for extra #ENVCAN conditions
+
     - name: "Current Condition"
       unique_id: current_condition #DARKSKY
       icon: mdi:weather-partly-rainy
@@ -314,6 +342,11 @@
         {% endif %}
         {% if condition|lower == 'clear' and is_state('sensor.day_night','Day') %} sunny
         {% elif condition|lower == 'clear' and is_state('sensor.day_night','Night') %} clear-night
+        {% elif condition|lower == 'haze' %} sunny
+        {% elif condition|lower == 'mostly cloudy' %} cloudy
+        {% elif condition|lower == 'light rain' %} rainy
+        {% elif condition|lower == 'mainly sunny' %} partlycloudy
+        {% elif condition|lower == 'partly cloudy' %} partlycloudy
         {% else %} {{ condition|lower }}
         {% endif %}
       attributes:
@@ -614,7 +647,7 @@
             or states('sensor.climacell_precipitation_intensity')|lower not in ['unknown','unavailable','none'] }}
 
     - name: "Precipitation Yesteray - Rain"
-      unique_id: precipitation_yesterday_rain #DARKSKY
+      unique_id: precipitation_yesterday_rain
       icon: mdi:weather-pouring
       state_class: measurement
       unit_of_measurement: mm
@@ -633,7 +666,16 @@
         {{ states('sensor.envcan_precipitation_yesterday')|lower not in ['unknown','unavailable','none']
             or states('sensor.home_precipitation')|lower not in ['unknown','unavailable','none'] }}
 
-#TODO snow
+    - name: "Precipitation Yesteray - Snow"
+      unique_id: precipitation_yesterday_snow #TEMP state
+      icon: mdi:weather-snowy-heavy
+      state_class: measurement
+      unit_of_measurement: cm
+      state: 0
+      attributes:
+        provider: ''
+      availability: "{{ true }}"
+
     - name: "Precipitation Type"
       unique_id: precipitation_type #DARKSKY
       icon: mdi:weather-rainy
@@ -651,6 +693,35 @@
           {% elif states('sensor.climacell_precipitation_type')|lower not in ['unknown','unavailable','none'] %} Climacell
           {% else %} Outdoor Temperature
           {% endif %}
+
+    - name: "Nearest Storm Bearing"
+      unique_id: nearest_storm_bearing #DARKSKY
+      state: "{{ states('sensor.dark_sky_nearest_storm_bearing')|float }}"
+      state_class: measurement
+      unit_of_measurement: '°'
+      attributes:
+        provider: Dark Sky
+      availability: "{{ states('sensor.dark_sky_nearest_storm_bearing')|lower not in ['unknown','unavailable','none'] }}"
+
+    - name: "Nearest Storm Distance"
+      unique_id: nearest_storm_distance #DARKSKY
+      state: "{{ states('sensor.dark_sky_nearest_storm_distance')|int }}"
+      state_class: measurement
+      unit_of_measurement: km
+      attributes:
+        provider: Dark Sky
+      availability: "{{ states('sensor.dark_sky_nearest_storm_distance')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: storm_full_direction #NAME
+      state: >
+        {% set directions = ['North','North-Northeast','Northeast','East-Northeast','East','East-Southeast',
+            'Southeast','South-Southeast','South','South-Southwest','Southwest','West-Southwest','West',
+            'West-Northwest','Northwest','North-Northwest','North'] %}
+        {{ directions[((states('sensor.nearest_storm_bearing')|float/360)|float*16)|round] }}
+      attributes:
+        provider: "{{ state_attr('sensor.nearest_storm_bearing','provider') }}"
+      availability: >
+        {{ states('sensor.nearest_storm_bearing')|lower not in ['unknown','unavailable','none'] }}
 
     - name: "Barometric Pressure"
       unique_id: barometric_pressure
@@ -803,13 +874,13 @@
       unit_of_measurement: °
       state: >
         {% if states('sensor.envcan_wind_bearing')|lower not in ['unknown','unavailable','none'] %}
-          {{ states('sensor.envcan_wind_bearing')|int }}
+          {{ states('sensor.envcan_wind_bearing')|float }}
         {% elif states('sensor.kdtw_wind_direction')|lower not in ['unknown','unavailable','none'] %}
-          {{ states('sensor.kdtw_wind_direction')|int }}
+          {{ states('sensor.kdtw_wind_direction')|float }}
         {% elif state_attr('weather.home','wind_bearing')|lower not in ['unknown','unavailable','none'] %}
-          {{ state_attr('weather.home','wind_bearing')|int }}
+          {{ state_attr('weather.home','wind_bearing')|float }}
         {% elif states('sensor.climacell_wind_bearing')|lower not in ['unknown','unavailable','none'] %}
-          {{ states('sensor.climacell_wind_bearing')|int }}
+          {{ states('sensor.climacell_wind_bearing')|float }}
         {% endif %}
       attributes:
         provider: >
@@ -823,6 +894,29 @@
             or states('sensor.kdtw_wind_direction')|lower not in ['unknown','unavailable','none']
             or state_attr('weather.home','wind_bearing')|lower not in ['unknown','unavailable','none']
             or states('sensor.climacell_wind_bearing')|lower not in ['unknown','unavailable','none'] }}
+
+    - name: "Wind Direction"
+      unique_id: wind_direction
+      icon: mdi:compass
+      state: >
+        {% set directions = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW','N'] %}
+        {{ directions[((states('sensor.wind_bearing')|float/360)|float*16)|round] }}
+      attributes:
+        provider: "{{ state_attr('sensor.wind_bearing','provider') }}"
+      availability: "{{ states('sensor.wind_bearing')|lower not in ['unknown','unavailable','none'] }}"
+
+    - unique_id: wind_condition_verbose
+      state: >
+        {% set directions = ['North','North-Northeast','Northeast','East-Northeast','East','East-Southeast',
+            'Southeast','South-Southeast','South','South-Southwest','Southwest','West-Southwest','West',
+            'West-Northwest','Northwest','North-Northwest','North'] %}
+        {{ states('sensor.wind_gust')|int }} kilometers per hour from the
+        {{ directions[((states('sensor.wind_bearing')|float/360)|float*16)|round] }}
+      attributes:
+        provider: "{{ state_attr('sensor.wind_bearing','provider') }}"
+      availability: >
+        {{ states('sensor.wind_gust')|lower not in ['unknown','unavailable','none']
+             and states('sensor.wind_bearing')|lower not in ['unknown','unavailable','none'] }}
 
     - name: "Cloud Cover"
       unique_id: cloud_cover

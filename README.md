@@ -22,17 +22,18 @@ Home Assistant (Hassio) configuration, updated to v2021.9.6
     #DEPRACATED - depracated option/code
     #DISABLED - disabled code
 
-    #NAME - template name
-    #APEX - issues with APEX charts
+    #NAME - template to rename
+    #APEX - apex graph issues/notes
     #STACK - stack-in-card bug, must be nested in vertical-stack
     #SPOTIFY - tag for spotify issues/notes
     #DARKSKY - darksky code to replace
-    #ENVCAN - envcan sensor issue
+    #ENVCAN - envcan sensor issues/notes
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
     #GARAGE_HVAC - no thermostat
-    #WEBOS - waiting for volume_level fix
+    #TV_VOL - tv's don't report volume_level?
     #VIRTUAL - replace virtual entities
 
+    #CHROMECAST - chromecast code
     #INFLUXDB - sensor for influx_db
     #ZWAVE - note for zwave
     #BLOOP - google home bloop fixes

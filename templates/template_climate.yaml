@@ -1,11 +1,11 @@
 - binary_sensor:
-    - unique_id: indoor_low_temperature_alert # can't use availability template because of separate sensors
-      name: Indoor Low Temperatature Alert
+    - name: "Indoor Low Temperatature Alert"
+      unique_id: indoor_low_temperature_alert # can't use availability template because of separate sensors
       delay_on:
         minutes: 30 # let temp stabalize, avoid false alerts
       state: >
-        {{ ((states('sensor.upstairs_thermostat_temperature')|int < states('input_number.low_temperature_threshold')|int)
-              and not states('sensor.upstairs_thermostat_temperature')|lower in ['unknown','unavailable','none'])
+        {{ ((states('sensor.thermostat_temperature')|int < states('input_number.low_temperature_threshold')|int)
+              and not states('sensor.thermostat_temperature')|lower in ['unknown','unavailable','none'])
             or ((states('sensor.upstairs_bathroom_sensor_temperature')|int < states('input_number.low_temperature_threshold')|int )
               and not states('sensor.upstairs_bathroom_sensor_temperature')|lower in ['unknown','unavailable','none'])
             and is_state('input_boolean.climate_alerts','on')
@@ -13,33 +13,33 @@
 
     # add bathroom temp differential to temp threshold to reduce false alerts
     # can't use availability template because of separate sensors
-    - unique_id: indoor_high_temperature_alert
-      name: Indoor High Temperature Alert
+    - name: "Indoor High Temperature Alert"
+      unique_id: indoor_high_temperature_alert
       delay_on:
         minutes: 30 # let temp stabalize, avoid false alerts
       state: >
-        {{ (states('sensor.upstairs_thermostat_temperature')|int > states('input_number.high_temperature_threshold')|int
-              and not states('sensor.upstairs_thermostat_temperature')|lower in ['unknown','unavailable','none'])
+        {{ (states('sensor.thermostat_temperature')|int > states('input_number.high_temperature_threshold')|int
+              and not states('sensor.thermostat_temperature')|lower in ['unknown','unavailable','none'])
             or (( states('sensor.upstairs_bathroom_sensor_temperature')|int > (states('input_number.high_temperature_threshold')|int
                   + states('input_number.bathroom_temperature_differential')|int ))
               and not states('sensor.upstairs_bathroom_sensor_temperature')|lower in ['unknown','unavailable','none'])
             and is_state('input_boolean.climate_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: indoor_high_humidity_alert # can't use availability template because of separate sensors
-      name: Indoor High Humidity Alert
+    - name: "Indoor High Humidity Alert"
+      unique_id: indoor_high_humidity_alert # can't use availability template because of separate sensors
       delay_on:
         minutes: 60 # let humidity stabalize, avoid false alerts
       state: >
-        {{ (states('sensor.upstairs_thermostat_humidity')|int > states('input_number.high_humidity_threshold')|int
-              and not states('sensor.upstairs_thermostat_humidity')|lower in ['unknown','unavailable','none'] )
+        {{ (states('sensor.thermostat_humidity')|int > states('input_number.high_humidity_threshold')|int
+              and not states('sensor.thermostat_humidity')|lower in ['unknown','unavailable','none'] )
             or (states('sensor.upstairs_bathroom_sensor_humidity')|int > states('input_number.high_humidity_threshold')|int
               and not states('sensor.upstairs_bathroom_sensor_humidity')|lower in ['unknown','unavailable','none'])
             and is_state('input_boolean.climate_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: upstairs_bathroom_mold_risk_alert
-      name: Upstairs Bathroom Mold Risk Alert
+    - name: "Upstairs Bathroom Mold Risk Alert"
+      unique_id: upstairs_bathroom_mold_risk_alert
       delay_on:
         minutes: 60 # let temp/humidity stabalize, avoid false alerts
       state: >
@@ -47,8 +47,8 @@
             and is_state('input_boolean.climate_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: hvac_window_door_open_alert
-      name: HVAC Window Door Open Alert
+    - name: "HVAC Window Door Open Alert"
+      unique_id: hvac_window_door_open_alert
       delay_on:
         minutes: 15 # allow temporary open
       state: >
@@ -58,10 +58,35 @@
             and is_state('input_boolean.startup_pending','off') }}
 
 - sensor:
-    - unique_id: climate_hvac_action
-      name: Climate HVAC Action
+    - unique_id: thermostat_mode
+      name: "Thermostat Mode"
       icon: mdi:hvac
-      state: "{{ state_attr('climate.upstairs_thermostat','hvac_action') }}"
+      state: >
+        {% if is_state('climate.thermostat','heat') %} Heat
+        {% elif is_state('climate.thermostat','cool') %} Cool
+        {% elif is_state('climate.thermostat','heat_cool') %} Auto
+        {% elif is_state('climate.thermostat','fan_only') %} Fan
+        {% elif is_state('climate.thermostat','off') %} Off
+        {% else %} Unknown
+        {% endif %}
+
+    - unique_id: thermostat_target_temperature
+      name: "Thermostat Target Temperature"
+      icon: mdi:hvac
+      state: > #ISSUE when heat_cool and not on using heat target - bounces target around
+        {% if states('climate.thermostat') in ['heat','cool'] %}{{ state_attr('climate.thermostat','temperature') }}
+        {% elif states('climate.thermostat') == 'heat_cool' %}
+          {% if states('sensor.thermostat_hvac_state') == 'heating' %}{{ state_attr('climate.thermostat','target_temp_high') }}
+          {% elif states('sensor.thermostat_hvac_state') == 'cooling' %}{{ state_attr('climate.thermostat','target_temp_low') }}
+          {% else %} {{ state_attr('climate.thermostat','target_temp_high') }}
+          {% endif %}
+        {% else %} 0
+        {% endif %}
+
+    - name: "Thermostat HVAC State"
+      unique_id: thermostat_hvac_state
+      icon: mdi:hvac # mdi:air-conditioner
+      state: "{{ state_attr('climate.thermostat','hvac_action') }}"
 
     # overload climate integration sensors
     - unique_id: indoor_temperature
@@ -69,13 +94,13 @@
       device_class: temperature
       state_class: measurement
       unit_of_measurement: °C
-      state: "{{ states('sensor.upstairs_thermostat_temperature')|float }}"
-      availability: "{{ states('sensor.upstairs_thermostat_temperature')|lower not in ['unknown','unavailable','none'] }}"
+      state: "{{ states('sensor.thermostat_temperature')|float }}"
+      availability: "{{ states('sensor.thermostat_temperature')|lower not in ['unknown','unavailable','none'] }}"
 
     - unique_id: indoor_humidity
       name: Indoor Humidity
       device_class: humidity
       state_class: measurement
       unit_of_measurement: '%'
-      state: "{{ states('sensor.upstairs_thermostat_humidity')|int }}"
-      availability: "{{ states('sensor.upstairs_thermostat_humidity')|lower not in ['unknown','unavailable','none'] }}"
+      state: "{{ states('sensor.thermostat_humidity')|int }}"
+      availability: "{{ states('sensor.thermostat_humidity')|lower not in ['unknown','unavailable','none'] }}"
