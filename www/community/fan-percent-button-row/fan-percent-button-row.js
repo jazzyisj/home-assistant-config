@@ -106,6 +106,7 @@ class CustomFanPercentRow extends Polymer.Element {
 			reverseButtons: false,
 			isTwoSpeedFan: false,
 			sendStateWithSpeed: false,
+			allowDisablingButtons: true,
 			offPercentage: 0,
 			lowPercentage: 33,
 			medPercentage: 66,
@@ -134,6 +135,7 @@ class CustomFanPercentRow extends Polymer.Element {
 		const revButtons = config.reverseButtons;
 		const twoSpdFan = config.isTwoSpeedFan;
 		const sendStateWithSpeed = config.sendStateWithSpeed;
+		const allowDisable = config.allowDisablingButtons;
 		const buttonWidth = config.width;
 		const buttonHeight = config.height;
 		const OnLowClr = config.isOnLowColor;
@@ -276,10 +278,10 @@ class CustomFanPercentRow extends Polymer.Element {
 		if (revButtons) {
 			this.setProperties({
 				_stateObj: stateObj,
-				_leftState: offstate == 'on',
-				_midLeftState: low === 'on',
-				_midRightState: med === 'on',
-				_rightState: high === 'on',
+				_leftState: (offstate == 'on' && allowDisable),
+				_midLeftState: (low === 'on' && allowDisable),
+				_midRightState: (med === 'on'&& allowDisable),
+				_rightState: (high === 'on' && allowDisable),
 				_width: buttonwidth,
 				_height: buttonheight,
 				_leftColor: offcolor,
@@ -304,10 +306,10 @@ class CustomFanPercentRow extends Polymer.Element {
 		} else {
 			this.setProperties({
 				_stateObj: stateObj,
-				_leftState: high == 'on',
-				_midLeftState: med === 'on',
-				_midRightState: low === 'on',
-				_rightState: offstate === 'on',
+				_leftState: (high == 'on' && allowDisable),
+				_midLeftState: (med === 'on'&& allowDisable),
+				_midRightState: (low === 'on' && allowDisable),
+				_rightState: (offstate === 'on'&& allowDisable),
 				_width: buttonwidth,
 				_height: buttonheight,
 				_leftColor: hicolor,

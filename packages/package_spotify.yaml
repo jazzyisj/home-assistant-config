@@ -3,6 +3,11 @@
 ## #WARNING (SyncWorker_29) [spotipy.client] Invalid state
 ## #ERROR (Thread-16) [homeassistant.components.cast.media_player] Failed to cast media https://www.home-assistant.io/images/cast/splash.png. Please make sure the URL is: Reachable from the cast device and either a publicly resolvable hostname or an IP address
 #######################################################################################################################
+homeassistant:
+  customize:
+    light.spotify_volume:
+      type: volume
+
 spotify:
   client_id: !secret SPOTIFY_CLIENTID
   client_secret: !secret SPOTIFY_SECRET
@@ -22,28 +27,21 @@ spotcast: # https://github.com/fondberg/spotcast
       sp_key: !secret SHERI_SP_KEY
 
 input_boolean:
-  spotify:
-    name: Spotify
-    icon: mdi:spotify
-
+  spotify_skip_action:
+    initial: false
   spotify_random:
     name: Spotify Random
     icon: mdi:progress-question
-
   spotify_shuffle:
     name: Spotify Shuffle
     icon: mdi:shuffle-variant
-
   spotify_repeat:
     name: Spotify Repeat
     icon: mdi:replay
-
   spotify_failed:
     initial: false
-
   resume_spotify:
     initial: false
-
   media_launcher_spotify:
     name: Spotify
     icon: mdi:spotify
@@ -105,6 +103,122 @@ input_number:
     min: 0
     max: 100
     step: 5
+
+light: # volume control for media launcher
+  - platform: template
+    lights:
+      spotify_volume:
+        friendly_name: "Spotify Volume"
+        value_template: >-
+          {% if is_state('switch.spotify', 'on') %}
+            {% if state_attr(states('sensor.spotify_media_player'), 'is_volume_muted') %}
+              off
+            {% else %}
+              on
+            {% endif %}
+          {% else %}
+            off
+          {% endif %}
+        icon_template: >-
+          {% if is_state('switch.spotify', 'on') %}
+            {% if state_attr(states('sensor.spotify_media_player'), 'is_volume_muted') %}
+              mdi:volume-off
+            {% else %}
+              mdi:volume-high
+            {% endif %}
+          {% else %}
+            mdi:volume-off
+          {% endif %}
+        turn_on:
+          service: "{{ 'media_player.volume_mute' if is_state('switch.spotify','on') }}"
+          target:
+            entity_id: "{{ states('sensor.spotify_media_player') if is_state('switch.spotify','on') }}"
+          data:
+            is_volume_muted: false
+        turn_off:
+          service: "{{ 'media_player.volume_mute' if is_state('switch.spotify','on') }}"
+          target:
+            entity_id: "{{ states('sensor.spotify_media_player') if is_state('switch.spotify','on') }}"
+          data:
+            is_volume_muted: true
+        set_level:
+          service: "{{ 'media_player.volume_set' if is_state('switch.spotify','on') }}"
+          target:
+            entity_id: "{{ states('sensor.spotify_media_player') if is_state('switch.spotify','on') }}"
+          data:
+            volume_level: "{{ (brightness / 255 * 100)|int / 100 }}"
+        level_template: "{{ (states('input_number.spotify_volume')|float/100 * 255)|int }}"
+
+switch:
+  - platform: template
+    switches:
+      spotify:
+        friendly_name: "Spotify"
+        icon_template: mdi:spotify
+        turn_on:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.spotify_skip_action
+                    state: 'off'
+                sequence:
+                  - service: script.turn_on
+                    target:
+                      entity_id: script.media_play
+                    data:
+                      variables:
+                        media_type: spotify
+
+                  - wait_template: "{{ is_state(states('sensor.spotify_media_player'),'playing') }}"
+                    timeout: 15
+
+                  - choose:
+                      - conditions: "{{ wait.completed }}"
+                        sequence:
+                          - service: input_text.set_value
+                            target:
+                              entity_id: input_text.active_radio_media_player
+                            data:
+                              value: "{{ states('sensor.spotify_media_player') }}"
+
+                    default:
+                      - service: browser_mod.toast
+                        data:
+                          message: "Spotify did not play!"
+                          duration: 30000
+
+            default:
+              - service: input_boolean.turn_off
+                entity_id: input_boolean.spotify_skip_action
+        turn_off:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.resume_spotify
+
+          - service: switch.turn_on # was turned off in color extractor
+            entity_id: switch.light_flux_dining_room
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.spotify_skip_action
+                    state: 'off'
+                sequence:
+                  - service: script.turn_on
+                    target:
+                      entity_id: script.media_stop
+                    data:
+                      variables:
+                        media_type: spotify
+
+                  - service: input_text.set_value # clear active media player value
+                    target:
+                      entity_id: "input_text.active_spotify_media_player"
+                    data:
+                      value: ''
+            default:
+              - service: input_boolean.turn_off
+                entity_id: input_boolean.spotify_skip_action
 
 group:
   spotify_selected_playlists: # must be in same order as stored

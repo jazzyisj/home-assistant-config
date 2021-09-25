@@ -10,6 +10,7 @@ Home Assistant (Hassio) configuration, updated to v2021.9.6
     #TEMP - temporary option/code
 
     #NOTE - special notes, unresolvable issue
+    #QUESTION - question I need to answer
     #ISSUE - unresolved issue
     #BUG - unfixable bug in HA/component
     #BUGFIX - workaround for bug

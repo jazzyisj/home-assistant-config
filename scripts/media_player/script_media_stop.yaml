@@ -19,42 +19,22 @@ media_stop:
       {% set players = state_attr('sensor.' ~ media_type ~ '_media_player','players') %}
       {{ [player] if players|count == 0 else players }}
   sequence:
-    - service: automation.turn_off
-      target:
-        entity_id: automation.media_player_media_turned_off
-      data:
-        stop_actions: false
-
-    - service: input_boolean.turn_off # turn boolean off to keep in sync if called from script
-      target:
-        entity_id: "['input_boolean.{{ media_type }}','input_boolean.resume_{{ media_type }}']"
-
-    - service: automation.turn_on # must turn off here or stranded off if alarm is triggered
-      entity_id: automation.media_player_media_turned_off
-
     - choose:
-        - conditions: "{{ media_type == 'spotify' }}"
+        - conditions: "{{ is_state('switch.' ~ media_type,'on') }}"
           sequence:
-            - service: switch.turn_on # was turned off in color extractor
-              entity_id: switch.light_flux_dining_room
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.{{ media_type }}_skip_action"
 
-    - service: input_text.set_value # clear active media player value
-      target:
-        entity_id: "input_text.active_{{ media_type }}_media_player"
-      data:
-        value: ''
+            - service: switch.turn_off # turn boolean off to keep in sync if called from script
+              target:
+                entity_id: "switch.{{ media_type }}"
 
     - condition: not
       conditions:
           condition: state
-          entity_id: alarm_control_panel.alarmo
+          entity_id: alarm_control_panel.master
           state: triggered
-
-    - service: automation.turn_off
-      target:
-        entity_id: automation.media_player_media_turned_off
-      data:
-        stop_actions: false
 
     - choose: # stop players (req for browser players)
         - conditions: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list|count > 0 }}"
@@ -73,9 +53,6 @@ media_stop:
     - wait_template: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list|count == 0 }}"
       timeout: # wait for all group media players to stop so we don't get a volume jump
         seconds: 10
-
-    - service: automation.turn_on
-      entity_id: automation.media_player_media_turned_off
 
     - choose: # reset media player volumes
         - conditions: "{{ reset_volume }}"

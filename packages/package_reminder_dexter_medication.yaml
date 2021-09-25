@@ -1,148 +1,124 @@
 #######################################################################################################################
-## Dexter Medication Package
+## Package - Dexter Medication Reminder
 #######################################################################################################################
 input_boolean:
   dexter_medication_enabled:
-    name: Dexter Medication Enabled
-    icon: mdi:cat
+    icon: mdi:pill
 
   dexter_medication_active:
-    name: Dexter Medication Active
-    icon: mdi:cat
+    icon: mdi:pill
 
 input_datetime:
   dexter_medication_days:
-    name: Dexter Mediation Days
     icon: mdi:clock
     has_date: false
     has_time: true
 
   dexter_medication_afternoons:
-    name: Dexter Mediation Afternoons
     icon: mdi:clock
     has_date: false
     has_time: true
 
   dexter_medication_weekends:
-    name: Dexter Mediation Weekends
     icon: mdi:clock
     has_date: false
     has_time: true
 
 input_number:
   dexter_medication_day_interval:
-    name: Dexter Mediation Day Interval
     icon: mdi:calendar-range
     unit_of_measurement: days
     min: 1
     max: 7
     step: 1
 
+#IDEA change active boolean to switch?
+
 automation:
-  #######################################################################################################################
-  ## Dexter Medication - Turn Off
-  #######################################################################################################################
-  - id: dexter_medication_turn_off
-    alias: "[Dexter Medication] Turn Off"
-    description: Turn off active boolean.
+#######################################################################################################################
+## Reminders - Turn Off Dexter Medication
+#######################################################################################################################
+  - id: reminders_turn_off_dexter_medication
+    alias: "[Reminders] Turn Off Dexter Medication"
+    description: "Turn off reminder active boolean."
     initial_state: true
     trigger:
       - platform: state
-        entity_id: input_boolean.dexter_medication_active
-        to: "on"
+        entity_id: input_boolean.dexter_medication_enabled
+        to: 'off'
 
       - platform: state
-        entity_id: input_boolean.dexter_medication_enabled
-        to: "off"
+        entity_id: input_boolean.dexter_medication_active
+        to: 'on'
 
       - platform: event
+        id: action
         event_type: mobile_app_notification_action
         event_data:
           action: dexter_medication_done
-
     condition:
       - condition: or
         conditions:
           - condition: state
             entity_id: input_boolean.dexter_medication_enabled
-            state: "off"
+            state: 'off'
 
-          - condition: state
-            entity_id: input_select.occupancy_mode
-            state: Vacation
-
-          - condition: template
-            value_template: "{% if trigger.event is defined %}{{ trigger.event.data['action'] == 'dexter_medication_done' }}{% endif %}"
-
+          - "{{ trigger.id == 'action' }}"
     action:
       - service: input_boolean.turn_off
         entity_id: input_boolean.dexter_medication_active
 
-  #######################################################################################################################
-  ## Dexter Medication - Activate Reminder
-  #######################################################################################################################
-  - id: dexter_medication_activate_reminder
-    alias: "[Dexter Medication] Activate Reminder"
-    description: Turn on dexter mealtime active boolean with shift dependent time trigger.
-    initial_state: true
+#######################################################################################################################
+## Reminders - Activate Dexter Medication
+#######################################################################################################################
+  - id: reminders_activate_dexter_medication
+    alias: "[Reminders] Activate Dexter Medication"
+    description: "Turn on reminder active boolean."
     trigger:
       - platform: template
         value_template: >
           {% set time = states('sensor.time') %}
-          {% set days = is_state('sensor.current_shift','Days') and is_state('binary_sensor.work_today','on') %}
-          {% set afts = is_state('sensor.current_shift','Afternoons') and is_state('binary_sensor.work_today','on') %}
-          {% set wknd = is_state('binary_sensor.work_today','off') or states('sensor.current_shift') in ['Off','unknown','unknown','none'] %}
-
-          {{ (days and time == states('input_datetime.dexter_medication_days')[0:5])
-            or (afts and time == states('input_datetime.dexter_medication_afternoons')[0:5])
-            or (wknd and time == states('input_datetime.dexter_medication_weekends')[0:5]) }}
-
+          {% set shift = states('sensor.time_trigger_shift') %}
+          {{ (shift == 'days' and time == states('input_datetime.dexter_medication_days')[0:5])
+            or (shift == 'afts' and time == states('input_datetime.dexter_medication_afternoons')[0:5])
+            or (shift == 'wknd' and time == states('input_datetime.dexter_medication_weekends')[0:5]) }}
     condition:
       - condition: state
         entity_id: input_boolean.dexter_medication_enabled
-        state: "on"
+        state: 'on'
 
-      # only run every specified days
       - condition: template
+        alias: "Never ran or day interval reached"
         value_template: >
           {% set last_run = state_attr('automation.dexter_medication_activate_reminder','last_triggered') %}
           {{ last_run is none or (now().date() - last_run.date()).days >= states('input_number.dexter_medication_day_interval')|int }}
-
-      - condition: not
-        conditions:
-          - condition: state
-            entity_id: input_select.occupancy_mode
-            state: Vacation
-
     action:
       - service: input_boolean.turn_on
         entity_id: input_boolean.dexter_medication_active
 
-  #######################################################################################################################
-  ## Dexter Medication - Alert
-  #######################################################################################################################
-  - id: dexter_medication_alert
-    alias: "[Dexter Medication] Alert"
-    description: Sent alert every 15 minutes until dexter active turns off.
+#######################################################################################################################
+## Reminders - Dexter Medication Alert
+#######################################################################################################################
+  - id: reminders_dexter_medication_alert
+    alias: "[Reminders] Dexter Medication Alert"
+    description: "Send notification until alert turns off."
     initial_state: true
     trigger:
       - platform: state
         entity_id: input_boolean.dexter_medication_active
-        to: "on"
+        to: 'on'
         for:
-          seconds: 5 # allow boolean to turn back off if disabled
-
+          seconds: 5 # allow boolean to turn back off without triggering if disabled
     condition:
       - condition: state
         entity_id: input_boolean.dexter_medication_enabled
-        state: "on"
-
+        state: 'on'
     action:
       - repeat:
           sequence:
             - service: script.tts_play
               data:
-                play_message: Hey! The fat bastard needs his roids!  Give Dexter his medication!
+                play_message: "Attention!  The Fat Bastard needs his 'roids.  Give Dexter his medication!"
                 quiet_play: true
                 save_message: true
 
@@ -151,12 +127,11 @@ automation:
                     - condition: state
                       entity_id: input_boolean.schedule_alerts
                       state: "on"
-
                   sequence:
                     - service: notify.jason
                       data:
-                        title: Dexter Medication
-                        message: It's time for Dexter's medication!
+                        title: "Dexter Medication"
+                        message: "It's time for Dexter's medication!"
                         data:
                           tag: dexter_medication
                           group: General
@@ -171,7 +146,7 @@ automation:
                           image: !secret DEXTER_IMAGE
                           actions:
                             - action: dexter_medication_done
-                              title: Medication Done
+                              title: "Medication Done"
                               uri: /lovelace/schedule
 
             - wait_template: "{{ is_state('input_boolean.dexter_medication_active','off') }}"
@@ -181,20 +156,20 @@ automation:
           until:
             - condition: state
               entity_id: input_boolean.dexter_medication_active
-              state: "off"
+              state: 'off'
 
-  #######################################################################################################################
-  ## Dexter Medication - Close Notifications
-  #######################################################################################################################
-  - id: dexter_medication_close_notifications
-    alias: "[Dexter Medication] Close Notifications"
-    description: Dismiss notifications on all devices.
+#######################################################################################################################
+## Reminders - Close Dexter Medication Notifications
+#######################################################################################################################
+  - id: reminders_close_dexter_medication_notifications
+    alias: "[Reminders] Close Dexter Medication Notifications"
+    description: "Dismiss notifications on all devices."
     initial_state: true
     max_exceeded: silent
     trigger:
       - platform: state
         entity_id: input_boolean.dexter_medication_active
-        to: "off"
+        to: 'off'
 
       - platform: event
         event_type: mobile_app_notification_cleared
@@ -205,7 +180,6 @@ automation:
         event_type: mobile_app_notification_action
         event_data:
           action: dexter_medication_done
-
     action:
       - service: notify.jason
         data:

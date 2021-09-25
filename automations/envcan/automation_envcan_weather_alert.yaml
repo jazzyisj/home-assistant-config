@@ -7,10 +7,15 @@
   mode: restart
   trigger:
     - platform: state
-      entity_id: binary_sensor.envcan_weather_alert
-      to:
-        - 'on'
-        - 'off'
+      entity_id:
+        - sensor.envcan_warnings
+        - sensor.envcan_watches
+        - sensor.envcan_statements
+        - sensor.envcan_advisories
+
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
   action:
     - choose: # clear alert title/severity if no active alerts
         - conditions:
@@ -19,13 +24,15 @@
               state: 'off'
           sequence:
             - service: input_text.set_value
-              data:
+              target:
                 entity_id: input_text.previous_envcan_alert_title
+              data:
                 value: ''
 
             - service: input_select.select_option
-              data:
+              target:
                 entity_id: input_select.previous_envcan_alert_severity
+              data:
                 option: cleared
       default:
         - choose:
@@ -50,14 +57,24 @@
                         {% set previous = states('input_text.previous_envcan_alert_title') %}
                         {% set current = state_attr('binary_sensor.envcan_weather_alert','title') %}
                         {{ previous != current }}
+
+                    - condition: template
+                      alias: "Startup"
+                      value_template: "{{ trigger.entity_id == 'input_boolean.startup_pending' }}"
               sequence:
                 - service: script.tts_play
                   data:
-                    play_message: | #DARKSKY
+                    play_message: |
+                      {% set title = state_attr('binary_sensor.envcan_weather_alert','title') %}
+                      {% set until = state_attr('binary_sensor.envcan_weather_alert','expires_text') %}
+                      {% set description = state_attr('binary_sensor.envcan_weather_alert','description') %}
                       Attention!  Weather Alert!
-                      Environment Canada has issued a {{ state_attr('binary_sensor.envcan_weather_alert','title') }} for your immediate area.
-                      {% if states('sensor.dark_sky_alerts')|int > 0 %}
-                        {{ state_attr('sensor.dark_sky_alerts','description_1').split('.')[0] }}
+                      Environment Canada has issued a {{ title }} for your immediate area
+                      {%- if until|lower not in ['unknown','unavailable','none'] -%}
+                      , until {{ until }}
+                      {%- endif %}.
+                      {% if description|lower not in ['unknown','unavailable','none'] -%}
+                      {{ description.split('.')[0] }}
                       {% endif %}
                     quiet_play: "{{ state_attr('binary_sensor.envcan_weather_alert','severity') in ['warning','watch'] }}"
                     save_message: true

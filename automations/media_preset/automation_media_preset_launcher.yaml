@@ -5,7 +5,6 @@
 - id: media_preset_media_launcher_control
   alias: "[Media Preset] Media Launcher Control"
   description: "Control media launcher display."
-  initial_state: true
   mode: restart
   variables:
     launchers: >
@@ -13,14 +12,14 @@
             'input_boolean.media_launcher_preset_jason','input_boolean.media_launcher_preset_sheri',
             'input_boolean.media_launcher_preset_wake','input_boolean.media_launcher_preset_morning',
             'input_boolean.media_launcher_preset_sleep','input_boolean.media_launcher_preset_company',
-            'input_boolean.media_launcher_preset_shower' ] }}
+            'input_boolean.media_launcher_preset_shower','input_boolean.media_launcher_preset_guest' ] }}
     preset: "{% if trigger.id == 'preset' %}{{ trigger.entity_id[20:] }}{% endif %}"
   trigger:
     - platform: state
       id: media
       entity_id:
-        - input_boolean.radio
-        - input_boolean.spotify
+        - switch.radio
+        - switch.spotify
       to: 'on'
 
     - platform: state
@@ -58,61 +57,72 @@
         stop_actions: false
 
     - choose:
-        - conditions: "{{ trigger.id == 'launcher' and trigger.to_state.state == 'off' }}"
+        - conditions: "{{ trigger.id == 'launcher' }}" # and trigger.to_state.state == 'off'
+          sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: "{{ expand(launchers)|rejectattr('entity_id','eq',trigger.entity_id)|map(attribute='entity_id')|list }}"
+
+        - conditions: "{{ trigger.id == 'media' }}"
+          sequence:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: >
+                  {% if trigger.entity_id == 'switch.radio' %}
+                      {% set reject = 'input_boolean.media_launcher_radio' %}
+                  {% elif trigger.entity_id == 'switch.spotify' %}
+                      {% set reject = 'input_boolean.media_launcher_spotfiy' %}
+                  {% endif %}
+                  {{ expand(launchers)|rejectattr('entity_id','eq',reject)|map(attribute='entity_id')|list }}
+
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.media_launcher_{{ trigger.entity_id.split('.')[1] }}"
+
+        - conditions: "{{ trigger.id == 'preset' }}"
           sequence:
             - service: input_boolean.turn_on
               target:
-                entity_id: "{{ trigger.entity_id }}"
-      default:
-        - choose:
-            - conditions: "{{ trigger.id == 'media' }}"
-              sequence:
-                - service: input_boolean.turn_off
-                  target:
-                    entity_id: >
-                      {% if trigger.entity_id == 'input_boolean.radio' %}
-                          {% set reject = 'input_boolean.media_launcher_radio' %}
-                      {% elif trigger.entity_id == 'input_boolean.media_launcher_spotify' %}
-                          {% set reject = 'input_boolean.media_launcher_radio' %}
-                      {% endif %}
-                      {{ expand(launchers)|rejectattr('entity_id','eq',reject)|map(attribute='entity_id')|list }}
+                entity_id: "input_boolean.media_launcher_{{ states('input_select.media_preset_type_' ~ preset) }}"
 
-            - conditions: "{{ trigger.id == 'preset' }}"
-              sequence:
-                - service: input_boolean.turn_on
-                  target:
-                    entity_id: "input_boolean.media_launcher_{{ states('input_select.media_preset_type_' ~ preset) }}"
+    - service: automation.turn_on
+      target:
+        entity_id: "{{ this.entity_id }}"
 
-            - conditions: "{{ trigger.id == 'launcher' }}"
-              sequence:
-                - service: input_boolean.turn_off
-                  target:
-                    entity_id: "{{ expand(launchers)|rejectattr('entity_id','eq',trigger.entity_id)|map(attribute='entity_id')|list }}"
+    #ISSUE how to turn off booleans after window is closed so it opens next time in default view (radio)
+    #BUGFIX hacky fix - turn radio/spotify boolean on after a few seconds,
+    # will go back to default radio view if window still open but most times user would have closed by now anyway
+    - delay: 60
 
-        #ISSUE how to turn off booleans after window is closed so it opens next time in default view (radio)
-        #BUGFIX hacky fix - turn radio/spotify boolean on after a few seconds,
-        # will go back to default radio view if window still open but most times user would have closed by now anyway
-        - delay: 60
+    - service: automation.turn_off
+      target:
+        entity_id: "{{ this.entity_id }}"
+      data:
+        stop_actions: false
 
-        # switch back to default view (spotify if on, else radio)
-        - service: input_boolean.turn_on
-          target:
-            entity_id: >
-              {% if is_state('input_boolean.spotify','on') %} input_boolean.media_launcher_spotify
-              {% else %} input_boolean.media_launcher_radio
-              {% endif %}
+    - service: input_boolean.turn_off
+      target:
+        entity_id: "{{ expand(launchers)|map(attribute='entity_id')|list }}"
 
-        # switch spotify account back to default selection (hassio if on, else jason/sheri if on, else hassio)
-        - service: input_select.select_option
-          target:
-            entity_id: input_select.spotify_account
-          data:
-            option: >
-              {% if is_state('media_player.spotify_jazzyisj','playing') %} Hassio
-              {% elif is_state('media_player.spotify_jazzyisj','playing') %} Jason
-              {% elif is_state('media_player.spotify_sherigagnon','playing') %} Sheri
-              {% else %} Hassio
-              {% endif %}
+    # switch back to default view (spotify if on, else radio)
+    - service: input_boolean.turn_on
+      target:
+        entity_id: >
+          {% if is_state('switch.spotify','on') %} input_boolean.media_launcher_spotify
+          {% else %} input_boolean.media_launcher_radio
+          {% endif %}
+
+    # switch spotify account back to default selection (hassio if on, else jason/sheri if on, else hassio)
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.spotify_account
+      data:
+        option: >
+          {% if is_state('media_player.spotify_jazzyisj','playing') %} Hassio
+          {% elif is_state('media_player.spotify_jazzyisj','playing') %} Jason
+          {% elif is_state('media_player.spotify_sherigagnon','playing') %} Sheri
+          {% else %} Hassio
+          {% endif %}
 
     - service: automation.turn_on
       target:

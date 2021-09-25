@@ -5,6 +5,11 @@ lights_off:
   alias: "Lights Off"
   description: "Turn all lights off."
   icon: mdi:lightbulb-off
+  variables:
+    lights: >
+      {{ states.light|rejectattr('attributes.light_group','eq',true)|selectattr('state','eq','on')
+        |rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.rgb_light','eq','slave')
+        |rejectattr('attributes.type','eq','volume')|map(attribute='entity_id')|list }}
   sequence:
     - service: browser_mod.toast
       data:
@@ -21,10 +26,13 @@ lights_off:
 
     - service: light.turn_off
       target: # don't use all lights - triggers rgb master switches
-        entity_id: >
-          {{ states.light|rejectattr('attributes.light_group','eq',true)|selectattr('state','eq','on')
-            |rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.rgb_light','eq','slave')
-            |map(attribute='entity_id')|list }}
+        entity_id: "{{ lights }}"
+
+    - wait_template: > # wait so slow devices don't trigger timers
+        {{ states.light|rejectattr('attributes.light_group','eq',true)|selectattr('state','eq','on')
+          |rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.rgb_light','eq','slave')
+          |rejectattr('attributes.type','eq','volume')|map(attribute='entity_id')|list|count == 0 }}
+      timeout: 10
 
     - service: timer.cancel
       target:
@@ -36,6 +44,8 @@ lights_off:
     - service: automation.turn_on
       target:
         entity_id: *light_automations
+
+    - service: script.led_reset # we prevented update above
 
 #######################################################################################################################
 ## Lights On
@@ -50,21 +60,28 @@ lights_on:
         message: Turning on all lights.
         duration: 30000
 
-    - service: automation.turn_off # don't trigger device in use timers
-      entity_id: group.light_in_use_automations
+    - service: automation.turn_off
+      target:
+        entity_id: *light_automations
 
     - service: light.turn_on
       target:
         entity_id: > # state on/off to ensure brightness set, #ZWAVE device ready (state on/off)
           {{ states.light|selectattr('state','in',['on','off'])|rejectattr('attributes.light_group','eq',true)
             |rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.rgb_light','eq','slave')
-            |map(attribute='entity_id')|list }}
+            |rejectattr('attributes.type','eq','volume')|map(attribute='entity_id')|list }}
       data:
         brightness: 255
         rgb_color:
           - 255
           - 255
           - 255
+
+    - wait_template: > # wait so slow devices don't trigger timers
+        {{ states.light|selectattr('state','eq','off')|rejectattr('attributes.light_group','eq',true)
+          |rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.rgb_light','eq','slave')
+          |rejectattr('attributes.type','eq','volume')|map(attribute='entity_id')|list|count == 0 }}
+      timeout: 10
 
     - service: timer.cancel
       target:
@@ -74,4 +91,6 @@ lights_on:
         seconds: 10
 
     - service: automation.turn_on
-      entity_id: group.light_in_use_automations
+      entity_id: *light_automations
+
+    - service: script.led_reset # we prevented update above
