@@ -1,0 +1,61 @@
+#######################################################################################################################
+## Media Player Turned Off
+#######################################################################################################################
+- id: media_player_turned_off
+  alias: "[Media Player] Turned Off"
+  description: "Run Media Stop when media player turns off."
+  mode: queued
+  variables:
+    media_types: "{{ ['radio','spotify','spotify_jason','spotify_sheri','youtube'] }}"
+    media_type: >
+      {% if is_state('binary_sensor.radio','on') and is_state('input_boolean.resume_radio','off')
+          and (trigger.entity_id == states('sensor.radio_media_player')
+          or trigger.entity_id in state_attr('sensor.radio_media_player','players')) %} radio
+      {% elif is_state('binary_sensor.spotify','on') and is_state('input_boolean.resume_spotify','off')
+          and (trigger.entity_id == states('sensor.spotify_media_player')
+          or trigger.entity_id in state_attr('sensor.spotify_media_player','players')) %} spotify
+      {% elif is_state('binary_sensor.spotify_jason','on') and is_state('input_boolean.resume_spotify_jason','off')
+          and (trigger.entity_id == states('sensor.spotify_jason_media_player')
+          or trigger.entity_id in state_attr('sensor.spotify_jason_media_player','players')) %} spotify_jason
+      {% elif is_state('binary_sensor.spotify_sheri','on') and is_state('input_boolean.resume_spotify_sheri','off')
+          and (trigger.entity_id == states('sensor.spotify_sheri_media_player')
+          or trigger.entity_id in state_attr('sensor.spotify_sheri_media_player','players')) %} spotify_sheri
+      {% elif is_state('binary_sensor.youtube','on') and is_state('input_boolean.resume_youtube','off')
+          and (trigger.entity_id == states('sensor.youtube_media_player')
+          or trigger.entity_id in state_attr('sensor.youtube_media_player','players')) %} youtube
+      {% endif %}
+  trigger:
+    - platform: state
+      id: error
+      entity_id: !include /config/include/entities/media_player_entities_single.yaml
+      to:
+        - unavailable
+        - unknown
+      for:
+        seconds: 5 # allow temporary disconnections without stoping media
+
+    - platform: state
+      id: turned_off
+      entity_id: !include /config/include/entities/media_player_entities_single.yaml
+      to:
+        - idle
+        - 'off'
+      for:
+        seconds: 5 # allow temporary disconnections without stoping media
+  condition: "{{ media_type in media_types }}"
+  action:
+    - condition: template
+      alias: "Media player is not off" # recheck media player state, may have changed in queue
+      value_template: "{{ not is_state_attr('sensor.' ~ media_type ~ '_media_player','player_state','off') }}"
+
+    - service: script.media_stop
+      data:
+        media_type: "{{ media_type }}"
+        reset_volume: true
+
+    - choose:
+        - conditions: "{{ trigger.id == 'error' }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.{{ media_type }}_failed"

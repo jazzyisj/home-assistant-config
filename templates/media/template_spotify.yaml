@@ -1,0 +1,181 @@
+#######################################################################################################################
+## Spotify Template Sensors
+#######################################################################################################################
+- binary_sensor:
+    - name: "Spotify Connected"
+      unique_id: spotify_connected
+      icon: >
+        {{ 'mdi:spotify' if not states('media_player.spotify')|lower
+            in ['unknown','unavailable','none'] else 'mdi:alert-circle' }}
+      device_class: connectivity
+      state: "{{ states('media_player.spotify')|lower not in ['unknown','unavailable','none'] }}"
+
+    - name: "Spotify Connected Alert"
+      unique_id: spotify_connected_alert
+      icon: mdi:spotify
+      delay_on:
+        minutes: 5 # allow for temporary disconnections before alerting
+      state: >
+        {{ is_state('binary_sensor.spotify_connected','off')
+            and is_state('input_boolean.media_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
+    - name: "Spotify"
+      unique_id: spotify
+      delay_off:
+        seconds: 5 # allow switch playlist, media player etc.
+      state: >
+        {{ states('media_player.spotify') in ['playing','paused']
+            or is_state('input_boolean.resume_spotify','on') }}
+
+    - name: "Spotify Jason"
+      unique_id: spotify_jason
+      delay_off:
+        seconds: 5 # allow switch playlist, media player etc.
+      state: >
+        {{ (states('media_player.spotify_jason') in ['playing','paused']
+            and states('sensor.spotify_jason_media_player') in state_attr('sensor.media_players','players'))
+            or is_state('input_boolean.resume_spotify','on') }}
+
+    - name: "Spotify Sheri"
+      unique_id: spotify_sheri
+      delay_off:
+        seconds: 5 # allow switch playlist, media player etc.
+      state: >
+        {% if state_attr('sensor.media_players','players')|lower not in ['',[],'unknown','unavailable','none'] %}
+        {{ (states('media_player.spotify_sheri') in ['playing','paused']
+            and states('sensor.spotify_sheri_media_player') in state_attr('sensor.media_players','players'))
+            or is_state('input_boolean.resume_spotify','on') }}
+        {% endif %}
+
+- sensor:
+    #SPOTIFY only populated while Spotify is playing, detects spotify starting from spotcast/app etc.
+    #BUG cannot use media_player.spotify source or source_list attributes - spotcast won't popuplate w/speaker groups
+    # media_player.spotify can take up to 15 seconds to populate
+    - name: "Spotify Media Player"
+      unique_id: spotify_media_player # don't name entity id w/hassio - breaks media type templates
+      icon: mdi:spotify
+      state: > # entity_id of spotify media player (filters jason/sheri spotify players if active)
+        {% set group = expand(state_attr('sensor.media_players','group'))
+          |rejectattr('entity_id','eq',states('sensor.spotify_jason_media_player'))
+          |rejectattr('entity_id','eq',states('sensor.spotify_sheri_media_player'))
+          |selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|join('') %}
+        {% set single = expand(state_attr('sensor.media_players','single'))
+          |selectattr('attributes.app_name','eq','Spotify')
+          |rejectattr('entity_id','in',state_attr('sensor.spotify_jason_media_player','players'))
+          |rejectattr('entity_id','in',state_attr('sensor.spotify_sheri_media_player','players'))
+          |map(attribute='entity_id')|join('') %}
+        {% if group != '' %}{{ group }}
+        {% elif single != '' %}{{ single }}
+        {% else %} off
+        {% endif %}
+      attributes:
+        player_state: "{{ states(states('sensor.spotify_media_player')) }}"
+        players: > # media players in spotify group
+          {% set jason_spotify = [] if state_attr('sensor.spotify_jason_media_player','players')|lower == 'none'
+              else state_attr('sensor.spotify_jason_media_player','players') %}
+          {% set sheri_spotify = [] if state_attr('sensor.spotify_sheri_media_player','players')|lower == 'none'
+              else state_attr('sensor.spotify_sheri_media_player','players') %}
+
+          {% set group = expand(state_attr('sensor.media_players','players'))|selectattr('attributes.type','eq','single')
+              |rejectattr('entity_id','in',jason_spotify)|rejectattr('entity_id','in',sheri_spotify)
+              |selectattr('attributes.app_name','eq','Spotify')|map(attribute='entity_id')|list %}
+
+          {% set single = expand(state_attr('sensor.media_players','single'))|selectattr('attributes.app_name','eq','Spotify')
+              |rejectattr('entity_id','in',jason_spotify)|rejectattr('entity_id','in',sheri_spotify)|map(attribute='entity_id')|list %}
+
+          {% if group|count > 0 %}{{ group }}
+          {% else %}{{ single }}
+          {% endif %}
+
+    - name: "Spotify Jason Media Player "
+      unique_id: spotify_jason_media_player
+      icon: mdi:spotify
+      state: >
+        {% set player = expand(state_attr('sensor.media_players','players'))
+            |selectattr('name','eq',state_attr('media_player.spotify_jason','source'))
+            |map(attribute='entity_id')|list|join('') %}
+        {% set content_id = state_attr(player,'media_content_id') %}
+        {% if not is_state_attr(player,'type','group') %}
+          {% set matching = expand(state_attr('sensor.media_players','players'))|selectattr('attributes.type','eq','group')
+              |selectattr('attributes.media_content_id','eq',content_id)|map(attribute='entity_id')|list %}
+          {% if matching|count > 0 %}{% set player = matching[0] %}{% endif %}
+        {% endif %}
+        {{ player if player != '' else 'off' }}
+      attributes:
+        player_state: "{{ states(states('sensor.spotify_jason_media_player')) }}"
+        players: >
+          {% set jason_spotify = states('sensor.spotify_jason_media_player') %}
+          {% if is_state_attr(jason_spotify,'type','group') %}
+            {{ expand(state_attr('sensor.media_players','players'))|selectattr('attributes.' ~ jason_spotify.split('.')[1],'eq',true)|map(attribute='entity_id')|list }}
+          {% else %}{{ [jason_spotify] }}
+          {% endif %}
+
+    - name: "Spotify Sheri Media Player "
+      unique_id: spotify_sheri_media_player
+      icon: mdi:spotify
+      state: >
+        {% set player = expand(state_attr('sensor.media_players','players'))
+            |selectattr('name','eq',state_attr('media_player.spotify_sheri','source'))
+            |map(attribute='entity_id')|list|join('') %}
+        {% set content_id = state_attr(player,'media_content_id') %}
+        {% if not is_state_attr(player,'type','group') %}
+          {% set matching = expand(state_attr('sensor.media_players','players'))|selectattr('attributes.type','eq','group')
+              |selectattr('attributes.media_content_id','eq',content_id)|map(attribute='entity_id')|list %}
+          {% if matching|count > 0 %}{% set player = matching[0] %}{% endif %}
+        {% endif %}
+        {{ player if player != '' else 'off' }}
+      attributes:
+        player_state: "{{ states(states('sensor.spotify_sheri_media_player')) }}"
+        players: >
+          {% set sheri_spotify = states('sensor.spotify_sheri_media_player') %}
+          {% if is_state_attr(sheri_spotify,'type','group') %}
+            {{ expand(state_attr('sensor.media_players','players'))|selectattr('attributes.' ~ sheri_spotify.split('.')[1],'eq',true)|map(attribute='entity_id')|list }}
+          {% else %}{{ [sheri_spotify] }}
+          {% endif %}
+
+    - name: "Playlists Sensor Jason"
+      unique_id: playlists_sensor_jason
+      icon: mdi:spotify
+      state: ok
+      attributes:
+        playlists: >
+          {{
+            [
+              {
+                "name":"Funk Outta Here",
+                "uri":"spotify:playlist:37i9dQZF1DX70TzPK5buVf"
+              },
+              {
+                "name":"70s Road Trip",
+                "uri":"spotify:playlist:37i9dQZF1DWWiDhnQ2IIru"
+              },
+              {
+                "name":"2000's Hip Hop",
+                "uri":"spotify:playlist:01pNIDYGqmeawppy32wr3D"
+              }
+            ]
+          }}
+
+    - name: "Playlists Sensor Sheri"
+      unique_id: playlists_sensor_sheri
+      icon: mdi:spotify
+      state: ok
+      attributes:
+        playlists: >
+          {{
+            [
+              {
+                "name":"Mega Hit Mix",
+                "uri":"spotify:playlist:37i9dQZF1DXbYM3nMM0oPk"
+              },
+              {
+                "name":"This Is Keith Urban",
+                "uri":"spotify:playlist:37i9dQZF1DX75bySfirAbH"
+              },
+              {
+                "name":"This Is Eric Church",
+                "uri":"spotify:playlist:37i9dQZF1DX2FZ3fas1D61"
+              }
+            ]
+          }}

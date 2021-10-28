@@ -1,0 +1,140 @@
+#######################################################################################################################
+## Youtube - Playlist Update
+#######################################################################################################################
+- id: youtube_playlist_update
+  alias: "[Youtube] Playlist Update"
+  description: "Update youtube playlist input options."
+  mode: restart
+  variables:
+    selected_playlists: "{{ expand('group.youtube_selected_playlists')|map(attribute='entity_id')|list }}"
+    stored_playlists: "{{ expand('group.youtube_stored_playlists')|map(attribute='entity_id')|list }}"
+  trigger:
+    - platform: state
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: state
+      entity_id: sensor.youtube_playlists
+      attribute: playlists
+  condition:
+    - "{{ states('sensor.youtube_playlists')|lower not in ['','unknown','unavailable','none'] }}"
+
+    - condition: state
+      entity_id:
+        - binary_sensor.wan_connected
+        - binary_sensor.youtube_connected
+      state: 'on'
+  action:
+    - wait_template: "{{ is_state('sensor.youtube_playlists','ok') }}" # error if not popuplated (eg startup)
+      timeout:
+        minutes: 10
+      continue_on_timeout: false
+
+    - service: automation.turn_off
+      target:
+        entity_id: &youtube_automations
+          - automation.youtube_store_playlist_selection # don't overwrite stored values
+          - automation.media_auto_resume # triggered by input_select.youtube_playlist
+      data:
+        stop_actions: false
+
+    - service: input_select.set_options
+      target:
+        entity_id: # ytube maintains main playlist
+          - input_select.media_preset_youtube_wake
+          - input_select.media_preset_youtube_morning
+          - input_select.media_preset_youtube_sleep
+          - input_select.media_preset_youtube_jason
+          - input_select.media_preset_youtube_sheri
+          - input_select.media_preset_youtube_guest
+          - input_select.media_preset_youtube_shower
+          - input_select.media_preset_youtube_chill
+          - input_select.media_preset_youtube_company
+          - input_select.alarm_clock_youtube_auto
+          - input_select.alarm_clock_youtube_manual
+          - input_select.alarm_clock_youtube_nap
+      data:
+        options: >
+          [{% for item in state_attr('sensor.youtube_playlists','playlists') -%}
+            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+
+    - repeat: # restore previous selection (values reset when options reloaded)
+        count: "{{ selected_playlists|count }}"
+        sequence:
+          - choose:
+              - conditions: "{{ states(stored_playlists[repeat.index-1])|lower not in ['','unknown','unavailable','none'] }}"
+                sequence:
+                  - service: input_select.select_option
+                    target:
+                      entity_id: "{{ selected_playlists[repeat.index-1] }}"
+                    data:
+                      option: "{{ states(stored_playlists[repeat.index-1]) }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: *youtube_automations
+
+#######################################################################################################################
+## Youtube - Store Playlist Selection
+#######################################################################################################################
+- id: youtube_store_playlist_selection
+  alias: "[Youtube] Store Playlist Selection"
+  description: "Update stored youtube playlist selection."
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - input_select.youtube_playlist
+        - input_select.media_preset_youtube_wake
+        - input_select.media_preset_youtube_morning
+        - input_select.media_preset_youtube_sleep
+        - input_select.media_preset_youtube_guest
+        - input_select.media_preset_youtube_shower
+        - input_select.media_preset_youtube_chill
+        - input_select.media_preset_youtube_company
+        - input_select.alarm_clock_youtube_auto
+        - input_select.alarm_clock_youtube_manual
+        - input_select.alarm_clock_youtube_nap
+        - input_select.media_preset_youtube_jason
+        - input_select.media_preset_youtube_sheri
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: "{{ trigger.entity_id|replace('input_select','input_text') }}"
+      data:
+        value: "{{ states(trigger.entity_id) }}"
+
+#######################################################################################################################
+## Youtube - Playlist Selection Update
+#######################################################################################################################
+- id: youtube_playlist_selection_update
+  alias: "[Youtube] Playlist Selection Update"
+  description: "Update youtube playlist input selection."
+  mode: restart
+  variables:
+    entity: "{{ 'input_select.youtube_playlist' }}"
+    playlist: "{{ state_attr(trigger.entity_id,'media_playlist') }}"
+  trigger:
+    - platform: state
+      entity_id: media_player.youtube_hassio
+      attribute: media_playlist
+  condition:
+    - "{{ state_attr(trigger.entity_id,'media_playlist')|lower not in ['unknown','unavailable','none'] }}"
+    - "{{ playlist in state_attr(entity,'options') }}" # only update if current playlist is a sensor playlist
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.media_auto_resume # triggered by input_select.youtube_playlist
+      data:
+        stop_actions: false
+
+    - service: input_select.select_option
+      target:
+        entity_id: "{{ entity }}"
+      data:
+        option: "{{ playlist }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.media_auto_resume

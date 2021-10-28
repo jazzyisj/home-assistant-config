@@ -1,0 +1,109 @@
+#######################################################################################################################
+## Media - Volume Changed
+## - media player expects float value, media volume input is percent
+#######################################################################################################################
+- id: media_volume_changed
+  alias: "[Media] Volume Changed"
+  description: "Change media player volume when media volume control changed."
+  mode: queued
+  max: 5
+  variables:
+    media_types: "{{ ['radio','spotify','spotify_jason','spotify_sheri','youtube'] }}"
+    media_type: >
+      {% if is_state('binary_sensor.radio','on') and trigger.entity_id == 'input_number.radio_volume' %} radio
+      {% elif is_state('binary_sensor.spotify','on') and trigger.entity_id == 'input_number.spotify_volume' %} spotify
+      {% elif is_state('binary_sensor.spotify_jason','on') and trigger.entity_id == 'input_number.spotify_jason_volume' %} spotify_jason
+      {% elif is_state('binary_sensor.spotify_sheri','on') and trigger.entity_id == 'input_number.spotify_sheri_volume' %} spotify_sheri
+      {% elif is_state('binary_sensor.youtube','on') and trigger.entity_id == 'input_number.youtube_volume' %} youtube
+      {% endif %}
+    media_volume: "{{ states('input_number.' ~ media_type ~ '_volume')|float(default=0) }}"
+  trigger:
+    - platform: state
+      entity_id:
+        - input_number.radio_volume
+        - input_number.spotify_volume
+        - input_number.spotify_jason_volume
+        - input_number.spotify_sheri_volume
+        - input_number.youtube_volume
+  condition:
+    - "{{ media_type in media_types}}"
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - choose: # reset input value if req during quiet hours unless override on
+        - conditions: >
+            {% set quiet_volume = states('input_number.media_quiet_volume')|int %}
+            {{ is_state('input_boolean.volume_override','off')
+                and is_state('binary_sensor.quiet_hours','on')
+                and media_volume > quiet_volume }}
+          sequence:
+            - service: automation.turn_off
+              target:
+                entity_id: "{{ this.entity_id }}"
+              data:
+                stop_actions: false
+
+            - service: input_number.set_value
+              target:
+                entity_id: "input_number.{{ media_type }}_volume"
+              data:
+                value: "{{ states('input_number.media_quiet_volume')|int }}"
+
+            - wait_template: "{{ states('input_number.' ~ media_type ~ '_volume')|int == states('input_number.media_quiet_volume')|int }}"
+              timeout: 5 # wait for volume to change
+              continue_on_timeout: true
+
+            - service: automation.turn_on
+              target:
+                entity_id: "{{ this.entity_id }}"
+
+    - condition: template
+      alias: "New set volume is not equal to the current media player volume"
+      value_template: > # may have reset - need current value, so no variables here
+        {{ '%0.2f'|format(states('input_number.' ~ media_type ~ '_volume')|float(default=0)/100)
+            != '%0.2f'|format(state_attr('media_player.' ~ media_type,'volume_level')|float(default=0)) }}
+
+    - condition: template
+      alias: "Media type media player is on"
+      value_template: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','player_state') in ['playing','paused'] }}"
+
+    - service: automation.turn_off
+      target:
+        entity_id: automation.media_player_volume_changed
+      data:
+        stop_actions: false
+
+    - choose:
+        - conditions:
+            - condition: and
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.quiet_hours
+                  state: 'on'
+
+                - condition: state
+                  entity_id: input_boolean.volume_override
+                  state: 'off'
+
+                - "{{ states('input_number.' ~ media_type ~ 'volume')|int
+                      > states('input_number.media_quiet_volume')|int }}"
+          sequence:
+            - service: input_number.set_value
+              target:
+                entity_id: "input_number.{{ media_type }}_volume"
+              data:
+                value: "input_number.media_quiet_volume"
+
+    - service: media_player.volume_set # reset media player volume
+      target:
+        entity_id: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
+      data:
+        volume_level: "{{ states('input_number.' ~ media_type ~ '_volume')|float/100 }}"
+
+    - delay: 1 # allow media player volumes to set
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.media_player_volume_changed

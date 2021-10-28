@@ -1,0 +1,140 @@
+#######################################################################################################################
+## Bedtime
+#######################################################################################################################
+bedtime:
+  alias: "Bedtime"
+  description: "Turn on bedtime lights and activate night mode."
+  icon: mdi:bed-empty
+  mode: restart
+  sequence:
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: 'off'
+
+                - condition: not
+                  conditions:
+                    - condition: state
+                      entity_id: input_select.occupancy_mode
+                      state:
+                        - Home
+                        - Guest
+
+                - condition: state
+                  entity_id: input_boolean.alarm_triggered
+                  state: 'on'
+          sequence:
+            - service: browser_mod.toast
+              data:
+                message: Bedtime routine cannot be run.
+                duration: 30000
+      default:
+        - service: script.turn_off
+          target:
+            entity_id:
+              - script.wake_up
+              - script.morning_lights
+
+        - choose:
+            - conditions:
+                - condition: state # bedtime_active delayed on at bedtime to force this first time
+                  entity_id: binary_sensor.bedtime_active
+                  state: 'off'
+              sequence:
+                - service: script.bedtime_notification
+
+                - service: script.turn_on
+                  target:
+                    entity_id: script.tts_play
+                  data:
+                    variables:
+                      message: !include /config/include/template/bedtime_message_template.yaml
+                      quiet_play: true
+                      min_volume: 35
+
+                - wait_template: "{{ is_state('input_boolean.bedtime_delayed','on') }}"
+                  timeout: # user must turn boolean on before this delay expires to delay night mode
+                    minutes: "{{ states('input_number.bedtime_delay')|int }}"
+
+                - choose:
+                    - conditions:
+                        - condition: state
+                          entity_id: input_boolean.bedtime_delayed
+                          state: 'on'
+                      sequence:
+                        - service: timer.start
+                          target:
+                            entity_id: timer.bedtime_delay
+                          data:
+                            duration:
+                              minutes: "{{ states('input_number.stay_awake_delay')|int }}"
+                  default:
+                    - delay: 30 # allow bedtime_active to turn on (prevent recursive loop)
+
+                    - service: script.turn_on
+                      entity_id: script.bedtime
+          default:
+            - condition: or
+              alias: Occupancy mode is still Home/Guest
+              conditions: # check occupancy mode again, might be already have been changed to night or away
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state:
+                    - Home
+                    - Guest
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id:
+                        - input_boolean.light_automation
+                        - binary_sensor.nighttime_auto_light
+                      state: 'on'
+                  sequence:
+                    - service: script.turn_on
+                      entity_id: script.bedtime_lights
+
+            - delay: # delay before night mode, last chance to turn bedtime delay on
+                minutes: "{{ states('input_number.night_mode_delay')|int }}"
+
+            - condition: state
+              entity_id: input_boolean.bedtime_delayed
+              state: 'off'
+
+            - service: input_select.select_option
+              target:
+                entity_id: input_select.occupancy_mode
+              data:
+                option: Night
+
+            - delay: 5 # allow media player auto_off to run
+
+            - service: script.tts_play
+              data:
+                message: "Good night!"
+                quiet_play: true
+                media_player: media_player.dining_room_display
+                tts_service: nabu_casa
+                gender: female
+                language: en-CA
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id:
+                        - input_boolean.media_player_automation
+                        - input_boolean.media_preset_enabled_sleep
+                      state: 'on'
+
+                    - condition: template
+                      value_template: > # only when less than delay + 5 minutes after bedtime or someone might be in bed!
+                        {{ is_state('sensor.bedtime_today','off') or states('sensor.time') < (as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'),'ERROR')
+                            + (states('input_number.night_mode_delay')|int * 60 ) + 300)|timestamp_custom('%H:%M',true,'ERROR') }}
+                  sequence:
+                    - delay: 60 # delay until after night mode or will shuts off via media players auto off
+
+                    - service: switch.turn_on # turn on sleep radio
+                      entity_id: switch.media_preset_sleep

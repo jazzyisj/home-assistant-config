@@ -2,26 +2,32 @@
 ## Light - Kitchen Sink Light Auto On
 #######################################################################################################################
 - id: light_kitchen_sink_light_auto_on
-  alias: '[Light] Kitchen Sink Light Auto On'
-  description: Turn on lights.
+  alias: "[Light] Kitchen Sink Light Auto On"
+  description: "Turn on light."
   max_exceeded: silent
   trigger:
     - platform: state
+      id: lux
       entity_id:
-        - binary_sensor.auto_light_on
-        - binary_sensor.illuminance_light_on
+        - binary_sensor.nighttime_auto_light
+        - binary_sensor.daytime_illuminance_light
       to: 'on'
+
+    - platform: state
+      id: scene
+      entity_id:
+        - script.morning_lights
+        - binary_sensor.scene_active
+      to: 'off'
   condition:
     - condition: state
       entity_id: input_boolean.light_automation
       state: 'on'
 
     - condition: state
-      entity_id: input_boolean.alarm_triggered
-      state: 'off'
-
-    - condition: state
-      entity_id: binary_sensor.light_scene_active
+      entity_id:
+        - input_boolean.alarm_triggered
+        - binary_sensor.light_scene_active
       state: 'off'
 
     - condition: state
@@ -33,59 +39,100 @@
     - condition: or
       conditions:
         - condition: state
-          entity_id: binary_sensor.auto_light_on
+          entity_id: binary_sensor.nighttime_auto_light
           state: 'on'
 
         - condition: state
-          entity_id: binary_sensor.illuminance_light_on
+          entity_id: binary_sensor.daytime_illuminance_light
           state: 'on'
   action:
     - service: light.turn_on
-      entity_id: light.kitchen_sink_light
+      target:
+        entity_id: light.kitchen_sink_light
 
 #######################################################################################################################
 ## Light - Kitchen Sink Light Auto Off
 #######################################################################################################################
 - id: light_kitchen_sink_light_auto_off
-  alias: '[Light] Kitchen Sink Light Auto Off'
-  description: Turn off lights.
+  alias: "[Light] Kitchen Sink Light Auto Off"
+  description: "Turn off light."
   max_exceeded: silent # reloading templates (illuminance sensor)
   trigger:
     - platform: state
+      id: lux
       entity_id:
-        - binary_sensor.auto_light_on
-        - binary_sensor.illuminance_light_on
+        - binary_sensor.nighttime_auto_light
+        - binary_sensor.daytime_illuminance_light
       to: 'off'
 
     - platform: state
-      entity_id: input_select.occupancy_mode #OCC
+      id: scene
+      entity_id:
+        - script.morning_lights
+        - binary_sensor.scene_active
+      to: 'off'
+
+    - platform: state
+      id: away
+      entity_id: input_select.occupancy_mode
       to:
-        - Night
         - Away
         - Vacation
       for:
-        minutes: 2 # allow timer to cancel, occupant to leave
+        minutes: 2 # allow occupant to leave, timer cancel
+
+    - platform: state
+      id: night
+      entity_id: input_select.occupancy_mode
+      to: Night
+
+    - platform: event
+      id: timer
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.kitchen_sink_light
   condition:
     - condition: state
-      entity_id: input_boolean.light_automation
+      entity_id:
+        - light.kitchen_sink_light
+        - input_boolean.light_automation
       state: 'on'
 
     - condition: template
-      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
-
-    - condition: template
       value_template: >
-        {% if is_state('binary_sensor.someone_home','on') %}
-          {{ is_state('binary_sensor.auto_light_on','off') if trigger.entity_id == 'binary_sensor.illuminance_light_on'
-              else (is_state('binary_sensor.illuminance_light_on','off') if trigger.entity_id == 'binary_sensor.auto_light_on' else true) }}
-        {% else %} true
-        {% endif %}
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id in ['away','night'] else true }}
 
     - condition: state
       entity_id:
         - binary_sensor.light_scene_active
         - input_boolean.alarm_triggered
       state: 'off'
+
+    - condition: template
+      alias: "Timer is not on if trigger is lux"
+      value_template: >
+        {{ is_state('timer.kitchen_sink_light','idle')
+            if trigger.id == 'lux' else true }}
+
+    - condition: template
+      value_template: >
+        {{ is_state('binary_sensor.nighttime_auto_light','off')
+              and is_state('binary_sensor.daytime_illuminance_light','off')
+            if trigger.id == 'scene' else true }}
+
+    - condition: template
+      value_template: >
+        {% if is_state('binary_sensor.someone_home','on') %}
+          {% if trigger.entity_id == 'binary_sensor.daytime_illuminance_light'%}
+            {{ is_state('binary_sensor.nighttime_auto_light','off') }}
+          {% elif trigger.entity_id == 'binary_sensor.nighttime_auto_light' %}
+            {{ is_state('binary_sensor.daytime_illuminance_light','off') }}
+          {% else %} true
+          {% endif %}
+        {% else %} true
+        {% endif %}
   action:
     - service: light.turn_off
-      entity_id: light.kitchen_sink_light
+      target:
+        entity_id: light.kitchen_sink_light

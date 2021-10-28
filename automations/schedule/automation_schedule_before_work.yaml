@@ -3,7 +3,7 @@
 #######################################################################################################################
 - id: schedule_before_work
   alias: "[Schedule] Before Work"
-  description: Play announcement when before work active turns on.
+  description: "Play announcement when before work active turns on."
   trigger:
     - platform: state
       entity_id: binary_sensor.prework_active # 30 min
@@ -12,30 +12,18 @@
     - condition: state
       entity_id: binary_sensor.owner_home
       state: 'on'
+    - condition: state
+      entity_id: binary_sensor.owner_home
+      state: 'on'
   action:
-    #OPTION - choose:
-    #     - conditions: "{{ is_state('sensor.current_shift','Days') }}"
-    #       sequence:
-
-
-    #     - conditions: "{{ is_state('sensor.current_shift','Afternoons') }}"
-    #       sequence:
-
     - service: script.tts_play
       data:
-        play_message: >
-          {% if is_state('sensor.current_shift','Days') %}
-            {% set minutes = ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.days_leave_home_time'))|int - as_timestamp(now())|int) / 60) %}
-          {% elif is_state('sensor.current_shift','Afternoons') %}
-            {% set minutes =  ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.afternoons_leave_home_time'))|int - as_timestamp(now())|int) / 60) %}
-          {% else %}
-            {% set minutes = 1 %}
-          {% endif %}
-          You better get yer ass in gear there, big fella.  You need to leave for work in {{ minutes|int }} minutes!
+        message: |
+          You better get yer ass in gear there big guy.
+          You need to leave for work in {{ state_attr('binary_sensor.prework_active','leave_min') }} minutes!
         quiet_play: true
-        min_volume: 40
+        min_volume: 50
         media_player: media_player.broadcast_speakers
-        tts_override: nabu_casa
 
     - service: scene.create
       data:
@@ -50,6 +38,22 @@
 
     - choose:
         - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.nighttime_auto_light
+                  state: 'on'
+
+                - condition: state
+                  entity_id: binary_sensor.daytime_illuminance_light
+                  state: 'on'
+          sequence:
+            - service: light.turn_on
+              entity_id: light.side_entrance_light
+
+    #IDEA change these to switch LED notification? prework led notification?
+    - choose:
+        - conditions:
             - condition: state
               entity_id:
                 - input_boolean.weather_automation
@@ -57,11 +61,13 @@
               state: 'on'
           sequence:
             - service: switch.turn_off
-              entity_id: switch.light_flux_dining_room
+              target:
+                entity_id: switch.light_flux_dining_room
 
             - service: light.turn_on
-              data:
+              target:
                 entity_id: light.dining_room_rgb_light
+              data:
                 brightness: 255
                 rgb_color:
                   - 0
@@ -93,11 +99,13 @@
                                 state: 'on'
                         sequence:
                           - service: switch.turn_off
-                            entity_id: switch.light_flux_dining_room
+                            target:
+                              entity_id: switch.light_flux_dining_room
 
                           - service: light.turn_on
-                            data:
+                            target:
                               entity_id: light.dining_room_rgb_light
+                            data:
                               brightness: 255
                               rgb_color:
                                 - 56
@@ -114,26 +122,24 @@
     - choose:
         - conditions:
             - condition: state
-              entity_id: binary_sensor.light_scene_active
-              state: 'off'
-          sequence:
-            - service: switch.turn_on
-              entity_id: switch.light_flux_dining_room
+              entity_id: light.dining_room_rgb_light
+              state: 'on'
 
-    - choose:
-        - conditions:
             - condition: state
               entity_id: input_select.occupancy_mode
               state:
                 - Home
                 - Guest
           sequence:
-            - service: script.activate_scene
+            - service: light.turn_on # reset rgb req if off in prework_active scene
+              target:
+                entity_id: light.dining_room_rgb_light
               data:
-                scene: rgb_reset # req because rgb won't reset if light was off
+                profile: warm_min
 
             - delay: 1 # allow light states to change
 
             - service: script.activate_scene
               data:
                 scene: prework_active
+

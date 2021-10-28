@@ -1,0 +1,326 @@
+- binary_sensor:
+    - name: "Alarm Clock"
+      unique_id: alarm_clock
+      icon: mdi:alarm-note
+      delay_off: 2 # allow media player volumes to change, prevent automation.media_player_volume_changed trigger
+      state: >
+        {{ (is_state('switch.alarm_clock_auto','on')
+            or is_state('switch.alarm_clock_manual','on')
+            or is_state('switch.alarm_clock_nap','on'))
+            and is_state('input_boolean.alarm_clock_test_play','off') }}
+      attributes:
+        alarm_type: >
+          {% if is_state('switch.alarm_clock_auto','on') %} auto
+          {% elif is_state('switch.alarm_clock_manual','on') %} manual
+          {% elif is_state('switch.alarm_clock_nap','on') %} nap
+          {% endif %}
+
+    - name: "Alarm Clock Alert"
+      unique_id: alarm_clock_alert
+      icon: mdi:clock
+      delay_on: 5 # allow booleans to turn back off in check conditions w/o triggering alert
+      state: > # no alerts when user is testing alarm play
+        {{ is_state('binary_sensor.alarm_clock','on')
+            and is_state('input_boolean.alarm_clock_alerts','on')
+            and is_state('input_boolean.alarm_clock_test_play','off')
+            and is_state('switch.alarm_clock_snooze','off') }}
+
+    - name: "Alarm Clock Snoozed Alert"
+      unique_id: alarm_clock_snoozed_alert
+      icon: mdi:sleep
+      state: > # no alerts when user is testing alarm play
+        {{ is_state('switch.alarm_clock_snooze','on')
+            and is_state('input_boolean.alarm_clock_alerts','on')
+            and is_state('input_boolean.alarm_clock_test_play','off')
+            and is_state('binary_sensor.alarm_clock','on') }}
+
+    - name: "Alarm Clock Pending Alert"
+      unique_id: alarm_clock_pending_alert
+      icon: mdi:clock-alert
+      state: >
+        {{ is_state('input_boolean.alarm_clock_alerts','on')
+            and not states('sensor.alarm_clock_next_alarm') in ['Snooze','Active']
+            and (is_state('binary_sensor.bedtime_active','on')
+              or is_state('input_select.occupancy_mode','Night')) }}
+
+    - name: "Alarm Clock Presence Alert"
+      unique_id: alarm_clock_presence_alert
+      icon: mdi:clock-alert
+      state: >
+        {{ is_state('input_boolean.alarm_clock_alerts','on')
+            and is_state('binary_sensor.alarm_clock','on')
+            and (is_state('binary_sensor.someone_home','off')
+              or is_state('input_select.occupancy_mode','Away')) }}
+
+    - unique_id: alarm_clock_led_alert
+      state: >
+        {{ is_state('binary_sensor.alarm_clock','on')
+            or is_state('input_boolean.alarm_clock_failed','on') }}
+
+- sensor:
+    - name: "Alarm Clock Media Player"
+      unique_id: alarm_clock_media_player
+      icon: mdi:animation-play
+      state: >
+        {% if is_state('switch.alarm_clock_auto','on') %}{% set player = states('input_select.alarm_clock_media_player_auto') %}
+        {% elif is_state('switch.alarm_clock_manual','on') %}{% set player = states('input_select.alarm_clock_media_player_manual') %}
+        {% elif is_state('switch.alarm_clock_nap','on') %}{% set player = states('input_select.alarm_clock_media_player_nap') %}
+        {% endif %}
+        {{ expand(state_attr('sensor.media_players','players'))
+            |selectattr('name','eq',player)
+            |map(attribute='entity_id')|join('') }}
+      attributes:
+        player_state: "{{ states(states('sensor.alarm_clock_media_player')) }}"
+        players: >
+          {% set player = states('sensor.alarm_clock_media_player') %}
+          {% if player|lower not in ['','unknown','unavailable','none'] %}
+            {{ expand(state_attr('sensor.media_players','single'))
+                |selectattr('attributes.' ~ player.split('.')[1],'eq',true)|map(attribute='entity_id')|list
+                  if is_state_attr(player,'type','group') else [player] }}
+          {% else %} []
+          {% endif %}
+
+    - name: "Alarm Clock Auto"
+      unique_id: alarm_clock_auto
+      icon: >
+        {% if is_state('sensor.alarm_clock_auto','Snooze')  %} mdi:alarm-snooze
+        {% elif is_state('sensor.alarm_clock_auto','Active') %} mdi:alarm-note
+        {% elif is_state('sensor.alarm_clock_auto','Paused') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_auto','Failed') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_auto','Off') %} mdi:alarm-off
+        {% else %} mdi:alarm-check
+        {% endif %}
+
+#MIDNIGHT
+#TODO saturday workday on afternoons shift change to days on sunday
+# alarm is on for sunday (now today) morning when weekend enabled is off.  off when weekday enabled turned off.
+# time is right - 10:30am
+
+      state: >
+        {% set time = states('sensor.time') %}
+        {% set days = states('input_datetime.days_waketime')[0:5] %}
+        {% set afts = states('input_datetime.afternoons_waketime')[0:5] %}
+        {% set wkd = states('input_datetime.weekend_waketime')[0:5] %}
+        {% set guest = states('input_datetime.guest_waketime')[0:5] %}
+        {% if is_state('switch.alarm_clock_auto','on') %}
+          {% if is_state('input_boolean.alarm_clock_failed','on') %} Failed
+          {% elif is_state('input_boolean.tts_playing','on') %} Paused
+          {% elif is_state('input_boolean.alarm_clock_test_play','on') %} Test
+          {% elif is_state('switch.alarm_clock_snooze','on') %} Snooze
+          {% else %} Active
+          {% endif %}
+        {% else %}
+          {% if is_state('input_select.occupancy_mode','Guest') %}
+            {{ guest if is_state('input_boolean.alarm_clock_guest','on') else 'Off' }}
+          {% else %}
+            {# set tomorrows alarm time #}
+            {% if is_state('binary_sensor.work_tomorrow','on') %}
+              {% set alarm_tom = afts if is_state('sensor.tomorrow_shift','Afternoons') else days
+                  if is_state('input_boolean.alarm_clock_auto_workdays','on') else 'Off' %}
+            {% else %}
+              {% set alarm_tom = wkd if is_state('input_boolean.alarm_clock_auto_weekends','on') else 'Off' %}
+            {% endif %}
+            {# set next alarm to tomorrows alarm time if past alarm time else alarm time #}
+            {% if is_state('binary_sensor.work_today','on') and  is_state('input_boolean.alarm_clock_auto_workdays','on') %}
+              {% if is_state('sensor.current_shift','Afternoons') %}
+                {{ alarm_tom if time > afts else afts }}
+              {% else %}
+                {{ alarm_tom if time > days else days  }}
+              {% endif %}
+            {% elif is_state('input_boolean.alarm_clock_auto_workdays','on') %}
+              {{ alarm_tom if time > wkd else wkd }}
+            {% else %} Off
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      attributes:
+        12hour: >
+          {{ states('sensor.alarm_clock_auto') if states('sensor.alarm_clock_auto')|lower
+                in ['off','active','snoozed','failed','paused','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.alarm_clock_auto'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    - name: "Alarm Clock Manual"
+      unique_id: alarm_clock_manual
+      icon: >
+        {% if is_state('sensor.alarm_clock_manual','Snooze')  %} mdi:alarm-snooze
+        {% elif is_state('sensor.alarm_clock_manual','Active') %} mdi:alarm-note
+        {% elif is_state('sensor.alarm_clock_manual','Paused') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_manual','Failed') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_manual','Off') %} mdi:alarm-off
+        {% else %} mdi:alarm-check
+        {% endif %}
+      state: >
+        {% if is_state('switch.alarm_clock_manual','on') %}
+          {% if is_state('input_boolean.alarm_clock_failed','on') %} Failed
+          {% elif is_state('input_boolean.tts_playing','on') %} Paused
+          {% elif is_state('input_boolean.alarm_clock_test_play','on') %} Test
+          {% elif is_state('switch.alarm_clock_snooze','on') %} Snooze
+          {% else %} Active
+          {% endif %}
+        {% elif is_state('input_boolean.alarm_clock_manual','on') %}
+          {{ as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.alarm_clock_manual_time')[0:5],'ERROR')|timestamp_custom('%H:%M',true,'ERROR') }}
+        {% else %} Off
+        {% endif %}
+      attributes:
+        12hour: >
+          {{ states('sensor.alarm_clock_manual') if states('sensor.alarm_clock_manual')|lower
+                in ['off','active','snoozed','failed','paused','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.alarm_clock_manual'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    - name: "Alarm Clock Nap"
+      unique_id: alarm_clock_nap
+      icon: >
+        {% if is_state('sensor.alarm_clock_nap','Snooze')  %} mdi:alarm-snooze
+        {% elif is_state('sensor.alarm_clock_nap','Active') %} mdi:alarm-note
+        {% elif is_state('sensor.alarm_clock_nap','Paused') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_nap','Failed') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_nap','Off') %} mdi:alarm-off
+        {% else %} mdi:alarm-check
+        {% endif %}
+      state: >
+        {% if is_state('switch.alarm_clock_nap','on') %}
+          {% if is_state('input_boolean.alarm_clock_failed','on') %} Failed
+          {% elif is_state('input_boolean.tts_playing','on') %} Paused
+          {% elif is_state('input_boolean.alarm_clock_test_play','on') %} Test
+          {% elif is_state('switch.alarm_clock_snooze','on') %} Snooze
+          {% else %} Active
+          {% endif %}
+        {% elif is_state('input_boolean.alarm_clock_nap','on') %}
+          {{ as_timestamp(state_attr('timer.alarm_clock_nap','finishes_at'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') }}
+        {% else %} Off
+        {% endif %}
+      attributes:
+        12hour: >
+          {{ states('sensor.alarm_clock_nap') if states('sensor.alarm_clock_nap')|lower
+                in ['off','active','snoozed','failed','paused','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.alarm_clock_nap'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    - name: "Alarm Clock Other"
+      unique_id: alarm_clock_other
+      icon: "{{ 'mdi:alarm-off' if is_state('sensor.alarm_clock_other','Off') else 'mdi:alarm-check' }}"
+      state: >
+        {% if state_attr('sensor.alarm_clock_next_alarm','source') not in ['off','auto','manual','nap'] %}
+          {{ state_attr('sensor.alarm_clock_next_alarm','12hour') }}
+        {% else %} Off
+        {% endif %}
+      attributes:
+        12hour: >
+          {{ states('sensor.alarm_clock_other') if states('sensor.alarm_clock_other')|lower
+                in ['off','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.alarm_clock_other'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    - name: "Alarm Clock Next Alarm"
+      unique_id: alarm_clock_next_alarm
+      icon: >
+        {% if is_state('sensor.alarm_clock_next_alarm','Snooze')  %} mdi:alarm-snooze
+        {% elif is_state('sensor.alarm_clock_next_alarm','Active') %} mdi:alarm-note
+        {% elif is_state('sensor.alarm_clock_next_alarm','Paused') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_next_alarm','Failed') %} mdi:alarm-note-off
+        {% elif is_state('sensor.alarm_clock_next_alarm','Off') %} mdi:alarm-off
+        {% else %} mdi:alarm-check
+        {% endif %}
+      state: > # earliest of auto, manual, phone, google home devices next 24 hours
+        {% if is_state('input_boolean.alarm_clock_failed','on') %} Failed
+        {% elif is_state('binary_sensor.alarm_clock','on') %}
+          {% if is_state('switch.alarm_clock_snooze','on') %} Snoozed
+          {% elif is_state(states('sensor.alarm_clock_media_player'),'playing') %} Playing
+          {% elif states('sensor.alarm_clock_next_alarm') == 'Active' %} Active
+          {% endif %}
+        {% else %}
+          {% set time = states('sensor.time') %}
+          {% set auto = '99:99' if states('sensor.alarm_clock_auto') in ['Off','Snooze','Active']
+              else states('sensor.alarm_clock_auto') %}
+          {% set manual = '99:99' if states('sensor.alarm_clock_manual') in ['Off','Snooze','Active']
+              else states('sensor.alarm_clock_manual') %}
+          {% set nap = '99:99' if states('sensor.alarm_clock_nap') in ['Off','Snooze','Active']
+              else states('sensor.alarm_clock_nap') %}
+          {% set jalarm = '99:99' if is_state('binary_sensor.jason_home','off')
+              or states('sensor.jphone_alarm_clock')|lower in ['off','unknown','unavailable','none']
+                else states('sensor.jphone_alarm_clock') %}
+          {% set salarm = '99:99' if is_state('binary_sensor.sheri_home','off')
+              or states('sensor.sphone_alarm_clock')|lower in ['off','unknown','unavailable','none']
+                else states('sensor.sphone_alarm_clock') %}
+          {% set dining_room_display = '99:99'
+              if states('sensor.dining_room_display_next_alarm')|lower in ['off','unknown','unavailable','none']
+              else state_attr('sensor.dining_room_display_next_alarm','24hour') %}
+          {% set bedroom_display = '99:99'
+              if states('sensor.bedroom_display_next_alarm')|lower in ['off','unknown','unavailable','none']
+              else state_attr('sensor.bedroom_display_next_alarm','24hour') %}
+          {% set bathroom_speaker = '99:99'
+              if states('sensor.bathroom_speaker_next_alarm')|lower in ['off','unknown','unavailable','none']
+              else state_attr('sensor.bathroom_speaker_next_alarm','24hour') %}
+          {% set garage_speaker = '99:99'
+              if states('sensor.garage_speaker_next_alarm')|lower in ['off','unknown','unavailable','none']
+              else state_attr('sensor.garage_speaker_next_alarm','24hour') %}
+          {% set living_room_speaker = '99:99'
+              if states('sensor.living_room_speaker_next_alarm')|lower in ['off','unknown','unavailable','none']
+              else state_attr('sensor.living_room_speaker_next_alarm','24hour') %}
+          {% set laundry_room_speaker = '99:99'
+              if states('sensor.laundry_room_speaker_next_alarm')|lower in ['off','unknown','unavailable','none']
+              else state_attr('sensor.laundry_room_speaker_next_alarm','24hour') %}
+
+          {% set today_alarms = namespace(value=[]) %}
+          {% set tomorrow_alarms = namespace(value=[]) %}
+
+          {% set alarms = [auto,manual,nap,jalarm,salarm,dining_room_display,bedroom_display,
+              bathroom_speaker,garage_speaker,living_room_speaker,laundry_room_speaker] %}
+
+          {% for item in alarms %}
+            {% if item != '99:99' and item > time %}
+              {% set today_alarms.value = today_alarms.value + [item] %}
+            {% elif item != '99:99' %}
+              {% set tomorrow_alarms.value = tomorrow_alarms.value + [item] %}
+            {% endif %}
+          {% endfor %}
+
+          {% if today_alarms.value|count > 0 %}
+            {% set alarms = today_alarms.value %}
+          {% else %}
+            {% set alarms = tomorrow_alarms.value %}
+          {% endif %}
+
+          {% if alarms|count > 0 %}{% set next = alarms|min %}
+          {% else %}{% set next = 'none' %}
+          {% endif %}
+
+          {{ 'Off' if next == 'none' else next }}
+        {% endif %}
+      attributes:
+        source: >
+          {% set next = states('sensor.alarm_clock_next_alarm') %}
+          {% if next|lower in ['off','active','snoozed','failed','paused','unknown','unavailable','none'] %} none
+          {% elif next == states('sensor.alarm_clock_auto') %} auto
+          {% elif next == states('sensor.alarm_clock_manual') %} manual
+          {% elif next == states('sensor.alarm_clock_nap') %} nap
+          {% elif next == as_timestamp(states('sensor.jphone_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} jphone
+          {% elif next == as_timestamp(states('sensor.sphone_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} sphone
+          {% elif next == as_timestamp(states('sensor.dining_room_display_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} dining_room_display
+          {% elif next == as_timestamp(states('sensor.bedroom_display_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} bedroom_display
+          {% elif next == as_timestamp(states('sensor.bathroom_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} bathroom_speaker
+          {% elif next == as_timestamp(states('sensor.living_room_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} living_room_speaker
+          {% elif next == as_timestamp(states('sensor.laundry_room_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} laundry_room_speaker
+          {% elif next == as_timestamp(states('sensor.garage_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} garage_speaker
+          {% endif %}
+        source_name: >
+          {% set next = states('sensor.alarm_clock_next_alarm') %}
+          {% if next|lower in ['off','active','snoozed','failed','paused','unknown','unavailable','none'] %} None
+          {% elif next == states('sensor.alarm_clock_auto') %} Auto Alarm Clock
+          {% elif next == states('sensor.alarm_clock_manual') %} Manual Alarm Clock
+          {% elif next == states('sensor.alarm_clock_nap') %} Nap Alarm Clock
+          {% elif next == as_timestamp(states('sensor.jphone_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Jason's Phone
+          {% elif next == as_timestamp(states('sensor.sphone_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Sheri's Phone
+          {% elif next == as_timestamp(states('sensor.dining_room_display_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Dining Room Display
+          {% elif next == as_timestamp(states('sensor.bedroom_display_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Bedroom Display
+          {% elif next == as_timestamp(states('sensor.bathroom_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Bathroom Speaker
+          {% elif next == as_timestamp(states('sensor.living_room_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Living Room Speaker
+          {% elif next == as_timestamp(states('sensor.laundry_room_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Laundry Room Speaker
+          {% elif next == as_timestamp(states('sensor.garage_speaker_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') %} Garage Speaker
+          {% endif %}
+        12hour: >
+          {{ states('sensor.alarm_clock_next_alarm') if states('sensor.alarm_clock_next_alarm')|lower
+                in ['off','active','snoozed','failed','paused','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.alarm_clock_next_alarm'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+        24hour: >
+          {{ states('sensor.alarm_clock_next_alarm') if states('sensor.alarm_clock_next_alarm')|lower
+                in ['off','active','snoozed','failed','paused','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.alarm_clock_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') }}

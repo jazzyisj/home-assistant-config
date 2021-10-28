@@ -1,0 +1,110 @@
+#######################################################################################################################
+## Spotify - Playlist Update
+#######################################################################################################################
+- id: spotify_playlist_update
+  alias: "[Spotify] Playlist Update"
+  description: "Update spotify playlist input options, restore previous selection."
+  mode: restart
+  variables:
+    selected_playlists: "{{ expand('group.spotify_selected_playlists')|map(attribute='entity_id')|list }}"
+    stored_playlists: "{{ expand('group.spotify_stored_playlists')|map(attribute='entity_id')|list }}"
+  trigger:
+    - platform: state
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: state
+      entity_id: sensor.playlists_sensor
+      attribute: playlists
+  condition:
+    - condition: state
+      entity_id:
+        - binary_sensor.wan_connected
+        - binary_sensor.spotify_connected
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.startup_pending
+      state: 'off'
+  action:
+    - wait_template: >
+        {{ state_attr('sensor.playlists_sensor','playlists')|lower
+            not in ['',[],'unknown','unavailable','none'] }}
+      timeout:
+        minutes: 10
+      continue_on_timeout: false
+
+    - service: automation.turn_off
+      target:
+        entity_id: &spotify_automations
+          - automation.spotify_store_playlist_selection # don't overwrite stored values
+          - automation.media_auto_resume # triggered by input_select.spotify_playlist
+      data:
+        stop_actions: false
+
+    - service: input_select.set_options
+      target:
+        entity_id:
+          - input_select.spotify_playlist
+          - input_select.media_preset_spotify_wake
+          - input_select.media_preset_spotify_morning
+          - input_select.media_preset_spotify_sleep
+          - input_select.media_preset_spotify_jason
+          - input_select.media_preset_spotify_sheri
+          - input_select.media_preset_spotify_guest
+          - input_select.media_preset_spotify_shower
+          - input_select.media_preset_spotify_chill
+          - input_select.media_preset_spotify_company
+          - input_select.alarm_clock_spotify_auto
+          - input_select.alarm_clock_spotify_manual
+          - input_select.alarm_clock_spotify_nap
+      data:
+        options: >
+          [{% for item in state_attr('sensor.playlists_sensor','playlists') -%}
+            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+
+    - repeat: # restore previous selection (values reset when options reloaded)
+        count: "{{ selected_playlists|count }}"
+        sequence:
+          - choose:
+              - conditions: "{{ states(stored_playlists[repeat.index-1])|lower not in ['','unknown','unavailable','none'] }}"
+                sequence:
+                  - service: input_select.select_option
+                    target:
+                      entity_id: "{{ selected_playlists[repeat.index-1] }}"
+                    data:
+                      option: "{{ states(stored_playlists[repeat.index-1]) }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: *spotify_automations
+
+#######################################################################################################################
+## Spotify - Playlist Selection Update
+#######################################################################################################################
+- id: spotify_playlist_selection_update
+  alias: "[Spotify] Playlist Selection Update"
+  description: "Update spotify playlist input selection."
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: media_player.spotify
+      attribute: media_playlist
+  condition: "{{ state_attr(trigger.entity_id,'media_playlist') in state_attr('input_select.spotify_playlist','options') }}"
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.media_auto_resume # triggered by input_select.spotify_playlist
+      data:
+        stop_actions: false
+
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.spotify_playlist
+      data:
+        option: "{{ state_attr(trigger.entity_id,'media_playlist') }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.media_auto_resume

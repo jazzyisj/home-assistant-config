@@ -3,27 +3,138 @@
 #######################################################################################################################
 wake_up:
   alias: "Wake Up"
+  description: "Turn on lights, set occupancy mode to home/guest, play morning radio & weather."
+  icon: mdi:white-balance-sunny
+  sequence:
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: input_boolean.alarm_triggered
+                  state: 'on'
+
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: 'off'
+          sequence:
+            - service: browser_mod.toast
+              data:
+                message: "Wake up routine cannot be run."
+                duration: 30000
+      default:
+        - service: script.turn_off
+          target:
+            entity_id:
+              - script.bedtime
+              - script.bedtime_lights
+
+        - choose:
+            - conditions: "{{ is_state('switch.alarm_clock_auto','on') }}"
+              sequence:
+                - service: switch.turn_off
+                  target:
+                    entity_id: switch.alarm_clock_auto
+
+        - choose:
+            - conditions: "{{ is_state('switch.alarm_clock_manual','on') }}"
+              sequence:
+                - service: switch.turn_off
+                  target:
+                    entity_id: switch.alarm_clock_manual
+
+        - choose:
+            - conditions: "{{ is_state('switch.alarm_clock_nap','on') }}"
+              sequence:
+                - service: switch.turn_off
+                  target:
+                    entity_id: switch.alarm_clock_nap
+
+        - service: input_select.select_option
+          target:
+            entity_id: input_select.occupancy_mode
+          data:
+            option: >
+              {% if is_state('binary_sensor.owner_home','on') %} Home
+              {% elif is_state('input_boolean.guest_home','on') %} Guest
+              {% else %} Away
+              {% endif %}
+
+        - service: script.arm_alarm
+          data:
+            mode: home
+
+        - delay: 60 # wait for alarm to disarm/tts
+
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.media_preset_enabled_wake
+                  state: 'on'
+              sequence:
+                - service: switch.turn_on
+                  entity_id: switch.media_preset_wake
+
+        - delay: # delay for weather report/morning radio
+            minutes: >
+              {{ states('input_number.morning_media_delay')|int if is_state('binary_sensor.work_today','on')
+                  else states('input_number.morning_media_delay_weekend')|int }}
+
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.media_preset_enabled_morning
+                  state: 'on'
+              sequence:
+                - service: script.media_stop # don't resume wake preset back on after tts
+                  data:
+                    media_type: "{{ states('input_select.media_preset_type_wake')|lower }}"
+
+                - delay: 15  # wait for media to stop
+
+                - choose:
+                    - conditions:
+                        - condition: state
+                          entity_id: input_boolean.morning_weather_enabled
+                          state: 'on'
+                      sequence:
+                        - service: script.weather_report
+                        - delay: 5 # allow weather tts to start playing
+                        - wait_template: "{{ is_state('input_boolean.tts_playing','off') }}"
+
+                - service: switch.turn_on
+                  target:
+                    entity_id: switch.media_preset_morning
+          default:
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.morning_weather_enabled
+                      state: 'on'
+                  sequence:
+                    - service: script.weather_report
+
+#######################################################################################################################
+## Wake Up Switch # for zwave scenes
+#######################################################################################################################
+wake_up_switch:
+  alias: "Wake Up Switch"
   description: "Turn off alarm clock or run wake up scene."
   max_exceeded: silent
   sequence:
     - choose:
         - conditions:
             - condition: state
-              entity_id: binary_sensor.alarm_clock_active
-              state: 'on'
+              entity_id: input_select.occupancy_mode
+              state: Night
           sequence:
-            - service: input_boolean.turn_on
-              entity_id:
-                - input_boolean.alarm_clock_active_auto
-                - input_boolean.alarm_clock_active_manual
-                - input_boolean.alarm_clock_active_nap
+            - service: script.turn_on
+              entity_id: script.wake_up
       default:
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: input_select.occupancy_mode
-                  state: Night
-              sequence:
-                - service: script.turn_on
-                  entity_id: script.scene_wake_up
+        - condition: state
+          entity_id: binary_sensor.alarm_clock
+          state: 'on'
 
+        - service: switch.turn_off
+          target:
+            entity_id: "switch.alarm_clock_{{ state_attr('binary_sensor.alarm_clock','alarm_type') }}"

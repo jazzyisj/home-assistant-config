@@ -1,0 +1,263 @@
+- binary_sensor:
+    - unique_id: work_today
+      name: Work Today
+      icon: >
+        {% if is_state('input_boolean.work_schedule','off') %} mdi:beach
+        {% elif is_state('sensor.current_shift','Days') %} mdi:alpha-d-circle
+        {% elif is_state('sensor.current_shift','Afternoons') %} mdi:alpha-a-circle
+        {% else %} mdi:calendar-alert
+        {% endif %}
+      state: >
+        {% if is_state('input_boolean.work_schedule','off') %} false
+        {% elif is_state('calendar.work_holiday','on') %} false
+        {% elif is_state('input_boolean.saturday_workday','on') and now().weekday() == 5 %} true
+        {% elif is_state('input_boolean.sunday_workday','on') and now().weekday() == 6 %} true
+        {% elif is_state('binary_sensor.workday','on') %} true
+        {% endif %}
+
+    - unique_id: work_tomorrow
+      name: Work Tomorrow
+      icon: >
+        {% if is_state('input_boolean.work_schedule','off') %} mdi:beach
+        {% elif is_state('sensor.tomorrow_shift','Days') %} mdi:alpha-d-circle
+        {% elif is_state('sensor.tomorrow_shift','Afternoons') %} mdi:alpha-a-circle
+        {% else %} mdi:calendar-alert
+        {% endif %}
+      state: >
+        {% if is_state('input_boolean.work_schedule','off') %} false
+        {% elif is_state('binary_sensor.holiday_tomorrow','on') %} false
+        {% elif is_state('input_boolean.saturday_workday','on') and now().weekday() == 4 %} true
+        {% elif is_state('input_boolean.sunday_workday','on') and now().weekday() == 5 %} true
+        {% elif is_state('binary_sensor.workday_tomorrow','on') %} true
+        {% endif %}
+
+    - unique_id: prework_active
+      name: Prework Active
+      icon: mdi:account-hard-hat
+      state: >
+        {% if is_state('sensor.current_shift','Afternoons') %}
+          {% set diff = (as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.afternoons_leave_home_time'),'ERROR') - as_timestamp(now())) %}
+        {% else %}
+          {% set diff =  (as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.days_leave_home_time'),'ERROR') - as_timestamp(now())) %}
+        {% endif %}
+        {{ diff|abs < 1800 if is_state('binary_sensor.work_today','on') else false }}
+      attributes:
+        leave_min: >
+          {% if is_state('binary_sensor.prework_active','on') %}
+            {% set shift = 'afternoons' if is_state('sensor.current_shift','Afternoons') else 'days' %}
+            {% set minutes =  ((as_timestamp(states('sensor.date') ~ ' ' ~ states('input_datetime.' ~ shift ~ '_leave_home_time'),'ERROR') - as_timestamp(now())) / 60) %}
+            {{ '%0.0f'|format(minutes) }}
+          {% endif %}
+
+    # limit media player volumes during set hours
+    # if QHS < QHE time does not span midnight
+    #  - time >= QHS and time <= QHE
+    # else if QHE < QHS quiet hours spans midnight
+    # - before midnight time >= QHS
+    # -  after midnight time <= QHE
+    # if waketime or bedtime state is Off default to set times
+    - unique_id: quiet_hours
+      name: Quiet Hours
+      icon: mdi:volume-low
+      state: >
+        {% set time = states('sensor.time') %}
+        {% if is_state('input_boolean.quiet_hours_bedtime_sync','on')
+            and states('sensor.waketime_today')|lower not in ['off','','unknown','unavailable','none']
+            and states('sensor.bedtime_today')|lower not in ['off','','unknown','unavailable','none'] %}
+          {% set start = (as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'),'ERROR') - states('input_number.quiet_hours_before_bedtime')|int * 60 )|timestamp_custom('%H:%M',true,'ERROR') %}
+          {% set end = (as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_today'),'ERROR') + states('input_number.quiet_hours_after_waketime')|int * 60 )|timestamp_custom('%H:%M',true,'ERROR') %}
+        {% else %}
+          {% set start = states('input_datetime.quiet_hours_start')[0:5] %}
+          {% set end = states('input_datetime.quiet_hours_end')[0:5] %}
+        {% endif %}
+        {% if is_state('input_boolean.quiet_hours_override','on') or is_state('input_select.occupancy_mode','Night') %} true
+        {% elif is_state('input_boolean.quiet_hours_enabled','on') %}
+          {% if is_state('binary_sensor.scene_active','off') %}
+            {{ start <= time < end if start < end else start <= time or time < end }}
+          {% else %} false
+          {% endif %}
+        {% else %} false
+        {% endif %}
+
+    # after bedtime, not in night mode, before 4am
+    # never true if waketime or bedtime state is Off
+    # before 4am only (prevent bedtime trigger if someone wakes up house early)
+    # bed > wake - bedtime is before midnight
+    # bed < time or bed > time < wake - its after bedtime (before midnight), or after bedtime and before waketime (after midnight)
+    # else - bedtime is before midnight
+    # bed < time < wake - after bedtime and before waketime (bed after midnight)
+    - unique_id: bedtime_active
+      name: Bedtime Active
+      icon: mdi:bed-empty
+      delay_on:
+        seconds: 15 # allow automation.schedule_bedtime to detect bedtime trigger
+      state: >
+        {% set time = states('sensor.time') %}
+        {% set wake = states('sensor.waketime_today') %}
+        {% set bed = states('sensor.bedtime_today') %}
+        {{ states('input_select.occupancy_mode') in ['Home','Guest']
+            and ((bed != 'Off' and wake != 'Off')
+              and (time < '04:00' or time > wake)
+              and (bed < time or bed > time < wake if bed > wake else bed < time < wake))
+            or is_state('script.bedtime','on') }}
+
+    - unique_id: bedtime_led_alert
+      state: >
+        {{ is_state('binary_sensor.bedtime_active','on')
+            or is_state('input_boolean.bedtime_delayed','on') }}
+
+    - unique_id: reminder_led_alert
+      state: >
+        {{ is_state('input_boolean.dexter_medication_active','on')
+            or is_state('input_boolean.jason_medication_active','on')
+            or is_state('input_boolean.maddie_mealtime_active','on') }}
+
+- sensor:
+    - unique_id: tod_greeting
+      state: >
+        {% set time = states('sensor.time') %}
+        {% if '02:00' <= time < '12:00' %}{% set tod = 'Morning' %}
+        {% elif '12:00' <= time < '18:00' %}{% set tod = 'Afternoon' %}
+        {% else %}{% set tod = 'Evening' %}
+        {% endif %}
+        Good {{ tod }}
+
+    - unique_id: time_trigger_shift
+      state: >
+        {% if is_state('sensor.current_shift','Days') and is_state('binary_sensor.work_today','on') %} days
+        {% elif is_state('sensor.current_shift','Afternoons') and is_state('binary_sensor.work_today','on') %} afts
+        {% else %} wknd
+        {% endif %}
+
+    - unique_id: waketime_today
+      name: Waketime Today
+      icon: mdi:white-balance-sunny
+      state: > # defaults to days if shift unknown or none
+        {% set time = states('sensor.time') %}
+        {% set bed = states('sensor.bedtime_today') %}
+        {% set alarm = states('sensor.alarm_clock_next_alarm') %}
+        {% set days = states('input_datetime.days_waketime')[0:5] %}
+        {% set afts = states('input_datetime.afternoons_waketime')[0:5] %}
+        {% set wknd = states('input_datetime.weekend_waketime')[0:5] %}
+        {% set guest = states('input_datetime.guest_waketime')[0:5] %}
+        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_morning','on') %}
+          {% set wake = guest %}
+        {% else %}
+          {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on')%}
+              {% set wake = afts if is_state('sensor.current_shift','Afternoons') else days %}
+          {% elif is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','on')%}
+              {% set wake = wknd %}
+          {% else %}{% set wake = 'Off' %}
+          {% endif %}
+        {% endif %}
+        {% set alarm = 'Off' if (wake == 'Off' or alarm < bed < wake) else alarm %}
+        {{ wake if alarm == 'Off' else wake if wake == 'Off' else [alarm,wake]|min }}
+      attributes:
+        12hour: >
+          {{ states('sensor.waketime_today') if states('sensor.waketime_today')|lower in ['off','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_today'))|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    #MIDNIGHT bedtime before noon and time < bedtime check work today, else check work tomorrow to account for bedtimes after midnight
+    - unique_id: waketime_tomorrow
+      name: Waketime Tomorrow
+      icon: mdi:weather-sunset-up
+      state: > # defaults to days if shift unknown or none
+        {% set time = states('sensor.time') %}
+        {% set bed = states('sensor.bedtime_today') %}
+        {% set alarm = states('sensor.alarm_clock_next_alarm') %}
+        {% set days = states('input_datetime.days_waketime')[0:5] %}
+        {% set afts = states('input_datetime.afternoons_waketime')[0:5] %}
+        {% set wknd = states('input_datetime.weekend_waketime')[0:5] %}
+        {% set guest = states('input_datetime.days_waketime')[0:5] %}
+        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_morning','on') %}
+          {% set wake = guest %}
+        {% else %}
+          {% if bed == 'Off' or time < bed < '12:00' %}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on') %}
+              {% if is_state('sensor.current_shift','Afternoons') %}{% set wake = afts %}
+              {% else %}{% set wake = days %}
+              {% endif %}
+            {% elif is_state('input_boolean.weekend_morning','on')%}{% set wake = wknd %}
+            {% else %}{% set wake = 'Off' %}
+            {% endif %}
+          {% else %}
+            {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_morning','on') %}
+              {% if is_state('sensor.tomorrow_shift','Afternoons') %}{% set wake = afts %}
+              {% else %}{% set wake = days %}
+              {% endif %}
+            {% elif is_state('input_boolean.weekend_morning','on') %}{% set wake = wknd %}
+            {% else %}{% set wake = 'Off' %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+        {% set alarm = 'Off' if (wake == 'Off' or alarm < bed < wake) else alarm %}
+        {{ wake if alarm == 'Off' else wake if wake == 'Off' else [alarm,wake]|min }}
+      attributes:
+        12hour: >
+          {{ states('sensor.waketime_tomorrow') if states('sensor.waketime_tomorrow')|lower in ['off','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.waketime_tomorrow'))|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    #TODO #MIDNIGHT saturday workday on afternoons shift change to days on sunday
+    # next waketime is right! Sunday morning 10:30am
+    - name: "Next Waketime"
+      unique_id: next_waketime
+      icon: mdi:weather-sunset-up
+      state: >
+        {% set time = states('sensor.time') %}
+        {% set today = states('sensor.waketime_today') %}
+        {% set tomorrow = states('sensor.waketime_tomorrow') %}
+        {% set house = states('input_datetime.house_waketime') %}
+        {% if today == 'Off' %}{{ today if time < house else tomorrow }}
+        {% elif tomorrow == 'Off' %}{{ today if time < today else tomorrow }}
+        {% else %}{{ tomorrow if time > today else today }}
+        {% endif %}
+      attributes:
+        12hour: >
+          {{ states('sensor.next_waketime') if states('sensor.waketime_today')|lower in ['off','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.next_waketime'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+
+    #TODO #MIDNIGHT saturday workday on afternoons shift change to days on sunday
+    # bedtime saturday after midnight switches to days bedtime and gets missed.
+    # BUT THE AUTOMATION FIRED AT 2:00am!?!?!?!
+    - unique_id: bedtime_today
+      name: Bedtime Today
+      icon: mdi:bed
+      state: > # - defaults to days if shift unknown or none, weekends if work schedule off
+        {% set day = states('input_datetime.days_bedtime')[0:5] %}
+        {% set aft = states('input_datetime.afternoons_bedtime')[0:5] %}
+        {% set wkd = states('input_datetime.weekend_bedtime')[0:5] %}
+        {% set bed = [day,aft,wkd]|reject('>','12:00')|max if [day,aft,wkd]|min < '12:00' else [day,aft,wkd]|max %}
+        {% if is_state('binary_sensor.someone_home','on') and is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_night','on') %}
+          {{ states('input_datetime.guest_bedtime')[0:5] }}
+        {% else %}
+          {% if is_state('sensor.current_shift','Afternoons') and (states('sensor.time') < bed) %}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_night','on') %} {{ aft }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
+          {% elif is_state('sensor.tomorrow_shift','Afternoons') %}
+            {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_night','on') %} {{ aft }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
+          {% elif is_state('sensor.current_shift','Days') and (states('sensor.time') < bed) %}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_night','on') %} {{ day }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
+          {% elif is_state('sensor.tomorrow_shift','Days') %}
+            {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_night','on') %} {{ day }}
+            {% elif is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% else %} Off
+            {% endif %}
+          {% else %}
+            {% if is_state('input_boolean.work_schedule','off') and is_state('input_boolean.weekend_night','on') %} {{ wkd }}
+            {% elif is_state('input_boolean.workday_night','on') %} {{ day }}
+            {% else %} Off
+            {% endif %}
+          {% endif %}
+        {% endif %}
+      attributes:
+        12hour: >
+          {{ states('sensor.bedtime_today') if states('sensor.bedtime_today')|lower in ['off','unknown','unavailable','none']
+              else as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|timestamp_custom('%-I:%M %p',true,'ERROR') }}

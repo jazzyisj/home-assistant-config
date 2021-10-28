@@ -1,0 +1,75 @@
+#######################################################################################################################
+## Save Media Player Volumes
+# - this does not save speaker group volumes, group volumes are determined by individual media players
+#######################################################################################################################
+save_media_player_volumes:
+  alias: "Save Media Player Volumes"
+  description: "Store media player volumes."
+  icon: mdi:play-box-multiple-outline
+  mode: queued
+  max: 5
+  fields:
+    source:
+      description: "Source calling this script."
+      example: tts
+    media_player:
+      description: "List of media players."
+      example: "[media_player.dining_room_display, media_player.bedroom_display]"
+  variables:
+    players: "{{ state_attr('sensor.media_players','single') if media_player == '' else  media_player }}"
+    player: null
+    name: null
+    new_volume: null
+  sequence:
+    - repeat:
+        while: "{{ repeat.index <= players|count }}"
+        sequence:
+          - variables:
+              player: "{{ players[repeat.index-1] }}"
+              name: "{{ players[repeat.index-1].split('.')[1] }}"
+              new_volume: > # if system is muted save default volume as current volume
+                {% if is_number(state_attr(player,'volume_level')) %}
+                  {% set default = states('input_number.' ~ name ~ '_default_volume')|int %}
+                  {% set current = '%0.2f'|format(state_attr(player,'volume_level')|float(default='ERROR'))|float %}
+                  {% if is_state('input_boolean.mute_all','on') %}
+                    {% set current = default  %}
+                  {% endif %}
+                  {% if source == 'reset' %}
+                    {% if is_state_attr(player,'device_class','speaker') %}
+                      {% set quiet = states('input_number.speaker_quiet_volume')|int/100 %}
+                    {% elif is_state_attr(player,'device_class','tv') %}
+                      {% set quiet = states('input_number.tv_quiet_volume')|int/100 %}
+                    {% else %} -1
+                    {% endif %}
+                    {% if is_state('binary_sensor.quiet_hours','on') and is_state('input_boolean.volume_override','off') %}
+                      {{ quiet if current > quiet else current if current > 0 else quiet }}
+                    {% else %}
+                      {{ default }}
+                    {% endif %}
+                  {% else %}
+                    {{ current }}
+                  {% endif %}
+                {% else %} -1
+                {% endif %}
+          - choose:
+              - conditions: "{{ new_volume > 0 }}"
+                sequence:
+                  - choose:
+                      - conditions: # phone is on, store radio/spotify volumes to restore when phone turns off
+                          - "{{ source == 'reset' }}"
+
+                          - condition: state
+                            entity_id: binary_sensor.mobile_phone_in_use
+                            state: 'on'
+                        sequence:
+                          - service: input_number.set_value
+                            target:
+                              entity_id: "input_number.{{ name ~ '_phone' }}"
+                            data:
+                              value: "{{ '%0.2f'|format(new_volume|float/100)|float }}"
+
+                  - service: input_number.set_value
+                    target:
+                      entity_id: "input_number.{{ name ~ '_current_volume' if source in ['reset'] else name ~ '_' ~ source }}"
+                    data:
+                      value: "{{ new_volume }}"

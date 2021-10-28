@@ -1,0 +1,69 @@
+#######################################################################################################################
+## Alarm Clock Sound Play
+#######################################################################################################################
+alarm_clock_sound_play:
+  alias: "Alarm Clock Sound Play"
+  description: "Play alarm clock sound."
+  icon: mdi:alarm-note
+  mode: restart
+  fields:
+    player:
+      description: "Alarm clock media player."
+      example: media_player.dining_room_display
+    playlist:
+      description: "Alarm clock sound."
+      example: Gentle
+  variables:
+    media_url: >
+      {% if playlist == 'Rooster' %}{{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/rooster.mp3' }}
+      {% elif playlist == 'Loud' %}{{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/loud.mp3' }}
+      {% elif playlist == 'Pager' %}{{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/pager.mp3' }}
+      {% elif playlist == 'Digital' %}{{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/digital.mp3' }}
+      {% elif playlist == 'Gentle' %}{{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/gentle.mp3' }}
+      {% endif %}
+  sequence:
+    - repeat:
+        sequence:
+          - service: media_player.play_media
+            target:
+              entity_id: "{{ player }}"
+            data:
+              media_content_id: "{{ media_url }}"
+              media_content_type: music
+              extra:
+                title: "{{ playlist }}"
+                thumb: /local/images/media/alarm_clock.png
+
+          - wait_template: "{{ is_state(player,'playing') }}"
+            timeout:
+              seconds: 60
+
+          - choose: # alarm clock sound did not play
+              - conditions: "{{ not is_state(player,'playing') }}"
+                sequence:
+                  - service: input_boolean.turn_on
+                    entity_id: input_boolean.alarm_clock_failed
+            default:
+              - choose:
+                  - conditions: "{{ repeat.first }}"
+                    sequence:
+                      - service: input_text.set_value
+                        target:
+                          entity_id: input_text.active_alarm_clock_media_player
+                        data:
+                          value: "{{ player }}"
+                      #BLOOP set volume after play starts to avoid google bloop
+                      - service: script.set_media_player_volumes
+                        data:
+                          source: alarm_clock
+
+              #NOTE if media_duration doesn't register use default 30 sec so no race condition (most files around 30 sec)
+              #ERROR AttributeError: 'NoneType' object has no attribute 'resume_reading'
+              - delay: # player must start playing first to get media_duration for delay
+                  seconds: >
+                    {% set sec = state_attr(player,'media_duration')|int %}
+                    {{ 30 if sec == 0 else sec }}
+        until:
+          - condition: state
+            entity_id: binary_sensor.alarm_clock
+            state: 'off'

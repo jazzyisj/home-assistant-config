@@ -1,0 +1,79 @@
+#######################################################################################################################
+## Alarm Clock - Resume
+#######################################################################################################################
+- id: alarm_clock_resume
+  alias: "[Alarm Clock] Resume"
+  description: "Resume alarm clock play."
+  initial_state: true
+  mode: restart
+  trigger:
+    - platform: event
+      id: snooze_done
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.alarm_clock_snooze
+
+    - platform: state
+      id: tts
+      entity_id: input_boolean.tts_playing
+      to: 'off'
+
+    - platform: state
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      to: 'off'
+
+    - platform: state
+      id: hass
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+  condition:
+    - condition: state
+      entity_id: binary_sensor.alarm_clock
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    #ERROR AttributeError: 'NoneType' object has no attribute 'resume_reading'+
+    #BUG when changing settings rapidly alarm clock stuck in 30 sec default loop  (media player playing, no sound)
+    - service: script.turn_off #BUGFIX turn off script.alarm_clock_sound_play
+      entity_id: script.alarm_clock_sound_play
+
+    - choose:
+        - conditions: "{{ trigger.id == 'hass' }}"
+          sequence:
+            - delay: 10 # allow timers to restart
+
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - "{{ trigger.id == 'snooze_done' }}"
+
+                - condition: template
+                  alias: "Resumed by system restart and snooze timer is idle"
+                  value_template: "{{ is_state('timer.alarm_clock_snooze','idle') if trigger.id == 'hass' else false }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.alarm_clock_snooze_stop_action
+
+            - service: switch.turn_off
+              target:
+                entity_id: switch.alarm_clock_snooze
+
+    - service: script.turn_on
+      target:
+        entity_id: script.alarm_clock_play
+      data:
+        variables:
+          alarm_type: "{{ state_attr('binary_sensor.alarm_clock','alarm_type') }}"
+          first_run: "{{ trigger.id == 'hass' }}" # first_run at startup to set volumes
+          resume: "{{ trigger.id == 'tts' }}"
+
+

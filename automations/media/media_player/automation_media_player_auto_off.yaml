@@ -1,0 +1,65 @@
+#######################################################################################################################
+## Media Player - Auto Off
+#######################################################################################################################
+- id: media_player_auto_off #OCC
+  alias: '[Media Player] Auto Off'
+  description: "Automatically stop and turn off media players."
+  mode: restart
+  variables:
+    players: > # don't turn off tv's when alarm triggered, they switch to security cams
+      {{ expand(state_attr('sensor.media_players','single'))|rejectattr('attributes.device_class','eq','tv')
+            |map(attribute='entity_id')|list if trigger.id == 'alarm'
+          else expand(state_attr('sensor.media_players','single'))|map(attribute='entity_id')|list }}
+  trigger:
+    - platform: state
+      id: presence
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+
+    - platform: state
+      id: alarm
+      entity_id: alarm_control_panel.alarm
+      to: triggered
+  condition:
+    - condition: state
+      entity_id: input_boolean.media_player_automation
+      state: 'on'
+
+    - condition: template
+      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.radio_failed
+          - input_boolean.spotify_failed
+          - input_boolean.spotify_jason_failed
+          - input_boolean.spotify_sheri_failed
+          - input_boolean.youtube_failed
+          - input_boolean.resume_radio
+          - input_boolean.resume_spotify
+          - input_boolean.resume_spotify_jason
+          - input_boolean.resume_spotify_sheri
+          - input_boolean.resume_youtube
+
+    # - choose:
+    #     - conditions: "{{ trigger.id == 'presence' }}"
+    #       sequence:
+    #         - delay: 30 # wait until good night/alarm tts done, prevent auto resume
+
+    - choose: # stop players playing (req for browser players)
+        - conditions: "{{ expand(players)|selectattr('state','in',['playing','paused'])|list|count > 0 }}"
+          sequence:
+            - service: media_player.media_stop
+              target:
+                entity_id: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list }}"
+
+    - choose: # turn off players not off
+        - conditions: "{{ expand(players)|selectattr('state','in',['on','playing','paused','idle'])|list|count > 0 }}"
+          sequence:
+            - service: media_player.turn_off
+              target:
+                entity_id: "{{ expand(players)|selectattr('state','in',['on','playing','paused','idle'])|map(attribute='entity_id')|list }}"

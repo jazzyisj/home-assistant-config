@@ -1,76 +1,102 @@
 - binary_sensor:
-    - unique_id: lutron_connected
-      name: Lutron Connected
-      icon: > # test a lutron light for unknown status to see if lutron is connected
-        {{ 'mdi:lightbulb' if not states('light.living_room_pot_lights')|lower
-                in ['unknown','unavailable','none'] else 'mdi:alert-circle' }}
+    - name: "Lutron Connected"
+      unique_id: lutron_connected
+      icon: "{{ 'mdi:lightbulb' if not states('light.living_room_pot_lights')|lower in ['unknown','unavailable','none'] else 'mdi:alert-circle' }}"
       device_class: connectivity
-      state: "{{ not states('light.living_room_pot_lights')|lower in ['unknown','unavailable','none'] }}"
+      state: "{{ states('light.living_room_pot_lights')|lower not in ['unknown','unavailable','none'] }}"
 
-    - unique_id: lutron_connected_alert
-      name: Lutron Connected Alert
+    - name: "Lutron Connected Alert"
+      unique_id: lutron_connected_alert
       icon: mdi:lightbulb
       state: >
         {{ is_state('binary_sensor.lutron_connected','off')
-              and is_state('input_boolean.system_alerts','on')
+              and is_state('input_boolean.light_alerts','on')
               and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: lights_on
-      name: Lights On
+    - name: "Lutron Bridge Connected"
+      unique_id: lutron_bridge_connected
+      icon: "{{ 'mdi:lightbulb' if not states('light.living_room_pot_lights')|lower in ['unknown','unavailable','none'] else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: "{{ is_state('device_tracker.lutron_bridge','home') }}"
+
+    - name: "Lutron Bridge Connected Alert"
+      unique_id: lutron_bridge_connected_alert
+      icon: mdi:lightbulb
+      delay_on:
+        minutes: 15 # allow for temporary disconnections before alerting
+      state: >
+        {{ is_state('binary_sensor.lutron_bridge_connected','off')
+            and is_state('input_boolean.light_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
+    - name: "Lights On"
+      unique_id: lights_on
       icon: mdi:lightbulb
       state: >
-        {{ states.light|rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.light_group','eq',true)
-            |selectattr('state','eq','on')|list|count > 0 }}
+        {{ states.light|selectattr('state','eq','on')
+            |rejectattr('attributes.light_group','eq',true)
+            |rejectattr('attributes.rgb_control','eq',true)
+            |rejectattr('attributes.rgb_light','eq','slave')
+            |rejectattr('attributes.type','eq','volume')
+            |list|count > 0 }}
       attributes:
         entities: >
-          {{ states.light|rejectattr('attributes.rgb_control','eq',true)|rejectattr('attributes.light_group','eq',true)
-              |selectattr('state','eq','on')|map(attribute='entity_id')|list }}
+          {{ states.light|selectattr('state','eq','on')
+              |rejectattr('attributes.light_group','eq',true)
+              |rejectattr('attributes.rgb_control','eq',true)
+              |rejectattr('attributes.rgb_light','eq','slave')
+              |rejectattr('attributes.type','eq','volume')
+              |map(attribute='entity_id')|list }}
 
-    - unique_id: light_in_use
-      name: Light In Use
+    - name: "Light In Use"
+      unique_id: light_in_use
       icon: mdi:light-switch
       state: "{{ states.timer|selectattr('attributes.type','eq','light')|selectattr('state','ne','idle')|list|count > 0 }}"
       attributes:
         entities: "{{ states.timer|selectattr('attributes.type','eq','light')|selectattr('state','ne','idle')|map(attribute='entity_id')|list }}"
 
-    - unique_id: auto_light_on
-      name: Auto Light On
+    - name: "Nighttime Auto Light"
+      unique_id: nighttime_auto_light
       icon: mdi:lightbulb-on # https://www.home-assistant.io/cookbook/automation_sun/
       state: >
         {% set time = states('sensor.time') %}
-        {% set sun = states('sensor.sun_elevation')|float %}
-        {% if is_state('input_boolean.auto_light_on','on') %} true
-        {% else %}
-          {{ is_state('input_boolean.startup_pending','off')
-              and ((is_state('input_boolean.auto_light_enabled','on')
-                and (sun < states('input_number.lighting_on_sun_elevation')|int and time > '12:00')
-                or (sun < states('input_number.lighting_off_sun_elevation')|int and time < '12:00'))) }}
-        {% endif %}
+        {% set sun = states('sensor.sun_elevation')|float(default='ERROR') %}
+          {% if is_state('input_boolean.auto_light_override','on') %} true
+          {% else %}
+            {% if is_number(sun) %}
+              {{ is_state('input_boolean.startup_pending','off')
+                  and ((is_state('input_boolean.auto_light_enabled','on')
+                    and (sun < states('input_number.lighting_on_sun_elevation')|int and time > '12:00')
+                    or (sun < states('input_number.lighting_off_sun_elevation')|int and time < '12:00'))) }}
+            {% endif %}
+          {% endif %}
 
-    - unique_id: illuminance_light_on
-      name: Illuminance Light On
+    - name: "Daytime Illuminance Light"
+      unique_id: daytime_illuminance_light
       icon: mdi:lightbulb-on
       state: >
-        {{ is_state('input_boolean.illuminance_light_enabled','on')
-            and is_state('binary_sensor.auto_light_on','off')
-            and is_state('input_boolean.startup_pending','off')
-            and states('sensor.outdoor_illuminance')|int <= states('input_number.illuminance_threshold')|int }}
+        {% if is_number(states('sensor.outdoor_illuminance')) %}
+          {{ is_state('input_boolean.illuminance_light_enabled','on')
+              and is_state('binary_sensor.nighttime_auto_light','off')
+              and is_state('input_boolean.startup_pending','off')
+              and states('sensor.outdoor_illuminance')|int <= states('input_number.illuminance_threshold')|int }}
+        {% endif %}
       availability: "{{ is_state('binary_sensor.climacell_connected','on') }}"
 
-    - unique_id: light_scene_active
-      name: Light Scene Active
+    - name: "Light Scene Active"
+      unique_id: light_scene_active
       icon: mdi:home-lightbulb-outline
-      state: > # prevent auto light automations from triggering when media mode switch on
-          {{ is_state('script.morning_lights','on')
-              or is_state('script.bedtime_lights','on')
-              or is_state('switch.movie_mode','on')
-              or is_state('switch.company_mode','on') }}
+      state: >
+        {{ is_state('script.morning_lights','on')
+            or is_state('script.bedtime_lights','on')
+            or is_state('binary_sensor.scene_active','on') }}
 
 - sensor:
     - unique_id: flux_color_general
       state: >
         {% if is_state('switch.light_flux_dining_room','on') %}
-            {% if is_state('light.dining_room_rgb_light','on') %}rgb{{ state_attr('light.dining_room_rgb_light','rgb_color') }}
+            {% if is_state('light.dining_room_rgb_light','on') %}
+              rgb{{ state_attr('light.dining_room_rgb_light','rgb_color') }}
             {% else %} var(--state-icon-color)
             {% endif %}
         {% else %} var(--state-icon-color)
@@ -79,7 +105,8 @@
     - unique_id: flux_color_bathroom
       state: >
         {% if is_state('switch.light_flux_bathroom','on') %}
-            {% if is_state('light.upstairs_bathroom_vanity_rgb_light','on') %}rgb{{ state_attr('light.upstairs_bathroom_vanity_rgb_light','rgb_color') }}
+            {% if is_state('light.upstairs_bathroom_vanity_rgb_light','on') %}
+              rgb{{ state_attr('light.upstairs_bathroom_vanity_rgb_light','rgb_color') }}
             {% else %} var(--state-icon-color)
             {% endif %}
         {% else %} var(--state-icon-color)
@@ -88,53 +115,51 @@
     - unique_id: flux_color_bedroom
       state: >
         {% if is_state('switch.light_flux_bedroom','on') %}
-            {% if is_state('light.upstairs_bedroom_rgb_light','on') %}rgb{{ state_attr('light.upstairs_bedroom_rgb_light','rgb_color') }}
+            {% if is_state('light.upstairs_bedroom_rgb_light','on') %}
+              rgb{{ state_attr('light.upstairs_bedroom_rgb_light','rgb_color') }}
             {% else %} var(--state-icon-color)
             {% endif %}
         {% else %} var(--state-icon-color)
         {% endif %}
 
-    - unique_id: day_night
-      name: Day Night
+    - name: "Day Night"
+      unique_id: day_night
       icon: "{{ 'mdi:weather-sunny' if is_state('sun.sun','above_horizon') else 'mdi:weather-night' }}"
       state: "{{ 'Day' if is_state('sun.sun','above_horizon') else 'Night' }}"
 
-    - unique_id: sun_elevation
-      name: Sun Elevation
+    - name: "Sun Elevation"
+      unique_id: sun_elevation
       icon: mdi:weather-sunset
       unit_of_measurement: '°'
       state: "{{ state_attr('sun.sun','elevation') }}"
 
-    - unique_id: sun_rise
-      name: Sun Rise
+    - name: "Sun Rise"
+      unique_id: sun_rise
       icon: mdi:weather-sunset-up
-      state: "{{ as_timestamp(state_attr('sun.sun','next_rising'))|timestamp_custom('%-I:%M %p',true) }}"
+      state: "{{ as_timestamp(state_attr('sun.sun','next_rising'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}"
 
-    - unique_id: sun_set
-      name: Sun Set
+    - name: "Sun Set"
+      unique_id: sun_set
       icon: mdi:weather-sunset-down
-      state: "{{ as_timestamp(state_attr('sun.sun','next_setting'))|timestamp_custom('%-I:%M %p',true) }}"
+      state: "{{ as_timestamp(state_attr('sun.sun','next_setting'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}"
 
-    # https://github.com/pnbruckner/ha-illuminance/blob/master/custom_components/illuminance/sensor.py
     # https://community.home-assistant.io/t/outdoor-illuminance-template-sensor/228581
-    # https://github.com/pnbruckner/ha-illuminance
-
-    - unique_id: outdoor_illuminance
-      name: Outdoor Illuminance
+    - name: "Outdoor Illuminance"
+      unique_id: outdoor_illuminance #IDEA add cloudy cover factor
       device_class: illuminance
       unit_of_measurement: lx
       state: |
         {%- set sun_factor = state_attr("sensor.outdoor_illuminance","sun_factor") %}
         {%- set condition_factor = state_attr("sensor.outdoor_illuminance","condition_factor") %}
         {# Take an educated guess #}
-        {%- set illuminance = (sun_factor|float * condition_factor|float)|round %}
+        {%- set illuminance = (sun_factor|float(default=0) * condition_factor|float(default=0))|round %}
         {%- set illuminance = 10 if illuminance < 10 else illuminance %}
         {{ illuminance }}
       attributes:
-        current_condition: | #ENVCAN account for envcan conditions
+        current_condition: |
           {%- set factors = namespace(current_condition='') %}
           {#- Retrieve the current condition and normalize the value #}
-          {%- set weather_sensors = ["sensor.climacell_current_condition"] %}
+          {%- set weather_sensors = ["sensor.current_condition"] %}
           {%- for sensor in weather_sensors if states(sensor) != "unknown" and factors.current_condition == "" %}
             {%- set factors.current_condition = states(sensor) %}
           {%- endfor %}
@@ -172,5 +197,4 @@
           {%- else %}
             {%- set factors.sun = (sunset_end - right_now) / (60*60) %}
           {%- endif %}
-          {%- set factors.sun = 1 if factors.sun > 1 else factors.sun %}
-          {{ factors.sun }}
+          {{ 1 if factors.sun > 1 else factors.sun }}

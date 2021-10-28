@@ -1,0 +1,160 @@
+#######################################################################################################################
+## Media Failed
+#######################################################################################################################
+- id: media_failed
+  alias: "[Media] Failed"
+  description: "Turn on media failed boolean, turn off media player."
+  mode: parallel # more than one media type can be playing
+  variables:
+    media_type: "{{ trigger.entity_id[14:-7] if trigger.id == 'failed' else trigger.id }}"
+  trigger:
+    - platform: state
+      id: failed
+      entity_id:
+          - input_boolean.radio_failed
+          - input_boolean.spotify_failed
+          - input_boolean.spotify_jason_failed
+          - input_boolean.spotify_sheri_failed
+          - input_boolean.youtube_failed
+      to: 'on'
+
+    - platform: template
+      id: radio
+      value_template: >
+        {{ is_state('binary_sensor.radio','on')
+            and state_attr('sensor.radio_media_player','player_state') not in ['playing','paused'] }}
+      for: 10 # must be longer than delay_off for binary_sensor.radio
+
+    - platform: template
+      id: spotify
+      value_template: >
+        {{ is_state('binary_sensor.spotify','on')
+            and state_attr('sensor.spotify_media_player','player_state') not in ['playing','paused'] }}
+      for: 30 #SPOTIFY slow to change states
+
+    - platform: template
+      id: spotify_jason
+      value_template: >
+        {{ is_state('binary_sensor.spotify_jason','on')
+            and state_attr('sensor.spotify_jason_media_player','player_state') not in ['playing','paused'] }}
+      for: 30 #SPOTIFY slow to change states
+
+    - platform: template
+      id: spotify_sheri
+      value_template: >
+        {{ is_state('binary_sensor.spotify_sheri','on')
+            and state_attr('sensor.spotify_sheri_media_player','player_state') not in ['playing','paused'] }}
+      for: 30 #SPOTIFY slow to change states
+
+    - platform: template
+      id: youtube
+      value_template: >
+        {{ is_state('binary_sensor.youtube','on')
+            and state_attr('sensor.youtube_media_player','player_state') not in ['playing','paused'] }}
+      for: 10
+  condition:
+    - "{{ is_state('input_boolean.resume_' ~ media_type,'off') }}"
+
+    - condition: template
+      value_template: >
+        {% if trigger.id != 'failed' %}
+          {{ is_state('script.media_play','off') and is_state('script.media_stop','off') }}
+        {% else %} true
+        {% endif %}
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: "input_boolean.{{ media_type }}_failed"
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: "input_boolean.resume_{{ media_type }}"
+
+    - choose:
+        - conditions: "{{ states('media_player.' ~ media_type)|lower not in ['off','unknown','unavailable','none'] }}"
+          sequence:
+            - service: media_player.turn_off
+              target:
+                entity_id: "media_player.{{ media_type }}"
+
+    - variables:
+        players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','players') }}"
+
+    - repeat:
+        count: "{{ players|count }}"
+        sequence:
+          - variables:
+              player: "{{ players[repeat.index-1] }}"
+          - choose:
+              - conditions: "{{ states(player)|lower not in ['idle','off','unknown','unavailable','none'] }}"
+                sequence:
+                  - service: media_player.turn_off
+                    target:
+                      entity_id: "{{ player }}"
+
+    - service: script.tts_play
+      data:
+        message: "Attention! The {{ media_type|replace('_',' ') }} media player has failed to play!"
+        min_volume: 40
+        quiet_play: true
+
+#######################################################################################################################
+## Media Player - Media Failed Reset
+#######################################################################################################################
+- id: media_failed_reset
+  alias: "[Media] Failed Reset"
+  description: "Reset media failed."
+  mode: parallel
+  variables:
+    media_type: >
+      {% if trigger.id in ['radio','spotify','spotify_jason','spotify_sheri','youtube'] %}
+        {{ trigger.event.data['action'][0:-13] }}
+      {% else %}
+        {{ trigger.event.data['action'][14:-7] }}
+      {% endif %}
+  trigger:
+    - platform: event
+      id: radio
+      event_type: mobile_app_notification_action
+      event_data:
+        action: radio_failed_reset
+
+    - platform: event
+      id: spotify
+      event_type: mobile_app_notification_action
+      event_data:
+        action: spotify_failed_reset
+
+    - platform: event
+      id: spotify_jason
+      event_type: mobile_app_notification_action
+      event_data:
+        action: spotify_jason_failed_reset
+
+    - platform: event
+      id: spotify_sheri
+      event_type: mobile_app_notification_action
+      event_data:
+        action: spotify_sheri_failed_reset
+
+    - platform: event
+      id: youtube
+      event_type: mobile_app_notification_action
+      event_data:
+        action: youtube_failed_reset
+
+    - platform: state
+      id: boolean
+      entity_id:
+        - input_boolean.radio_failed
+        - input_boolean.spotify_failed
+        - input_boolean.spotify_jason_failed
+        - input_boolean.spotify_sheri_failed
+        - input_boolean.youtube_failed
+      to: 'on'
+      for:
+        hours: 1
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: "input_boolean.{{ media_type }}_failed"

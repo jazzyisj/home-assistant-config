@@ -1,11 +1,31 @@
-
-#######################################################################################################################
-## Light - Upstairs Bathroom Vanity Light Timer Finished
-#######################################################################################################################
-- id: light_upstairs_bathroom_vanity_light_timer_finished
-  alias: '[Light] Upstairs Bathroom Vanity Light Timer Finished'
-  description: Turn light flux back on.
+###############################################################################
+## Light - Upstairs Bathroom Vanity Light Flux Control
+###############################################################################
+- id: light_upstairs_bathroom_vanity_light_flux_control #OCC
+  alias: "[Light] Upstairs Bathroom Vanity Light Flux Control"
+  description: "Control light flux state."
+  mode: restart
   trigger:
+    - platform: state
+      entity_id: light.upstairs_bathroom_vanity_rgb_light
+      to: 'off'
+
+    - platform: state
+      entity_id: binary_sensor.upstairs_bathroom_sensor_motion
+
+    - platform: state
+      entity_id: input_boolean.shower_mode
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      from:
+        - Night
+        - Away
+        - Vacation
+
     - platform: event
       event_type: timer.finished
       event_data:
@@ -16,25 +36,39 @@
       state: 'on'
 
     - condition: state
-      entity_id: switch.shower_mode
-      state: 'off'
+      entity_id: timer.upstairs_bathroom_vanity_light
+      state: 'idle'
   action:
-    - service: switch.turn_on
-      entity_id: switch.light_flux_bathroom
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Night
 
-#######################################################################################################################
-## Light - Upstairs Bathroom Motion Lights
-#######################################################################################################################
-- id: light_upstairs_bathroom_motion_lights
-  alias: '[Light] Upstairs Bathroom Motion Lights'
-  description: Turn on lights when motion detected in bathroom.
+                - condition: state
+                  entity_id: input_boolean.shower_mode
+                  state: 'on'
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.light_flux_bathroom
+      default:
+        - service: switch.turn_on
+          target:
+            entity_id: switch.light_flux_bathroom
+
+###############################################################################
+## Light - Upstairs Bathroom Vanity Light Auto On
+###############################################################################
+- id: light_upstairs_bathroom_vanity_light_auto_on
+  alias: "[Light] Upstairs Bathroom Vanity Light Auto On"
+  description: "Turn on light."
   mode: restart
-  variables:
-    current: "{{ state_attr('light.upstairs_hallway_potlights','brightness')|int }}"
-    default: 125
-    quiet: 40
   trigger:
     - platform: state
+      id: motion
       entity_id: binary_sensor.upstairs_bathroom_sensor_motion
       to: 'on'
   condition:
@@ -45,7 +79,7 @@
     - condition: or
       conditions:
         - condition: state
-          entity_id: binary_sensor.auto_light_on
+          entity_id: binary_sensor.nighttime_auto_light
           state: 'on'
 
         - condition: numeric_state
@@ -58,45 +92,25 @@
               entity_id: input_select.occupancy_mode
               state: Night
           sequence:
-            - service: switch.turn_off
-              entity_id: switch.light_flux_bathroom
-
             - service: light.turn_on
               target:
                 entity_id: light.upstairs_bathroom_vanity_rgb_light
               data:
                 profile: red_dim
       default:
-        - service: switch.turn_on
-          entity_id: switch.light_flux_bathroom
-
         - service: light.turn_on
           target:
             entity_id: light.upstairs_bathroom_vanity_rgb_light
-          data:
-            profile: warm
-            brightness: "{{ quiet if is_state('binary_sensor.quiet_hours','on') else default }}"
 
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: binary_sensor.quiet_hours
-                  state: 'off'
-              sequence:
-                - service: light.turn_on
-                  target:
-                    entity_id: light.upstairs_bathroom_shower_light
-                  data:
-                    brightness: 70
-
-#######################################################################################################################
+###############################################################################
 ## Light - Upstairs Bathroom Vanity Light Auto Off
-#######################################################################################################################
+###############################################################################
 - id: light_upstairs_bathroom_vanity_light_auto_off #OCC
-  alias: '[Light] Upstairs Bathroom Vanity Light Auto Off'
-  description: Turn off bathroom vanity light.
+  alias: "[Light] Upstairs Bathroom Vanity Light Auto Off"
+  description: "Turn off light."
   trigger:
     - platform: state
+      id: motion
       entity_id: binary_sensor.upstairs_bathroom_sensor_motion
       to: 'off' # unknown state at startup
       from: 'on'
@@ -104,15 +118,15 @@
         minutes: 5
 
     - platform: state
+      id: presence
       entity_id: input_select.occupancy_mode
       to:
         - Away
         - Vacation
-        - Night
       for:
         minutes: 2 # allow timer to cancel, occupant to leave
 
-    - platform: state # req in case motion/timer expire during restart
+    - platform: state # req if motion/timer expire during restart
       entity_id: input_boolean.startup_pending
       to: 'off'
 
@@ -122,23 +136,25 @@
         entity_id: timer.upstairs_bathroom_vanity_light
   condition:
     - condition: state
-      entity_id: input_boolean.light_automation
+      entity_id:
+        - light.upstairs_bathroom_vanity_rgb_light
+        - input_boolean.light_automation
       state: 'on'
 
     - condition: template
-      value_template: "{{ is_state('input_boolean.presence_automation','on') if trigger.entity_id == 'input_select.occupancy_mode' else true }}"
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id == 'presence' else true }}
 
     - condition: state
-      entity_id: input_boolean.alarm_triggered
+      entity_id:
+        - input_boolean.alarm_triggered
+        - binary_sensor.upstairs_bathroom_sensor_motion
       state: 'off'
 
     - condition: state
       entity_id: timer.upstairs_bathroom_vanity_light
       state: idle
-
-    - condition: state
-      entity_id: binary_sensor.upstairs_bathroom_sensor_motion
-      state: 'off'
   action:
     - choose:
         - conditions:
@@ -146,9 +162,6 @@
               entity_id: input_select.occupancy_mode
               state: Night
           sequence:
-            - service: switch.turn_off
-              entity_id: switch.light_flux_bathroom
-
             - service: light.turn_on # turn on the light back to night mode setting
               target:
                 entity_id: light.upstairs_bathroom_vanity_rgb_light
@@ -161,4 +174,3 @@
             entity_id: light.upstairs_bathroom_vanity_rgb_light
           data:
             transition: 1
-

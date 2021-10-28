@@ -1,0 +1,81 @@
+#######################################################################################################################
+## Radio - Playlist Update
+#######################################################################################################################
+- id: radio_playlist_update
+  alias: "[Radio] Playlist Update"
+  description: "Update radio playlist input options, restore previous selection."
+  mode: restart
+  variables:
+    selected_playlists: "{{ expand('group.radio_selected_playlists')|map(attribute='entity_id')|list }}"
+    stored_playlists: "{{ expand('group.radio_stored_playlists')|map(attribute='entity_id')|list }}"
+  trigger:
+    - platform: state
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: state
+      entity_id: sensor.streaming_radio_stations
+      attribute: stations
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: &radio_automations
+          - automation.radio_store_playlist_selection # don't overwrite stored values
+          - automation.media_auto_resume # triggered by input_select.radio_playlist
+      data:
+        stop_actions: false
+
+    - service: input_select.set_options
+      target:
+        entity_id: &radio_selects
+          - input_select.radio_playlist
+          - input_select.media_preset_radio_wake
+          - input_select.media_preset_radio_morning
+          - input_select.media_preset_radio_sleep
+          - input_select.media_preset_radio_jason
+          - input_select.media_preset_radio_sheri
+          - input_select.media_preset_radio_guest
+          - input_select.media_preset_radio_shower
+          - input_select.media_preset_radio_chill
+          - input_select.media_preset_radio_company
+          - input_select.alarm_clock_radio_auto
+          - input_select.alarm_clock_radio_manual
+          - input_select.alarm_clock_radio_nap
+      data:
+        options: >
+          [{% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
+            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+
+    - repeat: # restore previous selection (values reset when options reloaded)
+        count: "{{ selected_playlists|count }}"
+        sequence:
+          - choose:
+              - conditions: "{{ states(stored_playlists[repeat.index-1])|lower not in ['','unknown','unavailable','none'] }}"
+                sequence:
+                  - service: input_select.select_option
+                    target:
+                      entity_id: "{{ selected_playlists[repeat.index-1] }}"
+                    data:
+                      option: "{{ states(stored_playlists[repeat.index-1]) }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: *radio_automations
+
+#######################################################################################################################
+## Radio - Store Playlist Selection
+#######################################################################################################################
+- id: radio_store_playlist_selection
+  alias: "[Radio] Store Playlist Selection"
+  description: "Update stored radio playlist selection."
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: *radio_selects
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: "{{ trigger.entity_id|replace('input_select','input_text') }}"
+      data:
+        value: "{{ states(trigger.entity_id) }}"

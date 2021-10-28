@@ -1,10 +1,47 @@
 #######################################################################################################################
-## Schedule - Garbage Day Alert
+## Schedule - Waste Collection On
+#######################################################################################################################
+- id: schedule_waste_collection_on
+  alias: "[Schedule] Waste Collection On"
+  description: "Turn on waste collection alert boolean."
+  mode: parallel # allow 2 on same day
+  variables:
+    waste_type: "{{ trigger.entity_id[12:-4] }}"
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.next_garbage_day
+        - sensor.next_recycle_day
+        - sensor.next_yardwaste_day
+      to: Tomorrow
+
+    - platform: state
+      entity_id:
+        - sensor.next_garbage_day
+        - sensor.next_recycle_day
+        - sensor.next_yardwaste_day
+      from: Tomorrow
+  action:
+    - choose:
+        - conditions: "{{ is_state(trigger.entity_id,'Tomorrow') }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.{{ waste_type }}_alert"
+      default:
+        - service: input_boolean.turn_off
+          target:
+            entity_id: "input_boolean.{{ waste_type }}_alert"
+
+#######################################################################################################################
+## Schedule - Waste Collection Alert
 ## - default to afternoons time so we get notification early in day if shift unknown
 #######################################################################################################################
-- id: schedule_garbage_day_alert
-  alias: "[Schedule] Garbage Day Alert"
-  description: Play TTS announcement.
+- id: schedule_waste_collection_alert
+  alias: "[Schedule] Waste Collection Alert"
+  description: "Play TTS announcement."
+  variables:
+    waste_type: "{{ trigger.entity_id[12:-4] }}"
   trigger:
     - platform: template
       value_template: >
@@ -12,83 +49,34 @@
             else is_state('sensor.time','11:00') }}
   condition:
     - condition: state
-      entity_id: sensor.next_garbage_day
+      entity_id:
+        - sensor.next_garbage_day
+        - sensor.next_recycle_day
+        - sensor.next_yardwaste_day
       state: Tomorrow
   action:
     - service: script.tts_play
       data:
-        play_message: Don't forget to take out the garbage today!
+        message: "Don't forget to take out the {{ waste_type }} today!"
         save_message: true
 
     - service: script.waste_collection_alert
       data:
-        waste_type: Garbage
-
-#######################################################################################################################
-## Schedule - Recycle Day Alert
-## - default to afternoons time so we get notification early in day if shift unknown
-#######################################################################################################################
-- id: schedule_recycle_day_alert
-  alias: "[Schedule] Recycle Day Alert"
-  description: Play TTS announcement.
-  trigger:
-    - platform: template
-      value_template: >
-          {{ is_state('sensor.time','18:00') if is_state('sensor.current_shift','Days')
-            else is_state('sensor.time','11:00') }}
-  condition:
-    - condition: state
-      entity_id: sensor.next_recycle_day
-      state: Tomorrow
-  action:
-    - service: script.tts_play
-      data:
-        play_message: Don't forget to take out the recycle today!
-        save_message: true
-
-    - service: script.waste_collection_alert
-      data:
-        waste_type: Recycle
-
-#######################################################################################################################
-## Schedule - Yard Waste Day Alert
-## - default to afternoons time so we get notification early in day if shift unknown
-#######################################################################################################################
-- id: schedule_yardwaste_day_alert
-  alias: "[Schedule] Yard Waste Day Alert"
-  description: Play TTS announcement.
-  trigger:
-    - platform: template
-      value_template: >
-          {{ is_state('sensor.time','18:00') if is_state('sensor.current_shift','Days')
-            else is_state('sensor.time','11:00') }}
-  condition:
-    - condition: state
-      entity_id: sensor.next_yardwaste_day
-      state: Tomorrow
-  action:
-    - service: script.tts_play
-      data:
-        play_message: Don't forget to take out the yardwaste today!
-        save_message: true
-
-    - service: script.waste_collection_alert
-      data:
-        waste_type: Yardwaste
+        waste_type: "{{ waste_type }}"
 
 #######################################################################################################################
 ## Schedule - Close Waste Collection Notification
 #######################################################################################################################
 - id: schedule_close_waste_collection_notification
   alias: "[Schedule] Close Waste Collection Notification"
-  description: Dismiss notifications on all devices.
+  description: "Dismiss notifications on all devices."
   mode: parallel
   variables:
       waste_type: >
         {% if trigger.entity_id == 'sensor.next_garbage_day' or trigger.id == 'garbage' %} garbage
         {% elif trigger.entity_id == 'sensor.next_recycle_day' or trigger.id == 'recycle' %} recycle
         {% elif trigger.entity_id == 'sensor.next_yardwaste_day' or trigger.id == 'yardwaste' %} yardwaste
-        {% endif %}}
+        {% endif %}
   trigger:
     - platform: state
       entity_id:
@@ -101,19 +89,19 @@
       id: garbage
       event_type: mobile_app_notification_action
       event_data:
-        action: close_garbage_collection
+        action: garbage_done
 
     - platform: event
       id: recycle
       event_type: mobile_app_notification_action
       event_data:
-        action: close_recycle_collection
+        action: recycle_done
 
     - platform: event
       id: yardwaste
       event_type: mobile_app_notification_action
       event_data:
-        action: close_yardwaste_collection
+        action: yardwaste_done
 
   action:
     - service: input_boolean.turn_off
@@ -125,4 +113,3 @@
         message: clear_notification
         data:
           tag: "{{ waste_type }}_collection"
-

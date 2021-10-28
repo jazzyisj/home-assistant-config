@@ -186,10 +186,10 @@ class CustomFanPercentRow extends Polymer.Element {
 				}	
 			}
 		} else {
-			offSetpoint = parseInt(OffSetpoint);
-			lowSetpoint =  parseInt(LowSetpoint);
-			medSetpoint = parseInt(MedSetpoint);
-			hiSetpoint = parseInt(HiSetpoint);
+			offSetpoint = 0 //parseInt(OffSetpoint);
+			lowSetpoint = 33 //parseInt(LowSetpoint);
+			medSetpoint = 66 //parseInt(MedSetpoint);
+			hiSetpoint = 100 //parseInt(HiSetpoint);
 			if (stateObj && stateObj.attributes) {
 				if (stateObj.state == 'on' && stateObj.attributes.percentage >= 17 && stateObj.attributes.percentage <= 50) {
 					low = 'on';

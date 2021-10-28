@@ -34,7 +34,8 @@
         {% endif %}
   action:
     - service: script.turn_on
-      entity_id: script.scene_bedtime
+      target:
+        entity_id: script.bedtime
 
 #######################################################################################################################
 ## Schedule - Bedtime Clear Notification
@@ -81,7 +82,8 @@
         action: bedtime_delayed
   action:
     - service: input_boolean.turn_on
-      entity_id: input_boolean.bedtime_delayed
+      target:
+        entity_id: input_boolean.bedtime_delayed
 
 #######################################################################################################################
 ## Schedule - Bedtime Delayed On
@@ -98,8 +100,7 @@
     - condition: state
       entity_id:
         - input_boolean.alarm_triggered
-        - switch.company_mode
-        - switch.movie_mode
+        - binary_sensor.scene_active
       state: 'off'
   action:
     - choose:
@@ -112,7 +113,8 @@
                 - Vacation
           sequence:
             - service: input_boolean.turn_off
-              entity_id: input_boolean.bedtime_delayed
+              target:
+                entity_id: input_boolean.bedtime_delayed
 
             - service: browser_mod.toast
               data:
@@ -134,27 +136,28 @@
                     duration:
                       minutes: "{{ states('input_number.stay_awake_delay')|int }}"
 
+                - service: script.turn_on
+                  target:
+                    entity_id: script.tts_play
+                  data:
+                    variables:
+                      message: |
+                        {%- set bedtime =  as_timestamp(state_attr('timer.bedtime_delay','finishes_at'))|timestamp_custom('%-I:%M %p',true,'ERROR') -%}
+                        Your bedtime has been delayed by {{ states('input_number.stay_awake_delay')|int }} minutes.
+                        I'll check with you again at {{ bedtime }}.
+
         - service: script.turn_on
           target:
             entity_id: script.tts_play
           data:
             variables:
-              play_message: |
+              message: |
                 {%- set delay_s = states('input_number.stay_awake_delay')|int * 60 -%}
-                {%- set bed_ts = as_timestamp((states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|as_datetime) -%}
-
-                {%- if is_state('binary_sensor.bedtime_active','on') -%}
-                {%- set date = states('sensor.date') -%}
-                {%- set new_time = (as_timestamp(now()) + delay_s)|timestamp_custom('%-I:%M %p', true) -%}
-                Your bedtime has been delayed by {{ states('input_number.stay_awake_delay')|int }} minutes.
-                I'll check with you again at {{ new_time }}.
-
-                {% else %}
-                {%- set new_time = (bed_ts + delay_s)|timestamp_custom('%-I:%M %p', true) -%}
+                {%- set bed_ts = as_timestamp((states('sensor.date') ~ ' ' ~ states('sensor.bedtime_today'))|as_datetime,'ERROR') -%}
+                {%- set bedtime = (bed_ts + delay_s)|timestamp_custom('%-I:%M %p', true,'ERROR') -%}
                 You've elected to stay up past your bedtime today.
                 I've delayed your bedtime by {{ states('input_number.stay_awake_delay')|int }} minutes.
-                I'll check up on you at {{ new_time }} to see if you've come to your senses yet.
-                {% endif %}
+                I'll check up on you at {{ bedtime }} to see if you've come to your senses yet.
               quiet_play: true
               min_volume: 35
 
@@ -179,11 +182,6 @@
         entity_id: timer.bedtime_delay
 
     - platform: event
-      event_type: timer.cancelled
-      event_data:
-        entity_id: timer.bedtime_delay
-
-    - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: bedtime_delay_off
@@ -191,20 +189,19 @@
     - condition: state
       entity_id:
         - input_boolean.alarm_triggered
-        - script.scene_bedtime
+        - script.bedtime
       state: 'off'
   action:
     - choose:
         - conditions:
             - condition: state
-              alias: "Media mode switch is on"
-              entity_id:
-                - switch.company_mode
-                - switch.movie_mode
+              alias: "Scene is active"
+              entity_id: binary_sensor.scene_active
               state: 'on'
           sequence:
             - service: input_boolean.turn_on
-              entity_id: input_boolean.bedtime_delayed
+              target:
+                entity_id: input_boolean.bedtime_delayed
 
             - service: browser_mod.toast
               data:
@@ -218,7 +215,8 @@
             stop_actions: false
 
         - service: input_boolean.turn_off
-          entity_id: input_boolean.bedtime_delayed
+          target:
+            entity_id: input_boolean.bedtime_delayed
 
         - service: automation.turn_on
           target:
@@ -238,13 +236,13 @@
                             entity_id: script.tts_play
                           data:
                             variables:
-                              play_message: |
+                              message: |
                                 Are you still awake? I'm going to turn the lights off soon!
                                 Let me know if you'd like to stay up a while longer.
                               quiet_play: true
                               min_volume: 35
 
-                        - delay: # last chance to turn on bedtime delay
+                        - delay:
                             minutes: "{{ states('input_number.bedtime_delay')|int }}"
 
                         - condition: state
@@ -252,4 +250,5 @@
                           state: 'off'
 
                 - service: script.turn_on
-                  entity_id: script.scene_bedtime
+                  target:
+                    entity_id: script.bedtime
