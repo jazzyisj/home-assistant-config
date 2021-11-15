@@ -5,6 +5,8 @@
   alias: "[Media Player] Mute All"
   description: "Mute media players, display mute message."
   mode: restart
+  variables:
+    media_sensors: "{{ state_attr('group.media_sensors','entity_id') }}"
   trigger:
     - platform: state
       entity_id: input_boolean.mute_all
@@ -52,6 +54,7 @@
                       data:
                         duration: 30000
                         message: "Sytem mute has been turned off."
+
       default:
         - service: media_player.volume_mute
           target:
@@ -62,21 +65,21 @@
             is_volume_muted: true
 
         - choose:
-            - conditions: "{{ states('input_number.timed_mute_duration')|int > 0 }}"
+            - conditions: "{{ states('input_number.timed_mute_duration')|int(0) > 0 }}"
               sequence:
                 - service: timer.start
                   target:
                     entity_id: timer.timed_mute_duration
                   data:
                     duration:
-                      minutes: "{{ states('input_number.timed_mute_duration')|int }}"
+                      minutes: "{{ states('input_number.timed_mute_duration')|int(0) }}"
 
         - service: browser_mod.toast
           data:
             duration: 30000
             message: >
-              {% set hours = states('input_number.timed_mute_duration')|int // 60 %}
-              {% set minutes = states('input_number.timed_mute_duration')|int % 60 %}
+              {% set hours = states('input_number.timed_mute_duration')|int(0) // 60 %}
+              {% set minutes = states('input_number.timed_mute_duration')|int(0) % 60 %}
               Sytem mute has been turned on
               {{- ' for ' if hours > 0 or minutes > 0 -}}
               {{- hours ~ ' hours' if hours > 0 -}}
@@ -94,25 +97,25 @@
                   entity_id: input_boolean.mute_all
                   state: 'on'
 
-        - service: script.media_stop # call direct for reset_volume
-          data:
-            media_type: radio
-            reset_volume: false # prevent mute from turning off
+        - repeat:
+            count: "{{ media_sensors|count }}"
+            sequence:
+              - choose:
+                  - conditions: "{{ is_state(media_sensors[repeat.index-1],'on') }}"
+                    sequence:
+                      - service: script.media_stop # call direct for reset_volume
+                        data:
+                          media_type: "{{ media_sensors[repeat.index-1][14:] }}"
 
-        - service: script.media_stop
-          data:
-            media_type: spotify
-            reset_volume: false
-
-        - service: script.media_stop
-          data:
-            media_type: youtube
-            reset_volume: false
-
-        - service: script.alarm_clock_stop
-          data:
-            media_type: alarm_clock
-            reset_volume: false
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: binary_sensor.alarm_clock
+                  state: 'on'
+              sequence:
+                - service: script.alarm_clock_stop
+                  data:
+                    alarm_type: "{{ state_attr('binary_sensor.alarm_clock','alarm_type') }}"
 
         - choose: # skip if startup, duplicates automation.media_player_volume_reset
             - conditions: "{{ trigger.entity_id == 'input_boolean.mute_all' }}"

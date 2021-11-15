@@ -1,0 +1,195 @@
+#######################################################################################################################
+## Garage Door Open Alert
+#######################################################################################################################
+- id: garage_door_extended_open_alert
+  alias: '[Garage Door] Extended Open Alert'
+  description: 'Send notification, play announcement.'
+  trigger:
+    - platform: state
+      entity_id: cover.garage_door_opener
+      to: open
+      for:
+        minutes: 20
+  condition:
+    - condition: state
+      entity_id: input_boolean.garage_door_automation
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.garage_door_open_alert
+
+    - repeat:
+        sequence:
+          - variables:
+              open_time: >
+                {{ states.cover.garage_door_opener.last_changed.timestamp()
+                    |timestamp_custom('%-I:%M %p','unknown') }}
+              open_duration: >
+                {% set seconds = now().timestamp() - states.cover.garage_door_opener.last_changed.timestamp() %}
+                {%- set TIME_MAP = {
+                    'w': (seconds / 604800) % 604800,
+                    'd': (seconds / 86400) % 7,
+                    'h': (seconds / 3600) % 24,
+                    'm': (seconds / 60) % 60,
+                    's': (seconds % 60) } -%}
+                {%- if TIME_MAP.w|int > 0 %}{{ TIME_MAP.w|int ~ ' weeks'}}, {% endif %}
+                {%- if TIME_MAP.d|int > 0 %}{{ TIME_MAP.d|int ~ ' days'}}, {% endif %}
+                {%- if TIME_MAP.h|int > 0 %}{{ TIME_MAP.h|int ~ ' hours'}}, {% endif %}
+                {%- if TIME_MAP.m|int > 0 %}{{ TIME_MAP.m|int ~ ' minutes'}}{% endif %}
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_announcements
+                    state: 'on'
+                sequence:
+                  - service: script.tts_play
+                    data:
+                      message: |
+                        The garage door was opened at {{ open_time }}.
+                        It has been open for {{ open_duration }}.
+                      min_volume: 30
+                      quiet_play: true
+                      save_message: true
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_alerts
+                    state: 'on'
+                sequence:
+                  - service: notify.jason
+                    data:
+                      title: 'Garage Door Open'
+                      message: |
+                        Garage door has been open for {{ open_duration }}.
+                        Opened at: {{ open_time }}
+                      data:
+                        tag: garage_door_open
+                        group: Alert
+                        channel: Alert
+                        importance: max
+                        ttl: 0
+                        priority: high
+                        clickAction: /lovelace/garage
+                        color: !secret WARNING_COLOR
+                        icon_url: !secret GARAGE_OPEN_ICON
+                        actions:
+                          - action: close_garage_door
+                            title: 'Close Door'
+                          - action: turn_off_garage_door_alert
+                            title: 'Turn Alert Off'
+
+          - wait_template: "{{ not is_state('cover.garage_door_opener','open') }}"
+            timeout: # cancel delay if alert turned off
+              minutes: 15 # delay before repeat
+        until:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: cover.garage_door_opener
+                state: open
+
+#######################################################################################################################
+## Garage Door - Error
+#######################################################################################################################
+- id: garage_door_error
+  alias: '[Garage Door] Error'
+  description: 'Notify on garage door error.'
+  mode: restart
+  variables:
+    garage_error: >
+      {% set msg = trigger.event.data.message %}
+      {% if 'cover.open_cover' in msg[0] and 'cover.garage_door_opener' in msg[0] %}
+        open
+      {% elif 'cover.close_cover' in msg[0] and 'cover.garage_door_opener' in msg[0] %}
+        close
+      {% endif %}
+  trigger:
+    - platform: event
+      event_type: system_log_event
+      event_data:
+        level: ERROR
+  condition: "{{ garage_error not in ['','[]',empty] }}"
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: 'input_boolean.garage_door_{{ garage_error }}_alert'
+    - repeat:
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_alerts
+                    state: 'on'
+                sequence:
+                  - service: notify.mobile
+                    data:
+                      title: 'Garage Door Alert'
+                      message: >
+                        You must now {{ garage_error }} the door manually
+                        with the garage door control panel or remote button to reset the controller.
+                      data:
+                        tag: garage_door_alert
+                        subject: 'The garage door was not able to {{ garage_error }}!'
+                        group: Alert
+                        channel: Alert
+                        importance: max
+                        ttl: 0
+                        priority: high
+                        timeout: 600
+                        color: !secret NOTIFY_COLOR
+                        icon_url: !secret HASSIO_ICON
+                        actions:
+                          - action: turn_off_garage_door_alert
+                            title: 'Turn Alert Off'
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_announcements
+                    state: 'on'
+                sequence:
+                  - service: script.tts_play
+                    data:
+                      message: >
+                        Attention!
+                        The garage door was not able to {{ garage_error }}!
+                        You must now {{ garage_error }} the door manually
+                        with the garage door control panel or remote button to reset the controller.
+                      ignore_away: true
+                      quiet_play: true
+
+          - wait_template: >
+              {{ is_state('input_boolean.garage_door_close_alert','off')
+                  and is_state('input_boolean.garage_door_open_alert','off') }}
+            timeout: # cancel delay if alert turned off
+              minutes: 5 # delay before repeat
+
+        until: >
+          {{ is_state('input_boolean.garage_door_close_alert','off')
+              and is_state('input_boolean.garage_door_open_alert','off') }}
+
+#######################################################################################################################
+## Garage Door - Turn Off Alert
+#######################################################################################################################
+- id: garage_door_turn_off_alert
+  alias: '[Garage Door] Turn Off Alert'
+  description: 'Turn off garage door alert booleans.'
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_garage_door_alert
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.garage_door_close_alert
+          - input_boolean.garage_door_open_alert

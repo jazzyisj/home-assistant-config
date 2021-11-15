@@ -3,29 +3,32 @@
 #######################################################################################################################
 - id: media_auto_resume
   alias: "[Media] Auto Resume"
-  description: "Restart media after announcement, alarm clock, or spotify settings are changed."
+  description: "Resume media."
+  initial_state: true
   mode: queued
   max: 5
   max_exceeded: error
   variables:
-    media_types: "{{ ['radio','spotify','spotify_jason','spotify_sheri','youtube'] }}"
+    media_sensors: "{{ state_attr('group.media_sensors','entity_id') }}"
+    media_types: >
+      {% set media_types = namespace(value=[]) %}
+      {% for sensor in media_sensors %}
+        {% set media_types.value = media_types.value + [sensor[14:]] %}
+      {% endfor %}
+      {{ media_types.value }}
     media_resume: >
-      {% if trigger.entity_id in ['input_boolean.startp_pending','input_boolean.tts_playing','binary_sensor.alarm_clock'] %} all
-      {% elif is_state('binary_sensor.radio','on')
-          and trigger.entity_id in ['input_select.radio_media_player','input_select.radio_playlist'] %} radio
-      {% elif is_state('binary_sensor.spotify','on')
-          and trigger.entity_id in ['input_select.spotify_media_player','input_select.spotify_playlist'] %} spotify
-      {% elif is_state('binary_sensor.spotify_jason','on')
-          and trigger.entity_id in ['input_select.spotify_jason_media_player','input_select.spotify_jason_playlist'] %} spotify_jason
-      {% elif is_state('binary_sensor.spotify_sheri','on')
-          and trigger.entity_id in ['input_select.spotify_sheri_media_player','input_select.spotify_sheri_playlist'] %} spotify_sheri
-      {% elif is_state('binary_sensor.youtube','on')
-          and trigger.entity_id in ['input_select.youtube_media_player','input_select.youtube_playlist'] %} youtube
-      {% else %} none
+      {% if trigger.entity_id in ['input_boolean.startp_pending',
+          'input_boolean.tts_playing','binary_sensor.alarm_clock'] %} all
+      {% else %}
+        {% for sensor in media_sensors %}
+          {% set media_type = media_types[loop.index0] %}
+          {% if is_state(sensor,'on') and trigger.entity_id
+              in ['input_select.' ~ media_type ~ '_media_player',
+                    'input_select.' ~ media_type ~ '_playlist' ] %}
+            {{ media_type }}
+          {% endif %}
+        {% endfor %}
       {% endif %}
-    speaker_groups: "{{ state_attr('sensor.media_players','group') }}"
-    alarm_player: "{{ states('sensor.alarm_clock_media_player') }}"
-    alarm_group: "{{ state_attr('sensor.alarm_clock_media_player','players') }}"
   trigger:
     - platform: state
       id: playlist
@@ -60,25 +63,27 @@
       entity_id: input_boolean.tts_playing
       to: 'off'
   condition:
-    - "{{ media_resume != 'none' }}"
+    - condition: template
+      value_template: "{{ media_resume != '' }}"
 
-    - "{{ is_state('binary_sensor.radio','on')
-          or is_state('binary_sensor.spotify','on')
-          or is_state('binary_sensor.spotify_jason','on')
-          or is_state('binary_sensor.spotify_sheri','on')
-          or is_state('binary_sensor.youtube','on') }}"
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state:
+        - Home
+        - Guest
   action:
     - repeat:
-        count: "{{ media_types|count }}"
+        count: "{{ media_sensors|count }}"
         sequence:
           - variables:
-              media_type: "{{ media_types[repeat.index -1] }}"
-              # must use active media player text input - sensor value has already changed to new player
+              media_type: "{{ media_sensors[repeat.index -1][14:] }}"
+              #NOTE use active media player - sensor value has already changed to new player
               player: "{{ states('input_text.active_' ~ media_type ~ '_media_player') }}"
               players: > # if players|count > 0 player is a group
-                {% if player|lower not in ['','unknown','unavailable','none'] %}
+                {% if player|lower not in ['','off','unknown','unavailable','none'] %}
                   {% set players = expand(state_attr('sensor.media_players','players'))
-                      |selectattr('attributes.' ~ player.split('.')[1],'eq',true)|map(attribute='entity_id')|list %}
+                      |selectattr('attributes.' ~ player.split('.')[1],'eq',true)
+                      |map(attribute='entity_id')|list %}
                   {{ [player] if players|count == 0 else players }}
                 {% else %} []
                 {% endif %}
@@ -86,37 +91,45 @@
               - conditions: > # player changed, turn off old players
                   {{ media_type == media_resume
                       and trigger.id == 'player'
-                      and expand(players)|selectattr('state','in',['playing','paused','idle'])|list|count > 0 }}
+                      and expand(players)|selectattr('state','in',['playing','paused','idle'])
+                        |list|count > 0 }}
                 sequence:
                   - service: media_player.turn_off
                     target:
                       entity_id: "{{ players }}"
 
                   - wait_template: > # wait here until all media_type players are off
-                      {{ expand(players)|selectattr('state','in',['playing','paused','idle'])|list|count == 0 }}
+                      {{ expand(players)|selectattr('state','in',['playing','paused','idle'])
+                        |list|count == 0 }}
                     timeout: 15
 
-    - repeat: #IDEA can we make this more efficient?
-        count: "{{ media_types|count }}"
+    - repeat:
+        count: "{{ media_sensors|count }}"
         sequence:
           - variables:
-              media_type: "{{ media_types[repeat.index -1] }}"
+              media_type: "{{ media_sensors[repeat.index -1][14:] }}"
 
           - choose:
               - conditions:
                   - condition: template
-                    alias: Resuming media play or resuming all and media type is on.
+                    alias: Resuming media play or resuming all and media type resume is on.
                     value_template: >
                       {{ media_type == media_resume
-                          or (media_resume == 'all' and is_state('binary_sensor.' ~ media_type,'on')) }}
+                          or (media_resume == 'all' and
+                                is_state('input_boolean.resume_' ~ media_type,'on')) }}
 
                   - condition: template
                     alias: Trigger media player is not an active alarm clock media player
                     value_template: >
+                      {% set media_sensor = states('sensor.' ~ media_type ~ '_media_player') %}
+                      {% set speaker_groups = state_attr('sensor.media_players','group') %}
+                      {% set alarm_player = states('sensor.alarm_clock_media_player') %}
+                      {% set alarm_group = state_attr('sensor.alarm_clock_media_player','players') %}
+
                       {% if is_state('binary_sensor.alarm_clock','on') %}
                         {% set found = namespace(value=0) %}
-                        {% set media_player = states('sensor.' ~ media_type ~ '_media_player') %}
-                        {% set media_group = state_attr('sensor.' ~ media_type ~ '_media_player','players') %}
+                        {% set media_player = media_sensor %}
+                        {% set media_group = state_attr(media_sensor,'players') %}
                         {% if media_player in speaker_groups %}
                           {% for item in media_group %}
                             {% if alarm_player in speaker_groups %}
@@ -136,7 +149,7 @@
                             {% set found.value = 1 %}
                           {% endif %}
                         {% endif %}
-                        {{ found.value|int != 1 }}
+                        {{ found.value|int(0) != 1 }}
                       {% else %} true
                       {% endif %}
                 sequence:

@@ -10,35 +10,18 @@ media_play:
   max_exceeded: error
   fields:
     media_type:
-      description: "Media type to play. (radio, spotify, youtube)"
-      example: spotify
+      description: "Media type to play."
+      example: "spotify"
     resume:
       description: "Resume media play option."
-      example: playlist
+      example: "playlist"
   variables:
     resume: "{{ resume|default(false) }}"
-    media_types: "{{ ['radio','spotify','spotify_jason','spotify_sheri','youtube'] }}"
     speaker_groups: "{{ state_attr('sensor.media_players','group') }}"
-    radio_player: "{{ states('sensor.radio_media_player') }}"
-    spotify_player: >
-      {{ expand(state_attr('sensor.media_players','players'))
-          |selectattr('name','eq',states('input_select.spotify_media_player'))|map(attribute='entity_id')|list|join('') }}
-    spotify_jason_player: >
-      {{ expand(state_attr('sensor.media_players','players'))
-          |selectattr('name','eq',states('input_select.spotify_jason_media_player'))|map(attribute='entity_id')|list|join('') }}
-    spotify_sheri_player: >
-      {{ expand(state_attr('sensor.media_players','players'))
-          |selectattr('name','eq',states('input_select.spotify_sheri_media_player'))|map(attribute='entity_id')|list|join('') }}
-    youtube_player: "{{ states('sensor.youtube_media_player') }}"
-    alarm_player: "{{ states('sensor.alarm_clock_media_player') }}"
-    alarm_players: "{{ state_attr('sensor.alarm_clock_media_player','players') }}"
     player: >
-      {% if media_type == 'radio' %}{{ radio_player }}
-      {% elif media_type == 'spotify' %}{{ spotify_player }}
-      {% elif media_type == 'spotify_jason' %}{{ spotify_jason_player }}
-      {% elif media_type == 'spotify_sheri' %}{{ spotify_sheri_player }}
-      {% elif media_type == 'youtube' %}{{ youtube_player }}
-      {% endif %}
+      {{ expand(state_attr('sensor.media_players','players'))
+          |selectattr('name','eq',states('input_select.' ~ media_type ~ '_media_player'))
+          |map(attribute='entity_id')|list|join('') }}
     players: >
       {{ state_attr('sensor.' ~ player.split('.')[1],'players')
           if is_state_attr(player,'type','group') else [player] }}
@@ -66,9 +49,11 @@ media_play:
                   state: 'on'
 
                 - condition: template
-                  alias: "Target media player is not playing an alarm clock"
+                  alias: "Target media player is an active alarm clock media player"
                   value_template: >
                     {% if is_state('binary_sensor.alarm_clock','on') %}
+                      {% set alarm_player = states('sensor.alarm_clock_media_player') %}
+                      {% set alarm_players = state_attr('sensor.alarm_clock_media_player','players') %}
                       {% set found = namespace(value=0) %}
                       {% if player in speaker_groups %}
                         {% for pitem in players %}
@@ -85,10 +70,14 @@ media_play:
                           {% set found.value = 1 %}
                         {% endif %}
                       {% endif %}
-                      {{ found.value|int == 1 }}
+                      {{ found.value == 1 }}
                     {% else %} false
                     {% endif %}
           sequence:
+            - service: script.media_stop
+              data:
+                media_type: "{{ media_type }}"
+
             - service: browser_mod.toast
               data:
                 duration: 30000
@@ -101,7 +90,9 @@ media_play:
                   {% endif %}
                   {{ message }}
       default:
-        - wait_template: "{{ is_state('input_boolean.tts_playing','off') and is_state('script.media_stop','off') }}"
+        - wait_template: >
+            {{ is_state('input_boolean.tts_playing','off')
+                and is_state('script.media_stop','off') }}
           timeout:  # wait for tts/previous stop script to finish
             seconds: 300
 
@@ -127,7 +118,7 @@ media_play:
                           message: "Your media selection will play when the mobile speakerphone in use has been turned off."
                           quiet_play: true
                           media_player: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
-                          min_volume: "{{ states('input_number.' ~ media_type ~ '_volume')|int }}"
+                          min_volume: "{{ states('input_number.' ~ media_type ~ '_volume')|int(0) }}"
 
                     - wait_template: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on',false) }}"
                       timeout:
@@ -137,15 +128,14 @@ media_play:
             - variables:
                 media_on: >
                   {% set media_on = namespace(value=[]) %}
-                  {% for type in media_types %}
-                    {% if is_state('binary_sensor.' ~ type,'on')  %}
+                  {% set media_sensors = state_attr('group.media_sensors','entity_id') %}
+                  {% for sensor in media_sensors %}
+                    {% set media_type = media_sensors[loop.index0][14:] %}
+                    {% if is_state(sensor,'on') %}
                       {% set found = namespace(value=0) %}
-                      {% if type == 'radio' %}{% set old_player = radio_player %}
-                      {% elif type == 'spotify' %}{% set old_player = spotify_player %}
-                      {% elif type == 'spotify_jason' %}{% set old_player = spotify_jason_player %}
-                      {% elif type == 'spotify_sheri' %}{% set old_player = spotify_sheri_player %}
-                      {% elif type == 'youtube' %}{% set old_player = youtube_player %}
-                      {% endif %}
+                      {% set old_player = expand(state_attr('sensor.media_players','players'))
+                          |selectattr('name','eq',states('input_select.' ~ media_type ~ '_media_player'))
+                          |map(attribute='entity_id')|list|join('') %}
                       {% set old_sensor = 'sensor.' ~ old_player.split('.')[1] %}
                       {% if player in speaker_groups %}
                         {% for pitem in players %}
@@ -167,7 +157,7 @@ media_play:
                         {% endif %}
                       {% endif %}
                       {% if found.value == 1 %}
-                        {% set media_on.value = media_on.value + [type] %}
+                        {% set media_on.value = media_on.value + [media_type] %}
                       {% endif %}
                     {% endif %}
                   {% endfor %}
@@ -183,31 +173,27 @@ media_play:
                               media_on_type: "{{ media_on[repeat.index-1] }}"
                               media_on_players: "{{ state_attr('sensor.' ~ media_on_type ~ '_media_player','players') }}"
 
-                          - service: media_player.turn_off
-                            target:
-                              entity_id: "{{ expand(media_on_players)|map(attribute='entity_id')|list }}"
+                          - service: script.media_stop
+                            data:
+                              media_type: "{{ media_on_type }}"
 
-                          - choose: #RADIO until streaming radio media player
-                              - conditions: "{{ media_on_type == 'radio' }}"
-                                sequence:
-                                  - service: input_boolean.turn_off
-                                    target:
-                                      entity_id: input_boolean.radio
+                          - wait_template: "{{ expand(media_on_players)|selectattr('state','in',['playing','paused','idle','unknown','unavailable'])|list|count == 0 }}"
+                            timeout: 30
 
-                          - wait_template: "{{ expand(media_on_players)|selectattr('state','in',['playing','paused','idle'])|list|count == 0 }}"
-                            timeout: 60
-
-            - choose: # check if player available, if speaker group check state for each media_player
-                - conditions: >
-                    {% if is_state_attr(player,'type','group') %}
-                      {% set found = namespace(value=0) %}
-                      {% for item in players -%}
-                        {% if states(item)|lower in ['unknown','unavailable','none'] %}{% set found.value = 1 %}{% endif %}
-                      {% endfor %}
-                      {{ found.value|int == 1 }}
-                    {% else %}
-                      {{ states(player)|lower in ['unknown','unavailable','none'] }}
-                    {% endif %}
+            - choose:
+                - conditions:
+                    - condition: template
+                      alias: "Media player is unavailable"
+                      value_template: > # if speaker group check state for each media_player
+                        {% if is_state_attr(player,'type','group') %}
+                          {% set found = namespace(value=0) %}
+                          {% for item in players -%}
+                            {% if states(item)|lower in ['unknown','unavailable','none'] %}{% set found.value = 1 %}{% endif %}
+                          {% endfor %}
+                          {{ found.value|int(0) == 1 }}
+                        {% else %}
+                          {{ states(player)|lower in ['unknown','unavailable','none'] }}
+                        {% endif %}
                   sequence:
                     - service: input_boolean.turn_on
                       target:
@@ -227,16 +213,25 @@ media_play:
                           data:
                             volume_level: 0 #BLOOP set volumes to 0 before media play avoid google bloops
 
-                - service: "script.{{ 'spotify' if 'spotify' in media_type else media_type }}_play" # jason/sheri = spotify
+                - service: script.turn_on
+                  target: #SPOTIFY jason/sheri = spotify
+                    entity_id: "script.{{ 'spotify' if 'spotify' in media_type else media_type }}_play"
                   data:
-                    resume: "{{ resume }}"
+                    variables:
+                      resume: "{{ resume }}"
 
-                - wait_template: "{{ is_state(player,'playing') }}"
+                - wait_for_trigger:
+                    - platform: template
+                      value_template: "{{  is_state(player,'playing')  }}"
+                      for: 2 # media players can momentarily show playing state even if media doesn't play (streaming radio)
                   timeout:
-                    seconds: 30 #SPOTIFY slow
+                    seconds: 15 #SPOTIFY slow
 
-                - choose: # turn on media failed boolean if media player doesn't play
-                    - conditions: "{{ not wait.completed }}"
+                - choose:
+                    - conditions:
+                        - condition: template
+                          alias: "Media player is did not play"
+                          value_template: "{{ not is_state(player,'playing') }}"
                       sequence:
                         - service: input_boolean.turn_on
                           target:
@@ -246,21 +241,30 @@ media_play:
                       target: # turn of after play starts so we don't trigger fail
                         entity_id: "input_boolean.resume_{{ media_type }}"
 
-                    - service: input_text.set_value
-                      target:
-                        entity_id: "input_text.active_{{ media_type }}_media_player"
-                      data:
-                        value: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
+                    - wait_template: "{{ player == states('sensor.' ~ media_type ~ '_media_player') }}"
+                      timeout: 15 #SPOTIFY wait for sensor to populate
 
-                    - choose:
-                        - conditions: "{{ resume != 'playlist' }}"
+                    - choose: # don't set input_text/run set volumes if sensor not valid,
+                        - conditions: "{{ wait.completed }}"
                           sequence:
-                            - service: script.set_media_player_volumes
+                            - service: input_text.set_value
+                              target:
+                                entity_id: "input_text.active_{{ media_type }}_media_player"
                               data:
-                                source: "{{ media_type ~ '_tts' if resume == 'tts' else media_type }}"
+                                value: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
 
-                    - condition: template #RADIO until streaming radio media player
-                      value_template: "{{ media_type == 'radio' }}"
+                            - service: input_boolean.turn_off
+                              target:
+                                entity_id: "input_boolean.{{ media_type }}_failed"
 
-                    - service: input_boolean.turn_on
-                      entity_id: input_boolean.radio
+                            - choose:
+                                - conditions: "{{ resume != 'playlist' }}"
+                                  sequence:
+                                    - service: script.set_media_player_volumes
+                                      data:
+                                        media_players: "{{ players }}"
+                                        source: "{{ media_type ~ '_tts' if resume == 'tts' else media_type }}"
+                      default:
+                        - service: input_boolean.turn_on
+                          target:
+                            entity_id: "input_boolean.{{ media_type }}_failed"

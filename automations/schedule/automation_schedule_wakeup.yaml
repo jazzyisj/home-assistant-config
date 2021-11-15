@@ -1,12 +1,19 @@
-#######################################################################################################################
+###############################################################################
 ## Schedule - Wakeup
-#######################################################################################################################
+## triggers on next_waketime and again on auto alarm time if still override/night mode
+## #NOTE can't determine phone/google alarm state, house wakes up whether phone/google alarm snoozed/turned off or not
+## auto alarm will not run if wakeup manually called before waketime (Home mode)
+###############################################################################
 - id: schedule_wakeup
-  alias: "[Schedule] Wakeup"
-  description: "Play alarm clock, run wake up routine."
+  alias: '[Schedule] Wakeup'
+  description: 'Play alarm clock, run wake up routine.'
   trigger:
-    - platform: template # will trigger on waketime today if before auto alarm time and again on auto alarm time if still override/night mode
-      value_template: "{{ is_state('sensor.time',states('sensor.waketime_today')) or is_state('sensor.time',states('sensor.alarm_clock_auto')) }}"
+    - platform: template
+      value_template: >
+        {% if states('sensor.next_waketime')|lower not in ['','off','unknown','unavailable','none'] %}
+          {% set time = now().replace(second=0,microsecond=0).isoformat() %}
+          {{ time == states('sensor.next_waketime') or time == states('sensor.alarm_clock_auto') }}
+        {% endif %}
   condition:
     - condition: state
       entity_id:
@@ -14,7 +21,7 @@
         - binary_sensor.someone_home
       state: 'on'
 
-    - condition: state # auto alarm will not run if wakeup manually called before waketime (Home mode)
+    - condition: state
       entity_id: input_select.occupancy_mode
       state: Night
 
@@ -31,38 +38,47 @@
 
             - condition: template
               value_template: >
-                {% if is_state('binary_sensor.owner_home','off') %}{{ is_state('input_boolean.alarm_clock_guest','on') }}
-                {% else %}{{ is_state('input_boolean.alarm_clock_auto_workdays','on') if is_state('binary_sensor.work_today','on') else is_state('input_boolean.alarm_clock_auto_weekends','on') }}
+                {% if is_state('binary_sensor.owner_home','off') %}
+                  {{ is_state('input_boolean.alarm_clock_guest','on') }}
+                {% else %}
+                  {{ is_state('input_boolean.alarm_clock_auto_workdays','on')
+                      if is_state('binary_sensor.work_today','on')
+                        else is_state('input_boolean.alarm_clock_auto_weekends','on') }}
                 {% endif %}
           sequence:
             - service: switch.turn_on
               entity_id: switch.alarm_clock_auto
 
+            # wait for alarm clock to turn on
             - wait_template: "{{ is_state('binary_sensor.alarm_clock','on') }}"
-              timeout: 120 # wait for alarm clock to turn on
+              timeout: 120
 
+            # wait for alarm clock to turn back off, wake house up after an hour even if alarm clock still on
             - wait_template: "{{ is_state('binary_sensor.alarm_clock','off') }}"
-              timeout: # wait for alarm clock to turn off, wake house up after an hour even if alarm clock still on
+              timeout:
                 minutes: 60
 
-            #NOTE can't determine phone alarm state, house wakes up whether phone alarm snoozed/turned off or not
-
     - condition: template # these are not in conditions so the auto alarm clock can still function
-      alias: Run if workday/weekend/guest morning routine is enabled is on.
+      alias: Wake up enabled.
       value_template: >
-        {% if is_state('sensor.waketime_today','Off') %} false
-        {% elif is_state('binary_sensor.owner_home','off') %}{{ is_state('input_boolean.guest_morning','on') }}
-        {% else %}{{ is_state('input_boolean.workday_morning','on') if is_state('binary_sensor.work_today','on') else is_state('input_boolean.weekend_morning','on') }}
+        {% if is_state('sensor.next_waketime','off') %}
+          false
+        {% elif is_state('binary_sensor.owner_home','off') %}
+          {{ is_state('input_boolean.guest_morning','on') }}
+        {% else %}
+          {{ is_state('input_boolean.workday_morning','on')
+              if is_state('binary_sensor.work_today','on')
+                else is_state('input_boolean.weekend_morning','on') }}
         {% endif %}
 
     - service: script.wake_up
 
-#######################################################################################################################
+###############################################################################
 ## Schedule - Manual Wake Up
-#######################################################################################################################
+###############################################################################
 - id: schedule_manual_wake_up #OCC
-  alias: "[Schedule] Manual Wake Up"
-  description: "Someone is up before alarm and has manually selected Home/Guest mode."
+  alias: '[Schedule] Manual Wake Up'
+  description: 'Someone is up before alarm and has manually selected Home/Guest mode.'
   trigger:
     - platform: state
       entity_id: input_select.occupancy_mode
@@ -81,10 +97,10 @@
       state: 'off'
 
     - condition: template
-      alias: After 4am and before scheduled wake time, default to house waketime if waketime_today is Off
+      alias: After 4am and before scheduled wake time, default to house waketime if next_waketime is Off
       value_template: >
         {{ '4:00' < states('sensor.time') < states('input_datetime.house_waketime')[0:5]
-          if is_state('sensor.waketime_today','Off') else states('sensor.waketime_today') }}
+          if is_state('sensor.next_waketime','off') else states('sensor.next_waketime') }}
 
     - condition: template
       value_template: >

@@ -2,11 +2,11 @@
 ## Presence - Override Auto On Home
 #######################################################################################################################
 - id: presence_override_auto_on_home
-  alias: "[Presence] Override Auto On Home"
-  description: "Turn on override booleans when alarm unlocked by code if person tracker not home."
+  alias: '[Presence] Override Auto On Home'
+  description: 'Turn on override booleans when alarm unlocked by code if person tracker not home.'
   mode: parallel
   variables:
-    person: "{{ trigger.to_state.state[10:-1]|lower }}"
+    person: '{{ trigger.to_state.state[10:-1]|lower }}'
     owner: "{{ person in ['jason','sheri'] }}"
   trigger:
     - platform: state
@@ -34,15 +34,15 @@
       state: 'on'
 
     - "{{ (is_state('input_boolean.guest_home','off') if not owner
-            else is_state('binary_sensor.' ~ person ~ '_home','off'))
-           and is_state(trigger.entity_id,'Unlocked (' ~ person|title ~ ')') }}"
+      else is_state('binary_sensor.' ~ person ~ '_home','off'))
+      and is_state(trigger.entity_id,'Unlocked (' ~ person|title ~ ')') }}"
   action:
     - choose:
-        - conditions: "{{ owner }}" # person still shows home
+        - conditions: '{{ owner }}' # person still shows home
           sequence:
             - service: input_boolean.turn_on
               target:
-                entity_id: "input_boolean.home_override_{{ person }}"
+                entity_id: 'input_boolean.home_override_{{ person }}'
 
     - service: input_boolean.turn_on
       target:
@@ -52,11 +52,11 @@
 ## Presence - Override Auto On Away
 #######################################################################################################################
 - id: presence_override_auto_on_away
-  alias: "[Presence] Override Auto On Away"
-  description: "Turn override on, turn presence boolean off if locked by keypad and tracker still home."
+  alias: '[Presence] Override Auto On Away'
+  description: 'Turn override on, turn presence boolean off if locked by keypad and tracker still home.'
   mode: parallel
   variables:
-    person: "{{ trigger.to_state.state[8:-1]|lower }}"
+    person: '{{ trigger.to_state.state[8:-1]|lower }}'
     owner: "{{ person in ['jason','sheri'] }}"
   trigger:
     - platform: state
@@ -80,11 +80,11 @@
     - "{{ is_state('binary_sensor.' ~ person ~ '_home','on') if owner else is_state('input_boolean.guest_home','on') }}"
   action:
     - choose:
-        - conditions: "{{ owner }}"
+        - conditions: '{{ owner }}'
           sequence:
             - service: input_boolean.turn_on
               target:
-                entity_id: "input_boolean.home_override_{{ person }}"
+                entity_id: 'input_boolean.home_override_{{ person }}'
 
     - service: input_boolean.turn_off
       target:
@@ -94,10 +94,16 @@
 ## Presence - Reset Override
 #######################################################################################################################
 - id: presence_reset_override
-  alias: "[Presence] Reset Override"
-  description: "Reset override boolean when tracker to/from home."
+  alias: '[Presence] Reset Override'
+  description: 'Reset override boolean when tracker to/from home.'
+  mode: parallel
   variables:
-    person: "{{ trigger.entity_id.split('.')[1] }}"
+    person: > #VERIFY
+      {% if trigger.id == 'action' %}
+        {{ event.data['action'][27:] }}
+      {% else %}
+        {{ trigger.entity_id.split('.')[1] }}
+      {% endif %}
   trigger:
     - platform: state
       entity_id:
@@ -110,6 +116,19 @@
         - person.jason
         - person.sheri
       from: home
+
+    - platform: event
+      id: action
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_presence_override_jason
+
+    - platform: event
+      id: action
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_presence_override_sheri
+
   condition:
     - condition: state
       entity_id: input_boolean.presence_automation
@@ -119,32 +138,42 @@
   action:
     - service: input_boolean.turn_off
       target:
-        entity_id: "input_boolean.home_override_{{ person }}"
+        entity_id: 'input_boolean.home_override_{{ person }}'
 
 #######################################################################################################################
 ## Presence - Override Alert
 #######################################################################################################################
 - id: presence_override_alert
-  alias: "[Presence] Override Alert"
-  description: "Play notification when presence override boolean turns on."
+  alias: '[Presence] Override Alert'
+  description: 'Play notification when presence override boolean turns on.'
+  mode: parallel
   trigger:
     - platform: state
       entity_id:
         - input_boolean.home_override_jason
         - input_boolean.home_override_sheri
+      to: 'on'
       for:
         minutes: 5 # allow override to turn off before notifications
-  action:
-    - service: browser_mod.toast
-      data:
-        message: >
-          {% if trigger.entity_id == 'input_boolean.home_override_jason' %}
-              Jason's presence override has been turned {{ states('input_boolean.home_override_jason') }}.
-          {% elif trigger.entity_id == 'input_boolean.home_override_sheri' %}
-              Sheri's presence override has been turned {{ states('input_boolean.home_override_sheri') }}.
-          {% endif %}
-        duration: 30000
 
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      for:
+        minutes: 10
+  condition:
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: input_boolean.home_override_jason
+          state: 'on'
+
+        - condition: state
+          entity_id: input_boolean.home_override_sheri
+          state: 'on'
+  action:
     - service: script.tts_play
       data:
         message: |
@@ -157,33 +186,31 @@
         ignore_away: true
 
 #######################################################################################################################
-## Presence - Turn Off Presence Override
+## Presence - Pause Presence Override Jason Alert
 #######################################################################################################################
-- id: presence_turn_off_presence_override
-  alias: "[Presence] Turn Off Presence Override"
-  description: "Turn off override booleans."
+- id: presence_pause_presence_override_jason_alert
+  alias: '[Presence] Pause Presence Override Jason Alert'
+  description: 'Pause alert.'
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
-        action: turn_off_presence_override
-  action:
-    - service: input_boolean.turn_off
-      entity_id:
-        - input_boolean.home_override_jason
-        - input_boolean.home_override_sheri
-
-#######################################################################################################################
-## Presence - Pause Presence Override Alert
-#######################################################################################################################
-- id: presence_pause_presence_override_alert
-  alias: "[Presence] Pause Presence Override Alert"
-  description: "Pause alert."
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: pause_presence_override
+        action: pause_presence_override_jason
   action:
     - service: alert.turn_off
-      entity_id: alert.presence_override
+      entity_id: alert.presence_override_jason
+
+#######################################################################################################################
+## Presence - Pause Presence Override Sheri Alert
+#######################################################################################################################
+- id: presence_pause_presence_override_sheri_alert
+  alias: '[Presence] Pause Presence Override Sheri Alert'
+  description: 'Pause alert.'
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_presence_override_sheri
+  action:
+    - service: alert.turn_off
+      entity_id: alert.presence_override_sheri

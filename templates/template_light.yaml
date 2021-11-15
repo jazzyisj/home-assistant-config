@@ -33,12 +33,9 @@
       unique_id: lights_on
       icon: mdi:lightbulb
       state: >
-        {{ states.light|selectattr('state','eq','on')
-            |rejectattr('attributes.light_group','eq',true)
-            |rejectattr('attributes.rgb_control','eq',true)
-            |rejectattr('attributes.rgb_light','eq','slave')
-            |rejectattr('attributes.type','eq','volume')
-            |list|count > 0 }}
+        {% if state_attr('binary_sensor.lights_on','entities')|lower not in ['unknown','unavailable','none'] %}
+          {{ state_attr('binary_sensor.lights_on','entities')|count > 0 }}
+        {% endif %}
       attributes:
         entities: >
           {{ states.light|selectattr('state','eq','on')
@@ -51,7 +48,10 @@
     - name: "Light In Use"
       unique_id: light_in_use
       icon: mdi:light-switch
-      state: "{{ states.timer|selectattr('attributes.type','eq','light')|selectattr('state','ne','idle')|list|count > 0 }}"
+      state: >
+        {% if state_attr('binary_sensor.light_in_use','entities')|lower not in ['unknown','unavailable','none'] %}
+          {{ state_attr('binary_sensor.light_in_use','entities')|count > 0 }}
+        {% endif %}
       attributes:
         entities: "{{ states.timer|selectattr('attributes.type','eq','light')|selectattr('state','ne','idle')|map(attribute='entity_id')|list }}"
 
@@ -60,14 +60,14 @@
       icon: mdi:lightbulb-on # https://www.home-assistant.io/cookbook/automation_sun/
       state: >
         {% set time = states('sensor.time') %}
-        {% set sun = states('sensor.sun_elevation')|float(default='ERROR') %}
+        {% set sun = states('sensor.sun_elevation')|float('unknown') %}
           {% if is_state('input_boolean.auto_light_override','on') %} true
           {% else %}
             {% if is_number(sun) %}
               {{ is_state('input_boolean.startup_pending','off')
-                  and ((is_state('input_boolean.auto_light_enabled','on')
-                    and (sun < states('input_number.lighting_on_sun_elevation')|int and time > '12:00')
-                    or (sun < states('input_number.lighting_off_sun_elevation')|int and time < '12:00'))) }}
+                  and is_state('input_boolean.auto_light_enabled','on')
+                  and ((sun < states('input_number.lighting_on_sun_elevation')|int(0) and time > '12:00')
+                    or (sun < states('input_number.lighting_off_sun_elevation')|int(0) and time < '12:00')) }}
             {% endif %}
           {% endif %}
 
@@ -79,7 +79,7 @@
           {{ is_state('input_boolean.illuminance_light_enabled','on')
               and is_state('binary_sensor.nighttime_auto_light','off')
               and is_state('input_boolean.startup_pending','off')
-              and states('sensor.outdoor_illuminance')|int <= states('input_number.illuminance_threshold')|int }}
+              and states('sensor.outdoor_illuminance')|int(0) <= states('input_number.illuminance_threshold')|int(0) }}
         {% endif %}
       availability: "{{ is_state('binary_sensor.climacell_connected','on') }}"
 
@@ -136,12 +136,12 @@
     - name: "Sun Rise"
       unique_id: sun_rise
       icon: mdi:weather-sunset-up
-      state: "{{ as_timestamp(state_attr('sun.sun','next_rising'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}"
+      state: "{{ state_attr('sun.sun','next_rising')|as_timestamp('unknown')|timestamp_custom('%-I:%M %p') }}"
 
     - name: "Sun Set"
       unique_id: sun_set
       icon: mdi:weather-sunset-down
-      state: "{{ as_timestamp(state_attr('sun.sun','next_setting'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}"
+      state: "{{ state_attr('sun.sun','next_setting')|as_timestamp('unknown')|timestamp_custom('%-I:%M %p') }}"
 
     # https://community.home-assistant.io/t/outdoor-illuminance-template-sensor/228581
     - name: "Outdoor Illuminance"
@@ -152,7 +152,7 @@
         {%- set sun_factor = state_attr("sensor.outdoor_illuminance","sun_factor") %}
         {%- set condition_factor = state_attr("sensor.outdoor_illuminance","condition_factor") %}
         {# Take an educated guess #}
-        {%- set illuminance = (sun_factor|float(default=0) * condition_factor|float(default=0))|round %}
+        {%- set illuminance = (sun_factor|float(0) * condition_factor|float(0))|round %}
         {%- set illuminance = 10 if illuminance < 10 else illuminance %}
         {{ illuminance }}
       attributes:

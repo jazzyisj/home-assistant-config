@@ -2,59 +2,116 @@
 ## Alarm Clock Stop
 #######################################################################################################################
 alarm_clock_stop:
-  alias: Alarm Clock Stop
-  description: Turn off and reset alarm clock.
+  alias: "Alarm Clock Stop"
+  description: "Turn off alarm clock."
   icon: mdi:alarm-note-off
   max_exceeded: silent
   fields:
-    reset_volume:
-      description: Reset media player volumes. (false for mute all - turns mute off)
-      example: 'false'
+    alarm_type:
+      description: "Alam clock type."
+      example: "nap"
   variables:
-    reset_volume: "{{ reset_volume|default(true) }}"
+    alarm_types: "{{ ['auto','manual','nap'] }}"
+    alarm_type: "{{ alarm_type if alarm_type not in ['',empty] else state_attr('binary_sensor.alarm_clock','alarm_type') }}"
+    media_type: "{% if alarm_type in alarm_types %}{{ states('input_select.alarm_clock_sound_' ~ alarm_type)|lower }}{% endif %}"
+    player: "{{ states('input_text.active_alarm_clock_media_player') }}"
+    players: >
+      {% if player|lower not in ['','off','unknown','unavailable','none'] %}
+        {% if is_state_attr('media_player.' ~ player.split('.')[1],'type','group') %}
+          {% set players = state_attr('sensor.' ~ player.split('.')[1],'players') %}
+        {% endif %}
+        {{ [player] if players|count == 0 else players }}
+      {% endif %}
   sequence:
-    - service: script.turn_off # must turn off - might be running in sound loop
-      entity_id: script.alarm_clock_sound_play
-
-    - service: timer.cancel
-      entity_id:
-        - timer.alarm_clock_snooze
-        - timer.alarm_clock_nap
-
-    - service: script.alarm_clock_active_media_player_off
-
     - choose:
-        - conditions: "{{ reset_volume }}"
+        - conditions:
+            - condition: template
+              alias: "Alarm type is valid"
+              value_template: "{{ alarm_type in alarm_types }}"
           sequence:
-            - service: script.set_media_player_volumes
-              data:
-                source: alarm_clock_off
+            - choose:
+                - conditions:
+                    - condition: template
+                      alias: "Alarm type is not active alarm"
+                      value_template: "{{ alarm_type != state_attr('binary_sensor.alarm_clock','alarm_type') }}"
+                  sequence:
+                    - service: switch.turn_off
+                      alias: "Turn off not active alarm clock switch"
+                      target:
+                        entity_id: "switch.alarm_clock_{{ alarm_type }}"
+              default:
+                - choose:
+                    - conditions: "{{ alarm_type == 'nap' }}"
+                      sequence:
+                        - service: timer.cancel
+                          target:
+                            entity_id: timer.alarm_clock_nap
 
-    # turn off at end so binary_sensor.alarm_clock doesn't turn off and resume media before we're done
-    - service: switch.turn_off
-      entity_id:
-        - switch.alarm_clock_auto
-        - switch.alarm_clock_manual
-        - switch.alarm_clock_nap
-        - switch.alarm_clock_snooze
+                        - service: input_boolean.turn_off
+                          target:
+                            entity_id: input_boolean.alarm_clock_nap
 
-    - service: automation.turn_off
-      entity_id: automation.alarm_clock_off
+                - choose:
+                    - conditions: "{{ expand(players)|selectattr('state','in',['playing','paused'])|list|count > 0 }}"
+                      sequence:
+                        - service: media_player.media_stop
+                          alias: "Stop alarm clock media players" # req for browser players
+                          target:
+                            entity_id: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list }}"
 
-    - service: input_boolean.turn_off
-      entity_id:
-        - input_boolean.alarm_clock_nap
-        - input_boolean.resume_alarm_clock
-        - input_boolean.alarm_clock_test_play
+                - choose:
+                    - conditions: "{{ expand(players)|selectattr('state','in',['idle','playing','paused'])|list|count > 0 }}"
+                      sequence:
+                        - service: media_player.turn_off
+                          alias: "Turn of alarm clock media players"
+                          target:
+                            entity_id: "{{ expand(players)|selectattr('state','in',['idle','playing','paused'])|map(attribute='entity_id')|list }}"
 
-    - service: input_text.set_value
-      target:
-        entity_id: input_text.active_alarm_clock_media_player
-      data:
-        value: ''
+                - service: timer.cancel
+                  target:
+                    entity_id: timer.alarm_clock_snooze
 
-    - service: automation.turn_on
-      entity_id:
-        - automation.alarm_clock_off
-        - automation.alarm_clock_media_player_turned_off # req if alarm failed
-        - automation.alarm_clock_media_player_paused # req if alarm failed
+                - service: input_boolean.turn_off
+                  target:
+                    entity_id:
+                      - input_boolean.resume_alarm_clock
+                      - input_boolean.alarm_clock_test_play
+
+                - service: switch.turn_off
+                  target:
+                    entity_id: switch.alarm_clock_snooze
+
+                - service: input_text.set_value
+                  target:
+                    entity_id: input_text.active_alarm_clock_media_player
+                  data:
+                    value: 'off'
+
+                - choose: #RADIO until streaming radio media player
+                    - conditions: "{{ media_type == 'radio' }}"
+                      sequence:
+                        - service: input_boolean.turn_off
+                          target:
+                            entity_id: input_boolean.radio
+                - choose:
+                    - conditions: "{{ not is_state('media_player.ytube_music_player','off') }}" #YOUTUBE
+                      sequence:
+                        - service: media_player.media_stop  # doesn't turn off
+                          target:
+                            entity_id: media_player.ytube_music_player
+
+                # turn off at end so binary_sensor.alarm_clock doesn't turn off and resume media before we're done
+                - service: switch.turn_off
+                  target:
+                    entity_id: "switch.alarm_clock_{{ alarm_type }}"
+
+                - service: script.set_media_player_volumes
+                  data:
+                    media_players: "{{ state_attr('sensor.media_players','single') }}"
+                    source: alarm_clock_off
+      default:
+        - service: system_log.write #IDEA where else do this?
+          data:
+            level: error
+            logger: "{{ this.entity_id }}"
+            message: "No active alarm or invalid alarm type."

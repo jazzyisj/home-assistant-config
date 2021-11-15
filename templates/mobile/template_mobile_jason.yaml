@@ -1,30 +1,39 @@
+###############################################################################
+## Templates - Mobile Jason
+## Jason Headphones MAC - 00:18:6B:97:9B:B9
+## UConnect MAC - 48:A9:D2:E5:12:66
+###############################################################################
 - binary_sensor:
-    - name: "Jason Phone Connected"
+    - name: 'Jason Phone Connected'
       unique_id: jphone_connected
       icon: "{{ 'mdi:cellphone-wireless' if is_state('binary_sensor.jphone_connected','on') else 'mdi:cellphone-off' }}"
       device_class: connectivity
-      state: > # bluetooth/wifi connected or last GPS update less than 30 minutes ago
-        {% set time = as_timestamp(now()) %}
-        {% set last_updated = as_timestamp(states.sensor.jphone_last_update_trigger.last_updated) %}
-        {% set last_gps = as_timestamp(states.device_tracker.jphone.last_updated) %}
-        {% set last_seen = as_timestamp(state_attr('device_tracker.jason_tracker','last_seen')) %}
+      state:
+        > # bluetooth/wifi connected or last GPS update less than 30 minutes ago
+        {% set time = now().timestamp() %}
+        {% set last_updated = states.sensor.jphone_last_update_trigger.last_updated.timestamp() %}
+        {% set last_gps = states.device_tracker.jphone.last_updated.timestamp() %}
+        {% set last_seen = state_attr('device_tracker.jason_tracker','last_seen').timestamp() %}
         {% set update_min = (time - last_updated)/60 %}
         {% set gps_min = (time - last_gps)/60 %}
         {% set seen_min = (time - last_seen)/60 %}
-        {% set min_since_update = [update_min,gps_min,seen_min]|min|int %}
+        {% set min_since_update = [update_min,gps_min,seen_min]|min|int(0) %}
         {{ is_state('device_tracker.jphone_bt','home')
-            or is_state('device_tracker.jphone_ping','home')
-            or is_state('device_tracker.jphone_wifi2','home')
-            or is_state('device_tracker.jphone_wifi5','home')
+            or is_state('device_tracker.jason_phone_wifi','home')
+            or is_state('device_tracker.jason_phone_router_wifi','home')
             or min_since_update < 30 }}
       attributes:
-        last_seen: "{{ as_timestamp(state_attr('device_tracker.jason_tracker','last_seen'))|timestamp_custom('%H:%M',true,'ERROR') }}"
-        last_updated: "{{ as_timestamp(states.sensor.jphone_last_update_trigger.last_updated)|timestamp_custom('%-I:%M %p',true,'ERROR') }}"
+        last_seen: >
+          {{ state_attr('device_tracker.jason_tracker','last_seen')
+              |as_timestamp('unknown')|timestamp_custom('%-I:%M %p','unknown') }}
+        last_updated: >
+          {{ states.sensor.jphone_last_update_trigger.last_updated
+              |as_timestamp('unknown')|timestamp_custom('%-I:%M %p') }}
         minutes_since_update: >
-          {% set last_updated = as_timestamp(states.sensor.jphone_last_update_trigger.last_updated) %}
-          {% set last_seen = as_timestamp(states.device_tracker.jphone.last_updated) %}
+          {% set last_updated = states.sensor.jphone_last_update_trigger.last_updated.timestamp() %}
+          {% set last_seen = states.device_tracker.jphone.last_updated.timestamp() %}
           {% set last_updated = [last_updated,last_seen]|min %}
-          {{ ((as_timestamp(now()) - last_updated)/60)|int }}
+          {{ ((now().timestamp() - last_updated)/60)|int(0) }}
       availability: >
         {{ states('device_tracker.jason_tracker')|lower not in ['unknown','unavailable','none']
             and not state_attr('device_tracker.jason_tracker','source_type')|lower == 'none'
@@ -39,7 +48,7 @@
       state: >
         {{ (is_state('sensor.jphone_do_not_disturb_sensor','priority_only')
               or is_state('sensor.jphone_ringer_mode','off')
-              or (states('sensor.jphone_volume_level_ringer')|int < 1 and not is_state('sensor.jphone_phone_state','offhook')))
+              or (states('sensor.jphone_volume_level_ringer')|int(0) < 1 and not is_state('sensor.jphone_phone_state','offhook')))
             and not is_state('binary_sensor.quiet_hours','on')
             and not is_state('input_select.occupancy_mode','Night')
             and is_state('input_boolean.mobile_alerts','on') }}
@@ -53,7 +62,7 @@
       delay_on:
         minutes: 5
 
-    - name: "Jason WIFI Connected"
+    - name: 'Jason WIFI Connected'
       unique_id: jphone_wifi
       icon: mdi:cellphone-wireless
       state: "{{ states('sensor.jphone_wifi_connection') in ['JNET2','JNET-ROUTER'] }}"
@@ -67,11 +76,11 @@
       delay_on:
         minutes: 5
 
-    - name: "Jason Phone High Accuracy Alert"
+    - name: 'Jason Phone High Accuracy Alert'
       #BUG sensor not turning on when command sent from HA  https://github.com/jazzyisj/home-assistant-config/issues/34
       unique_id: jphone_high_accuracy_alert
       icon: mdi:crosshairs-gps
-      state: > # 48:A9:D2:E5:12:66 is uconnect
+      state: >
         {{ is_state('binary_sensor.jphone_high_accuracy_mode','on')
             and not is_state('binary_sensor.commute_active','on')
             and not is_state('binary_sensor.jphone_is_charging','on')
@@ -97,12 +106,12 @@
     - unique_id: jphone_battery_alert
       state: >
         {% set level = 50 if is_state('binary_sensor.prework_active','on') else 20 %}
-        {{ states('sensor.jphone_battery_level')|int < level and is_state('binary_sensor.jphone_is_charging','off')
+        {{ states('sensor.jphone_battery_level')|int(0) < level and is_state('binary_sensor.jphone_is_charging','off')
             and is_state('input_boolean.mobile_alerts','on') }}
       delay_on:
         minutes: 15
 
-    - name: "Jason Mobile App Update"
+    - name: 'Jason Mobile App Update'
       unique_id: jphone_app_update
       icon: "{{ 'mdi:check-circle' if is_state('binary_sensor.jphone_app_update','off') else 'mdi:alert-circle' }}"
       state: "{{ states('sensor.ha_companion_latest_version') != states('sensor.jphone_current_version') }}"
@@ -114,18 +123,20 @@
             and states('sensor.ha_companion_latest_version')|lower not in ['unknown','unavailable','none'] }}
 
 - sensor:
-    - name: "Jason Phone Alarm Clock"
+    - name: 'Jason Phone Alarm Clock'
       unique_id: jphone_alarm_clock
       icon: mdi:alarm
       state: >
-        {% if states('sensor.jphone_next_alarm')|lower in ['','unavailable','unknown','none']
-            or is_state('input_boolean.jphone_alarm_clock_enabled','off') %} Off
-        {% elif (as_timestamp(states('sensor.jphone_next_alarm'),'ERROR') - as_timestamp(now())) > 86400 %} Off
-        {% else %}{{ as_timestamp(states('sensor.jphone_next_alarm'),'ERROR')|timestamp_custom('%H:%M',true,'ERROR') }}
+        {% if states('sensor.jphone_next_alarm')|lower in ['','unknown','unavailable','none']
+            or is_state('input_boolean.jphone_alarm_clock_enabled','off') %} off
+        {% elif (states('sensor.jphone_next_alarm')|as_timestamp - now().timestamp()) > 86400 %} off
+        {% else %}
+          {{ as_datetime(states('sensor.jphone_next_alarm')|as_timestamp|timestamp_custom('%Y-%m-%d %H:%M:%S%z','unknown')).isoformat() }}
         {% endif %}
       attributes:
         12hour: >
-          {% if is_state('sensor.jphone_alarm_clock','Off') %} Off
-          {% else %}{{ as_timestamp(states('sensor.date') ~ ' ' ~ states('sensor.jphone_alarm_clock'),'ERROR')|timestamp_custom('%-I:%M %p',true,'ERROR') }}
+          {% if states('sensor.jphone_next_alarm')|lower in ['','unknown','unavailable','none']
+            or is_state('input_boolean.jphone_alarm_clock_enabled','off') %} off
+          {% else %}{{ states('sensor.jphone_next_alarm')|as_timestamp('unknown')|timestamp_custom('%Y-%m-%d %H:%M:%S%z','unknown') }}
           {% endif %}
       availability: "{{ states('sensor.jphone_next_alarm') not in ['unknown','none'] }}"

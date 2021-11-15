@@ -1,14 +1,29 @@
 #######################################################################################################################
-## Hass - Log Level Changed
+## Hass - Log Level Selection
 #######################################################################################################################
-- id: hass_log_level_changed
-  alias: "[Hass] Log Level Changed"
+- id: hass_log_level_selection
+  alias: "[Hass] Log Level Selection"
   description: "Change system log level to set value."
   variables:
-    level: "{{ states('input_select.log_level') }}"
+    level: >
+      {% if trigger.entity_id == 'binary_sensor.wan_connected_alert'
+          and is_state('binary_sensor.wan_connected_alert','on') %} critical
+      {% else %} {{ states('input_select.log_level') }}
+      {% endif %}
   trigger:
     - platform: state
       entity_id: input_select.log_level
+
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: state
+      entity_id: binary_sensor.wan_connected_alert
+  condition:
+    - condition: state
+      entity_id: input_boolean.startup_pending
+      state: 'off'
   action:
     - service: logger.set_default_level
       data:
@@ -22,32 +37,17 @@
           sequence:
             - service: system_log.write
               data:
-                message: "***** HASS LOG LEVEL SET TO : {{ level }} *****"
+                logger: "{{ this.entity_id }}"
                 level: critical
+                message: |
+                  ***** HASS LOG LEVEL SET TO : {{ level }} *****
+                  {%- if trigger.entity_id == 'binary_sensor.wan_connected_alert' %}
+                  ***** WAN DOWN: states('binary_sensor.wan_connected_alert') *****
+                  {%- endif -%}
 
-#######################################################################################################################
-## Hass - Component Log Level Changed
-#######################################################################################################################
-- id: hass_log_level_selection
-  alias: "[Hass] Log Level Selection"
-  description: "Change component log level."
-  max_exceeded: silent
-  variables:
-    level: >
-      {% if is_state('binary_sensor.wan_connected_alert','on')
-          and not is_state('input_boolean.startup_pending','on')  %} critical
-      {% else %} {{ states('input_select.component_log_level') }}
-      {% endif %}
-  trigger:
-    - platform: state
-      entity_id:
-        - input_select.component_log_level
-        - binary_sensor.wan_connected_alert
+    - condition: template
+      value_template: "{{ trigger.entity_id == 'input_boolean.startup_pending' }}"
 
-    - platform: state
-      entity_id: input_boolean.startup_pending
-      to: 'off'
-  action:
     - choose:
         - conditions: "{{ level == 'info' }}"
           sequence:
@@ -78,41 +78,6 @@
           sequence:
             - service: logger.set_level
               data: !include /config/logging/include/component_log_debug.yaml
-
-        - conditions: "{{ level == 'custom' }}"
-          sequence:
-            - service: logger.set_level
-              data: !include /config/logging/include/component_log_custom.yaml
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.supplemental_logging
-              state: 'on'
-          sequence:
-            - service: system_log.write
-              data:
-                message: "***** COMPONENT LOG LEVEL SET TO : {{ level }} *****"
-                level: critical
-
-    - choose:
-        - conditions: "{{ is_state('binary_sensor.wan_connected_alert','on') }}"
-          sequence:
-            - service: persistent_notification.create
-              data:
-                title: "WAN Disconnected"
-                message: "WAN has disconnected. Log level has been set to critical."
-                notification_id: log_wan_down
-
-      default:
-        - condition: template
-          alias: "Triggered by WAN connection alert"
-          value_template: "{{ trigger.entity_id == 'binary_sensor.wan_connected_alert' }}"
-
-        - service: persistent_notification.create
-          data:
-            title: "WAN Reconnected"
-            message: "WAN has reconnected. Log level has been restored to {{ level }}."
-            notification_id: log_wan_down
 
 
 
