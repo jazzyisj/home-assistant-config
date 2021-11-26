@@ -2,26 +2,27 @@
 ## Alarm Clock Play
 #######################################################################################################################
 alarm_clock_play:
-  alias: "Alarm Clock Play"
-  description: "Play alarm clock."
+  alias: 'Alarm Clock Play'
+  description: 'Play alarm clock.'
   icon: mdi:alarm-note
   mode: restart
   fields:
     alarm_type:
-      description: "Alarm type to play (auto, manual, nap)."
-      example: "nap"
+      description: 'Alarm type to play (auto, manual, nap).'
+      example: 'nap'
     first_run:
-      description: "First run of alarm play."
-      example: "true"
+      description: 'First run of alarm play.'
+      example: 'true'
     resume:
-      description: "Resuming from tts play."
-      example: "true"
+      description: 'Resuming from tts play.'
+      example: 'true'
   variables:
-    first_run: "{{ first_run|default(false) }}"
-    resume: "{{ resume|default(false) }}"
+    first_run: '{{ first_run|default(false) }}'
+    resume: '{{ resume|default(false) }}'
     alarm_types: "{{ ['auto','manual','nap'] }}"
     media_sensors: "{{ state_attr('group.media_sensors','entity_id') }}"
-    media_type: > # if media_type if alarm_type matches a media_type else media_type == sound
+    media_type:
+      > # if media_type if alarm_type matches a media_type else media_type == sound
       {% set found = namespace(value=0) %}
       {% set type = states('input_select.alarm_clock_sound_' ~ alarm_type)|lower %}
       {% for sensor in media_sensors %}
@@ -41,8 +42,8 @@ alarm_clock_play:
     - choose:
         - conditions:
             - condition: template
-              alias: "Alarm type is valid"
-              value_template: "{{ alarm_type in alarm_types }}"
+              alias: 'Alarm type is valid'
+              value_template: '{{ alarm_type in alarm_types }}'
           sequence:
             - choose:
                 - conditions: > # only run if other alarm type is not on
@@ -82,11 +83,11 @@ alarm_clock_play:
                                 entity_id: timer.alarm_clock_snooze
 
                     - choose:
-                        - conditions: "{{ first_run }}"
+                        - conditions: '{{ first_run }}'
                           sequence: # save media player volumes before conditions so values are set for alarm_clock_stop
                             - service: script.save_media_player_volumes
                               data:
-                                media_players: "{{ players }}"
+                                media_players: '{{ players }}'
                                 source: alarm_clock
 
                     - choose:
@@ -104,7 +105,9 @@ alarm_clock_play:
                                     - Vacation
 
                                 - condition: state
-                                  entity_id: input_boolean.alarm_triggered
+                                  entity_id:
+                                    - input_boolean.alarm_pending
+                                    - input_boolean.alarm_triggered
                                   state: 'on'
                           sequence:
                             - service: browser_mod.toast
@@ -119,22 +122,22 @@ alarm_clock_play:
 
                             - service: script.alarm_clock_stop
                               data:
-                                alarm_type: "{{ alarm_type }}"
+                                alarm_type: '{{ alarm_type }}'
 
                       default:
                         - choose: # only on first run so changes on main UI during alarm aren't bypassed on restart
-                            - conditions: "{{ first_run }}"
+                            - conditions: '{{ first_run }}'
                               sequence:
                                 - repeat:
-                                    count: "{{ media_sensors|count }}"
+                                    count: '{{ media_sensors|count }}'
                                     sequence:
                                       - variables:
-                                          media_type: "{{ media_sensors[repeat.index-1][14:] }}"
+                                          media_type: '{{ media_sensors[repeat.index-1][14:] }}'
 
                                       - choose:
                                           - conditions:
                                               - condition: template
-                                                alias: "Media playing on alarm clock media player"
+                                                alias: 'Media playing on alarm clock media player'
                                                 value_template: >
                                                   {% set found = namespace(value=0) %}
                                                   {% set speaker_groups = state_attr('sensor.media_players','group') %}
@@ -167,17 +170,20 @@ alarm_clock_play:
                                             sequence:
                                               - service: input_boolean.turn_on
                                                 target:
-                                                  entity_id: "input_boolean.resume_{{ media_type }}"
+                                                  entity_id: 'input_boolean.resume_{{ media_type }}'
 
                                 - choose:
                                     - conditions: "{{ is_state('switch.alarm_clock_' ~ alarm_type,'off') }}"
                                       sequence:
                                         - service: switch.turn_on
                                           target:
-                                            entity_id: "switch.alarm_clock_{{ alarm_type }}"
+                                            entity_id: 'switch.alarm_clock_{{ alarm_type }}'
 
-                                        # allows app notification to be sent or turn off alarm before playing
-                                        # alarm time is effectively alarm set time plus this delay
+                                # allows app notification to be sent or turn off alarm before playing
+                                # alarm time is effectively alarm set time plus this delay
+                                - choose:
+                                    - conditions: "{{ is_state('input_boolean.alarm_clock_test_play','off') }}"
+                                      sequence:
                                         - delay:
                                             seconds: "{{ states('input_number.alarm_clock_play_delay')|int(0) }}"
 
@@ -193,7 +199,7 @@ alarm_clock_play:
                               sequence:
                                 - service: browser_mod.toast
                                   data:
-                                    message: "Alarm clock waiting for announcements to finish."
+                                    message: 'Alarm clock waiting for announcements to finish.'
 
                                 - wait_template: "{{ is_state('input_boolean.tts_playing','off') }}"
                                   timeout:
@@ -207,7 +213,7 @@ alarm_clock_play:
                         - choose:
                             - conditions:
                                 - condition: template
-                                  alias: "Media player or speaker group media player not available"
+                                  alias: 'Media player or speaker group media player not available'
                                   value_template: >
                                     {% if is_state_attr(player,'type','group') %}
                                       {% set found = namespace(value=0) %}
@@ -234,18 +240,18 @@ alarm_clock_play:
                               target:
                                 entity_id: &alarm_automations
                                   - automation.alarm_clock_media_player_turned_off
-                                  - automation.alarm_clock_media_player_paused
+                                  - automation.alarm_clock_snoozed
 
                             - choose: # if the alarm clock media player is playing stop it so we don't get a volume jump
-                                - conditions: "{{ alarm_clock_players|count > 0 }}"
+                                - conditions: '{{ alarm_clock_players|count > 0 }}'
                                   sequence:
-                                      - service: media_player.media_stop
-                                        target:
-                                          entity_id: "{{ alarm_clock_players }}"
+                                    - service: media_player.media_stop
+                                      target:
+                                        entity_id: '{{ alarm_clock_players }}'
 
                             - service: media_player.volume_set #BLOOP set volume to 0 before setting volume to avoid google volume pops
                               target:
-                                entity_id: "{{ players }}"
+                                entity_id: '{{ players }}'
                               data:
                                 volume_level: 0
 
@@ -265,9 +271,9 @@ alarm_clock_play:
                                         entity_id: script.radio_play
                                       data:
                                         variables: #QUESTION how to use alarm img/title for spotify/youtube
-                                          playlist: "{{ playlist }}"
-                                          media_player: "{{ player }}"
-                                          title: "Alarm Clock"
+                                          playlist: '{{ playlist }}'
+                                          media_player: '{{ player }}'
+                                          title: 'Alarm Clock'
                                           thumb: "{{ states('input_text.base_url') ~ '/local/images/media/alarm_clock.png' }}" #ISSUE doesn't work
 
                                 - conditions: "{{ media_type == 'spotify' }}"
@@ -277,8 +283,8 @@ alarm_clock_play:
                                         entity_id: script.spotify_play
                                       data:
                                         variables:
-                                          device: "{{ device }}"
-                                          playlist: "{{ playlist }}"
+                                          device: '{{ device }}'
+                                          playlist: '{{ playlist }}'
                                           random: true
                                           repeat: true
                                           shuffle: true
@@ -290,8 +296,8 @@ alarm_clock_play:
                                         entity_id: script.youtube_play
                                       data:
                                         variables:
-                                          media_player: "{{ player }}"
-                                          playlist: "{{ playlist }}"
+                                          media_player: '{{ player }}'
+                                          playlist: '{{ playlist }}'
 
                                 - conditions: "{{ media_type == 'sound' }}"
                                   sequence:
@@ -300,8 +306,8 @@ alarm_clock_play:
                                         entity_id: script.alarm_clock_sound_play
                                       data:
                                         variables:
-                                          media_player: "{{ player }}"
-                                          playlist:  "{{ playlist }}"
+                                          media_player: '{{ player }}'
+                                          playlist: '{{ playlist }}'
 
                             - delay: 5 # if not delay always fails
 
@@ -318,7 +324,7 @@ alarm_clock_play:
                                   target:
                                     entity_id: input_text.active_alarm_clock_media_player
                                   data:
-                                    value: "{{ player }}"
+                                    value: '{{ player }}'
 
                                 #BLOOP set volume after play starts to avoid google bloop
                                 - service: script.turn_on
@@ -326,12 +332,12 @@ alarm_clock_play:
                                     entity_id: script.set_media_player_volumes
                                   data:
                                     variables:
-                                      media_players: "{{ players }}"
+                                      media_players: '{{ players }}'
                                       source: alarm_clock
-                                      media_type: "{{ media_type if media_type != 'sound' }}"
+                                      media_type: '{{ media_type }}'
       default:
         - service: system_log.write #IDEA where else do this?
           data:
             level: error
-            logger: "{{ this.entity_id }}"
-            message: "Invalid alarm type."
+            logger: '{{ this.entity_id }}'
+            message: 'Invalid alarm type.'

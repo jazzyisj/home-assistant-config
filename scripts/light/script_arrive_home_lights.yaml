@@ -1,0 +1,83 @@
+#######################################################################################################################
+## Arrive Home Lights
+#######################################################################################################################
+arrive_home_lights: #VERIFY
+  alias: 'Arrive Home Lights'
+  description: 'Arrive home lighting.'
+  mode: restart
+  fields:
+    first_home:
+      description: 'Person is first person home.'
+      example: 'true'
+  sequence:
+    - condition: state
+      entity_id:
+        - input_boolean.presence_automation
+        - input_boolean.light_automation
+      state: 'on'
+
+    # don't restore if nobody else was home (lights were off)
+    - choose:
+        - conditions: '{{ not first_home }}'
+          sequence:
+            - service: scene.create
+              data:
+                scene_id: arrive_home_lights_restore
+                entities: # do not restore dining room rgb light
+                  light.kitchen_potlights:
+                    state: "{{ states('light.kitchen_potlights') }}"
+                    brightness: "{{ state_attr('light.kitchen_potlights','brightness')|int(0) }}"
+                  light.dining_room_potlights:
+                    state: "{{ states('light.dining_room_potlights') }}"
+                    brightness: "{{ state_attr('light.dining_room_potlights','brightness')|int(0) }}"
+                  light.upstairs_hallway_potlights:
+                    state: "{{ states('light.upstairs_hallway_potlights') }}"
+                    brightness: "{{ state_attr('light.upstairs_hallway_potlights','brightness')|int(0) }}"
+
+    - service: timer.start
+      entity_id: timer.arrive_home_lights
+
+    - choose: # always turn side entrance light on or restart in use timer if already on
+        - conditions:
+            - condition: state
+              entity_id: light.side_entrance_light
+              state: 'on'
+          sequence:
+            - service: timer.start
+              entity_id: timer.side_entrance_light
+      default:
+        - service: light.turn_on
+          target:
+            entity_id: light.side_entrance_light
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.nighttime_auto_light
+              state: 'on'
+          sequence:
+            - service: light.turn_on
+              target:
+                entity_id: light.upstairs_potlights
+              data:
+                brightness: >
+                  {% set b = state_attr('light.upstairs_hallway_potlights','brightness')|int(0) %}
+                  {% if is_state('input_select.occupancy_mode','Night') %} 5
+                  {% elif is_state('binary_sensor.quiet_hours','on') %} 20
+                  {% elif b < 90 %} 90
+                  {% else %}{{ b }}
+                  {% endif %}
+
+    - alias: 'Wait for arrive home timer to finish'
+      wait_for_trigger:
+        - platform: state
+          entity_id: timer.arrive_home_lights
+          to: 'idle'
+
+    # don't restore if nobody else was home (lights were off)
+    - choose:
+        - conditions: '{{ not first_home }}'
+          sequence:
+            - service: script.activate_scene
+              data:
+                scene: arrive_home_lights_restore

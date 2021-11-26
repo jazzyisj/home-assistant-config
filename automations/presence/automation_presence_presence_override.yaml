@@ -1,13 +1,12 @@
 #######################################################################################################################
-## Presence - Override Auto On Home
+## Presence - Auto Override Home
 #######################################################################################################################
-- id: presence_override_auto_on_home
-  alias: '[Presence] Override Auto On Home'
-  description: 'Turn on override booleans when alarm unlocked by code if person tracker not home.'
+- id: presence_auto_override_home
+  alias: '[Presence] Auto Override Home'
+  description: 'Toggle override boolean when required if door unlocked by code.'
   mode: parallel
   variables:
     person: '{{ trigger.to_state.state[10:-1]|lower }}'
-    owner: "{{ person in ['jason','sheri'] }}"
   trigger:
     - platform: state
       entity_id:
@@ -18,46 +17,42 @@
       to: #LOCK_USER
         - Unlocked (Jason)
         - Unlocked (Sheri)
-        - Unlocked (Dawn)
       from:
         - Locked (Jason)
         - Locked (Sheri)
-        - Locked (Dawn)
-        - Locked (Keypad)
-        - Locked (Hassio)
-        - Locked (Manual)
   condition:
     - condition: state
       entity_id:
         - input_boolean.lock_automation
         - input_boolean.presence_automation
       state: 'on'
-
-    - "{{ (is_state('input_boolean.guest_home','off') if not owner
-      else is_state('binary_sensor.' ~ person ~ '_home','off'))
-      and is_state(trigger.entity_id,'Unlocked (' ~ person|title ~ ')') }}"
   action:
     - choose:
-        - conditions: '{{ owner }}' # person still shows home
+        - conditions: >
+            {{ is_state('person.' ~ person ,'home')
+                and is_state('binary_sensor.' ~ person ~ '_phone_connected','on') }}"
           sequence:
-            - service: input_boolean.turn_on
+            - service: input_boolean.turn_off
               target:
                 entity_id: 'input_boolean.home_override_{{ person }}'
+      default:
+        - service: input_boolean.turn_on
+          target:
+            entity_id: 'input_boolean.home_override_{{ person }}'
 
-    - service: input_boolean.turn_on
-      target:
-        entity_id: "input_boolean.{{ person if owner else 'guest' }}_home"
+        - service: input_boolean.turn_on
+          target:
+            entity_id: 'input_boolean.{{ person }}_home'
 
 #######################################################################################################################
 ## Presence - Override Auto On Away
 #######################################################################################################################
-- id: presence_override_auto_on_away
-  alias: '[Presence] Override Auto On Away'
-  description: 'Turn override on, turn presence boolean off if locked by keypad and tracker still home.'
+- id: presence_auto_override_away
+  alias: '[Presence] Auto Override Away'
+  description: 'Turn override on, presence bool off when door locked by code.'
   mode: parallel
   variables:
     person: '{{ trigger.to_state.state[8:-1]|lower }}'
-    owner: "{{ person in ['jason','sheri'] }}"
   trigger:
     - platform: state
       entity_id:
@@ -67,7 +62,6 @@
       to: #LOCK_USER
         - Locked (Jason)
         - Locked (Sheri)
-        - Locked (Dawn)
       for:
         minutes: 2
   condition:
@@ -76,31 +70,26 @@
         - input_boolean.lock_automation
         - input_boolean.presence_automation
       state: 'on'
-
-    - "{{ is_state('binary_sensor.' ~ person ~ '_home','on') if owner else is_state('input_boolean.guest_home','on') }}"
   action:
-    - choose:
-        - conditions: '{{ owner }}'
-          sequence:
-            - service: input_boolean.turn_on
-              target:
-                entity_id: 'input_boolean.home_override_{{ person }}'
+    - service: input_boolean.turn_on
+      target:
+        entity_id: 'input_boolean.home_override_{{ person }}'
 
     - service: input_boolean.turn_off
       target:
-        entity_id: "input_boolean.{{ person if owner else 'guest' }}_home"
+        entity_id: 'input_boolean.{{ person }}_home'
 
 #######################################################################################################################
 ## Presence - Reset Override
 #######################################################################################################################
 - id: presence_reset_override
   alias: '[Presence] Reset Override'
-  description: 'Reset override boolean when tracker to/from home.'
+  description: 'Reset override boolean when tracker state to/from home.'
   mode: parallel
   variables:
-    person: > #VERIFY
+    person: >
       {% if trigger.id == 'action' %}
-        {{ event.data['action'][27:] }}
+        {{ trigger.event.data['action'][27:] }}
       {% else %}
         {{ trigger.entity_id.split('.')[1] }}
       {% endif %}
@@ -110,12 +99,14 @@
         - person.jason
         - person.sheri
       to: home
+      for: 30
 
     - platform: state
       entity_id:
         - person.jason
         - person.sheri
       from: home
+      for: 30
 
     - platform: event
       id: action
@@ -128,13 +119,14 @@
       event_type: mobile_app_notification_action
       event_data:
         action: turn_off_presence_override_sheri
-
   condition:
     - condition: state
       entity_id: input_boolean.presence_automation
       state: 'on'
 
     - "{{ is_state('input_boolean.home_override_' ~ person,'on') }}"
+
+    - "{{ is_state('binary_sensor.' ~ person ~ '_phone_connected','on') }}"
   action:
     - service: input_boolean.turn_off
       target:
@@ -152,6 +144,8 @@
       entity_id:
         - input_boolean.home_override_jason
         - input_boolean.home_override_sheri
+        - binary_sensor.jason_home
+        - binary_sensor.sheri_home
       to: 'on'
       for:
         minutes: 5 # allow override to turn off before notifications
@@ -162,7 +156,7 @@
         - Home
         - Guest
       for:
-        minutes: 10
+        minutes: 10 # allow override to turn off before notifications
   condition:
     - condition: or
       conditions:
@@ -178,12 +172,15 @@
       data:
         message: |
           Attention!
-          {% if trigger.entity_id == 'input_boolean.home_override_jason' %}
-              Jason's presence override has been turned {{ states('input_boolean.home_override_jason') }}.
-          {% elif trigger.entity_id == 'input_boolean.home_override_sheri' %}
-              Sheri's presence override has been turned {{ states('input_boolean.home_override_sheri') }}.
+          {% if is_state('input_boolean.home_override_jason','on') %}
+              Jason's presence override is {{ states('input_boolean.home_override_jason') }}.
+          {% endif %}
+          {% if is_state('input_boolean.home_override_sheri','on') %}
+              Sheri's presence override is {{ states('input_boolean.home_override_sheri') }}.
           {% endif %}
         ignore_away: true
+        night_play: true
+        save_message: true
 
 #######################################################################################################################
 ## Presence - Pause Presence Override Jason Alert
@@ -191,6 +188,7 @@
 - id: presence_pause_presence_override_jason_alert
   alias: '[Presence] Pause Presence Override Jason Alert'
   description: 'Pause alert.'
+  max_exceeded: silent
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
@@ -206,6 +204,7 @@
 - id: presence_pause_presence_override_sheri_alert
   alias: '[Presence] Pause Presence Override Sheri Alert'
   description: 'Pause alert.'
+  max_exceeded: silent
   trigger:
     - platform: event
       event_type: mobile_app_notification_action

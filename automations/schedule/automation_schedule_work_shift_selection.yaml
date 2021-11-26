@@ -2,28 +2,23 @@
 ## Schedule - Work Shift Change
 ###############################################################################
 - id: schedule_work_shift_change
-  alias: "[Schedule] Work Shift Change"
-  description: "Logbook entry, notification when work shift changes."
+  alias: '[Schedule] Work Shift Change'
+  description: 'Notification when work shift changes.'
   mode: restart
   trigger:
     - platform: state
-      entity_id:
-        - calendar.days
-        - calendar.afternoons
+      entity_id: sensor.today_shift
+      for: 60 # allow auto select to change value
   condition:
     - condition: state
-      entity_id:
-        - input_boolean.schedule_automation
-        - input_boolean.work_schedule
+      entity_id: input_boolean.schedule_automation
       state: 'on'
+    - '{{ trigger.to_state.state != trigger.from_state.state }}'
   action:
-    - delay: # prevent double notification when shifts on/off, only send after last change (current shift)
-        minutes: 5
-
     - service: notify.jason
       data:
-        title: "Work Shift Change"
-        message: "Shift: {{ states('sensor.current_shift') }}"
+        title: 'Work Shift Change'
+        message: "Shift: {{ states('sensor.today_shift') }}"
         data:
           tag: shift_change
           group: General
@@ -35,34 +30,38 @@
           icon_url: !secret WORK_ICON
           actions:
             - action: work_schedule_off
-              title: "Work Schedule Off"
+              title: 'Work Schedule Off'
 
             - action: URI
-              title: "Open Schedule"
+              title: 'Open Schedule'
               uri: /lovelace/schedule
 
 ###############################################################################
 ## Schedule - Work Shift Auto Select
 ###############################################################################
 - id: schedule_work_shift_auto_select
-  alias: "[Schedule] Work Shift Auto Select"
-  description: "Select current shift when calendar/selection changes."
-  max_exceeded: silent
+  alias: '[Schedule] Work Shift Auto Select'
+  description: 'Select today shift when calendar/selection changes.'
+  mode: queued
   trigger:
     - platform: state
       entity_id:
         - binary_sensor.google_calendar_connected
+        - input_boolean.work_schedule
+        - input_select.work_shift_selection
+
+    - platform: state
+      id: calendar
+      entity_id:
         - calendar.days
         - calendar.afternoons
-        - input_select.work_shift_selection
+      to: 'on'
+      for:
+        hours: 4 #VERIFY delay shift change 4 hours so we don't skip bedtime sundays aft -> days
 
     - platform: state
       entity_id: input_boolean.work_shift_override
       to: 'off'
-
-    - platform: state
-      entity_id: input_boolean.work_schedule
-      to: 'on'
 
     - platform: state
       entity_id: input_boolean.startup_pending
@@ -92,27 +91,3 @@
           {% elif is_state('calendar.days','on') %} Days
           {% else %} {{ states('input_select.work_shift_selection') }}
           {% endif %}
-
-#######################################################################################################################
-## Schedule - Turn Off Work Shift Override
-#######################################################################################################################
-- id: schedule_work_shift_override_off
-  alias: "[Schedule] Turn Off Work Shift Override"
-  description: "Turn work shift override off."
-  trigger:
-    - platform: state # always reset when work schedule turns on
-      entity_id: input_boolean.work_schedule
-      to: 'on'
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: shift_override_off
-  condition:
-    - condition: state
-      entity_id: binary_sensor.google_calendar_connected
-      state: 'on'
-  action:
-    - service: input_boolean.turn_off
-      target:
-        entity_id: input_boolean.work_shift_override

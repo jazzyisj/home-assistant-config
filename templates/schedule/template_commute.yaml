@@ -1,6 +1,5 @@
 ###############################################################################
 ## Templates - Commute
-## sensors default to days if current shift none, unknown
 ###############################################################################
 - binary_sensor:
     - name: 'Google Traffic Connected'
@@ -9,9 +8,9 @@
       device_class: connectivity
       state: >
         {{ is_number(states('sensor.jason_time_to_home'))
-            and is_number(states('sensor.sheri_time_to_home'))
-            and is_number(states('sensor.jason_time_to_work'))
-            and is_number(states('sensor.sheri_time_to_work')) }}
+            or is_number(states('sensor.sheri_time_to_home'))
+            or is_number(states('sensor.jason_time_to_work'))
+            or is_number(states('sensor.sheri_time_to_work')) }}
 
     - name: 'Google Traffic Connected Alert'
       unique_id: google_traffic_connected_alert
@@ -20,65 +19,73 @@
             and is_state('input_boolean.commute_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: leave_home_jason_alert # stops 15 min after leave home time
+    # default to days if today shift none, unknown
+    # off 15 min after leave home time (end_time)
+    - unique_id: leave_home_jason_alert
       state: >
-        {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-            if is_state('sensor.current_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
-        {% set end_time = (today_at(leave_time).timestamp() + 900)|timestamp_custom('%H:%M','unknown') %}
-
-        {{ is_state('binary_sensor.work_commute_active','on')
-            and states('sensor.time') > states('sensor.leave_home_time_jason')
-            and states('sensor.time') < end_time
+        {% if is_state('binary_sensor.work_commute_active','on')
             and is_state('binary_sensor.jason_home','on')
             and is_state('input_boolean.commute_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off')
+            and states('sensor.leave_home_time_jason')|lower not in ['','unknown','unavailable','none'] %}
+          {% set leave_time = today_at(states('input_datetime.afternoons_leave_home_time'))
+              if is_state('sensor.today_shift','Afternoons') else today_at(states('input_datetime.days_leave_home_time')) %}
+          {% set end_time = (leave_time.timestamp() + 900)|timestamp_custom('%Y-%m-%d %H:%M:%S%z',true,'unknown')|as_datetime %}
+          {{ end_time > now() >= states('sensor.leave_home_time_jason')|as_datetime }}
+        {% endif %}
 
+    # off if jason_home, prevent duplicate alert
     - unique_id: leave_home_sheri_alert
       state: >
-        {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-            if is_state('sensor.current_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
-        {% set end_time = (today_at(leave_time).timestamp() + 900)|timestamp_custom('%H:%M','unknown') %}
-
-        {{ is_state('binary_sensor.work_commute_active','on')
-            and states('sensor.time') > states('sensor.leave_home_time_sheri')
-            and states('sensor.time') < end_time
+        {% if is_state('binary_sensor.work_commute_active','on')
+            and is_state('binary_sensor.jason_home','off')
             and is_state('binary_sensor.sheri_home','on')
             and is_state('input_boolean.commute_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off')
+            and states('sensor.leave_home_time_sheri')|lower not in ['','unknown','unavailable','none'] %}
+          {% set leave_time = today_at(states('input_datetime.afternoons_leave_home_time'))
+              if is_state('sensor.today_shift','Afternoons') else today_at(states('input_datetime.days_leave_home_time')) %}
+          {% set end_time = (leave_time.timestamp() + 900)|timestamp_custom('%Y-%m-%d %H:%M:%S%z',true,'unknown')|as_datetime %}
+          {{ end_time > now() >= states('sensor.leave_home_time_sheri')|as_datetime }}
+        {% endif %}
 
     - unique_id: work_commute_jason_alert
       state: >
-        {{ (is_state('binary_sensor.leave_home_jason_alert','on')
-            or is_state('binary_sensor.work_commute_active','on'))
-            and states('sensor.jason_time_to_work')|int(0) >= states('input_number.commute_warning_threshold')|int(0)
+        {% if (is_state('binary_sensor.leave_home_jason_alert','on')
+              or is_state('binary_sensor.work_commute_active','on'))
             and not is_state('person.jason','Work')
             and is_state('input_boolean.commute_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off') %}
+          {{ states('sensor.jason_time_to_work')|int(-1) >= states('input_number.commute_warning_threshold')|int }}
+        {% endif %}
 
     - unique_id: work_commute_sheri_alert
       state: >
-        {{ (is_state('binary_sensor.leave_home_sheri_alert','on')
-            or is_state('binary_sensor.work_commute_active','on'))
-            and states('sensor.sheri_time_to_work')|int(0) >= states('input_number.commute_warning_threshold')|int(0)
+        {% if (is_state('binary_sensor.leave_home_sheri_alert','on')
+              or is_state('binary_sensor.work_commute_active','on'))
             and not is_state('person.sheri','Work')
             and is_state('input_boolean.commute_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off') %}
+          {{ states('sensor.sheri_time_to_work')|int(-1) >= states('input_number.commute_warning_threshold')|int }}
+        {% endif %}
 
     - unique_id: home_commute_jason_alert
       state: >
-        {{ is_state('binary_sensor.home_commute_active','on')
-            and (states('sensor.jason_time_to_home')|int(0) >= states('input_number.commute_warning_threshold')|int(0))
-            and is_state('person.jason','Work')
+        {% if is_state('binary_sensor.home_commute_active','on')
+            and not is_state('person.jason','home')
             and is_state('input_boolean.commute_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off') %}
+          {{ states('sensor.jason_time_to_home')|int(-1) >= states('input_number.commute_warning_threshold')|int }}
+        {% endif %}
 
     - unique_id: home_commute_sheri_alert
       state: >
-        {{ is_state('binary_sensor.home_commute_active','on')
-            and (states('sensor.sheri_time_to_home')|int(0) >= states('input_number.commute_warning_threshold')|int(0))
-            and is_state('person.sheri','Work')
+        {% if is_state('binary_sensor.home_commute_active','on')
+            and not is_state('person.sheri','home')
             and is_state('input_boolean.commute_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off') %}
+          {{ states('sensor.sheri_time_to_home')|int(-1) >= states('input_number.commute_warning_threshold')|int }}
+        {% endif %}
 
     - name: 'Commute Active'
       unique_id: commute_active
@@ -88,147 +95,136 @@
     - name: 'Work Commute Active'
       unique_id: work_commute_active
       icon: mdi:car
-      state: "{{ is_state('binary_sensor.days_work_commute','on') or is_state('binary_sensor.afternoons_work_commute','on') }}"
+      state: >
+        {{ is_state('binary_sensor.days_work_commute','on') or is_state('binary_sensor.afternoons_work_commute','on')
+            and not(is_state('person.jason','work') and is_state('person.sheri','work')) }}
 
     - name: 'Home Commute Active'
       unique_id: home_commute_active
       icon: mdi:car
-      state: "{{ is_state('binary_sensor.days_home_commute','on') or is_state('binary_sensor.afternoons_home_commute','on') }}"
+      state: >
+        {{ is_state('binary_sensor.days_home_commute','on') or is_state('binary_sensor.afternoons_home_commute','on')
+          and not(is_state('binary_sensor.jason_home','off') and is_state('binary_sensor.sheri_home','on')) }}
 
-    - name: 'Days Work Commute' #MIDNIGHT arrive home time after midnight (arrive < start)
+    - name: 'Days Work Commute'
       unique_id: days_work_commute
       icon: mdi:car
+      #MIDNIGHT if leave time < day_reset and time > day_reset it is after reset but before midnight - leave time is tomorrow (+ 86400)
+      #MIDNIGHT if no work tomorrow, sensor turns off at midnight - work_today is off
       state: >
-        {% set time = states('sensor.time') %}
-        {% set leave = states('input_datetime.days_leave_home_time')[0:5] %}
-        {% set arrive = states('input_datetime.days_arrive_work_time')[0:5] %}
-        {% set predep = states('input_number.commute_predeparture')|int(0) * 60 %}
-        {% set start = (today_at(leave).timestamp() - predep)|timestamp_custom('%H:%M','unknown') %}
         {% if is_state('input_boolean.commute_times_enabled','on')
             and is_state('binary_sensor.work_today','on')
-            and states('sensor.current_shift')|lower in ['off','days','unknown','unavailable','none'] %}
-          {{ true if time > start or time < arrive if arrive < start else arrive > time > start }}
-        {% else %} false
+            and is_state('sensor.today_shift','Afternoons') %}
+          {% set leave_time = states('input_datetime.days_leave_home_time') %}
+          {% set leave_ts = today_at(leave_time)|as_timestamp %}
+          {% set leave = leave_ts + 86400 if leave_time < states('input_datetime.day_reset') < states('sensor.time') else leave_ts %}
+          {% set predep = states('input_number.commute_predeparture')|int * 60 %}
+          {{ leave - predep < now().timestamp() and now().timestamp() - leave < 2700 }}
         {% endif %}
 
-    - name: 'Afternoons Work Commute' #MIDNIGHT arrive home time after midnight (arrive < start)
+    - name: 'Afternoons Work Commute'
       unique_id: afternoons_work_commute
       icon: mdi:car
       state: >
-        {% set time = states('sensor.time') %}
-        {% set leave = states('input_datetime.afternoons_leave_home_time')[0:5] %}
-        {% set arrive = states('input_datetime.afternoons_arrive_work_time')[0:5] %}
-        {% set predep = states('input_number.commute_predeparture')|int(0) * 60 %}
-        {% set start = (today_at(leave).timestamp() - predep)|timestamp_custom('%H:%M','unknown') %}
         {% if is_state('input_boolean.commute_times_enabled','on')
             and is_state('binary_sensor.work_today','on')
-            and is_state('sensor.current_shift','Afternoons') %}
-          {{ true if time > start or time < arrive if arrive < start else arrive > time > start }}
-        {% else %} false
+            and is_state('sensor.today_shift','Afternoons') %}
+          {% set leave_time = states('input_datetime.afternoons_leave_home_time') %}
+          {% set leave_ts = today_at(leave_time)|as_timestamp %}
+          {% set leave = leave_ts + 86400 if leave_time < states('input_datetime.day_reset') < states('sensor.time') else leave_ts %}
+          {% set predep = states('input_number.commute_predeparture')|int * 60 %}
+          {{ leave - predep < now().timestamp() and now().timestamp() - leave < 2700 }}
         {% endif %}
 
-    - name: 'Days Home Commute' #MIDNIGHT arrive home time after midnight (arrive < start)
+    # if leave work time before day_reset
+    - name: 'Days Home Commute'
       unique_id: days_home_commute
       icon: mdi:car
       state: >
-        {% set time = states('sensor.time') %}
-        {% set leave = states('input_datetime.days_leave_work_time')[0:5] %}
-        {% set arrive = states('input_datetime.days_arrive_home_time')[0:5] %}
-        {% set predep = states('input_number.commute_predeparture')|int(0) * 60 %}
-        {% set start = (today_at(leave).timestamp() - predep)|timestamp_custom('%H:%M','unknown') %}
         {% if is_state('input_boolean.commute_times_enabled','on')
             and is_state('binary_sensor.work_today','on')
-            and states('sensor.current_shift')|lower in ['off','days','unknown','unavailable','none'] %}
-          {{ true if time > start or time < arrive if arrive < start else arrive > time > start }}
-        {% else %} false
+            and is_state('sensor.today_shift','Afternoons') %}
+          {% set leave_time = states('input_datetime.days_leave_work_time') %}
+          {% set leave_ts = today_at(leave_time)|as_timestamp %}
+          {% set leave = leave_ts + 86400 if leave_time < states('input_datetime.day_reset') < states('sensor.time') else leave_ts %}
+          {% set predep = states('input_number.commute_predeparture')|int * 60 %}
+          {{ leave - predep < now().timestamp() and now().timestamp() - leave < 2700 }}
         {% endif %}
 
-    - name: 'Afternoons Home Commute' #MIDNIGHT arrive home time after midnight (arrive < start)
+    - name: 'Afternoons Home Commute'
       unique_id: afternoons_home_commute
       icon: mdi:car
-      state: > #VERIFY after midnight sun on afternoons
-        {% set time = states('sensor.time') %}
-        {% set leave = states('input_datetime.afternoons_leave_work_time')[0:5] %}
-        {% set arrive = states('input_datetime.afternoons_arrive_home_time')[0:5] %}
-        {% set predep = states('input_number.commute_predeparture')|int(0) * 60 %}
-        {% set start = (today_at(leave).timestamp() - predep)|timestamp_custom('%H:%M','unknown') %}
-        {% if is_state('input_boolean.commute_times_enabled','on') and is_state('sensor.current_shift','Afternoons') %}
-          {# Mon/Fri - Sat after midnight #}
-          {% if is_state('binary_sensor.work_today','on') or now().weekday() == 5 %}
-            {% if now().weekday() == 5 %}
-                {{ start >= time < arrive }} {# only after midnight sat #}
-            {% elif arrive < start %} {# start before midnight, arrive after midnight #}
-                {{ (start <= time > arrive)
-                    or ((start >= time < arrive) and now().weekday() != 0) }} {# before midnight mon-fri / after midnight tue-fri #}
-            {% else %} {# normal - start < arrive #}
-                {{ start <= time < arrive }} {# before midnight mon-fri #}
-            {% endif %}
-
-          {# Sun after midnight / Mon after midnight (excluded in Mon-Fri) #}
-          {% elif (is_state('input_boolean.saturday_workday','on') and now().weekday() == 6)
-              or (is_state('input_boolean.sunday_workday','on') and now().weekday() == 0 ) %}
-            {{ start >= time < arrive }}
-          {% else %} false
-          {% endif %}
-        {% else %} false
+      state: >
+        {% if is_state('input_boolean.commute_times_enabled','on')
+            and is_state('binary_sensor.work_today','on')
+            and is_state('sensor.today_shift','Afternoons') %}
+          {% set leave_time = states('input_datetime.afternoons_leave_work_time') %}
+          {% set leave_ts = today_at(leave_time)|as_timestamp %}
+          {% set leave = leave_ts + 86400 if leave_time < states('input_datetime.day_reset') < states('sensor.time') else leave_ts %}
+          {% set predep = states('input_number.commute_predeparture')|int * 60 %}
+          {{ leave - predep < now().timestamp() and now().timestamp() - leave < 2700 }}
         {% endif %}
 
     - name: 'Prework Active'
       unique_id: prework_active
       icon: mdi:account-hard-hat
       state: >
-        {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-            if is_state('sensor.current_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
-        {{ 0 < (today_at(leave_time).timestamp() - now().timestamp()) < 1800
-            if is_state('binary_sensor.work_today','on') else false }}
+        {% if is_state('binary_sensor.work_today','on') %}
+          {% set leave_time = states('input_datetime.afternoons_leave_home_time')
+              if is_state('sensor.today_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
+          {% set leave_ts = today_at(leave_time)|as_timestamp %}
+          {% set leave = leave_ts + 86400 if leave_time < states('input_datetime.day_reset') < states('sensor.time') else leave_ts %}
+          {{ 0 < (leave - now().timestamp()) < 1800 }}
+        {% endif %}
       attributes:
         leave_min: >
           {% if is_state('binary_sensor.prework_active','on') %}
             {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-              if is_state('sensor.current_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
-            {{ '%0.0f'|format((today_at(leave_time).timestamp() - now().timestamp()) / 60) }}
+                if is_state('sensor.today_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
+            {% set leave_ts = today_at(leave_time)|as_timestamp %}
+            {% set leave = leave_ts + 86400 if leave_time < states('input_datetime.day_reset') < states('sensor.time') else leave_ts %}
+            {{ '%0.0f'|format((leave - now().timestamp()) / 60) }}
           {% endif %}
 
 - sensor:
     - unique_id: leave_home_time_jason
-      state: > # add time exceeding threshold
-        {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-            if is_state('sensor.current_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
-        {% set add_sec = (states('sensor.jason_time_to_work')|int(0)
-              - states('input_number.commute_warning_threshold')|int(0))|abs * 60
-            if is_state('binary_sensor.work_commute_jason_alert','on') else 0 %}
-        {{ (today_at(leave_time).timestamp() - add_sec)|timestamp_custom('%H:%M','unknown') }}
+      device_class: timestamp
+      state: > # adds time to work exceeding threshold
+        {% if is_state('binary_sensor.work_today','on') %}
+          {% set leave_time = today_at(states('input_datetime.afternoons_leave_home_time'))
+              if is_state('sensor.today_shift','Afternoons') else today_at(states('input_datetime.days_leave_home_time')) %}
+          {% set add_sec = (states('sensor.jason_time_to_work')|int(-1) - states('input_number.commute_warning_threshold')|int)|abs * 60
+              if is_state('binary_sensor.work_commute_jason_alert','on') else 0 %}
+          {{ as_datetime((leave_time.timestamp() - add_sec)|timestamp_custom('%Y-%m-%dT%H:%M:%S%z',true,'unknown')).isoformat() }}
+        {% endif %}
       attributes:
         12hour: >
-          {% if states('sensor.leave_home_time_jason')|lower in ['off','unknown','unavailable','none'] %}
-            {{ states('sensor.leave_home_time_jason') }}
-          {% else %}
-            {{ today_at(states('sensor.leave_home_time_jason'))|as_timestamp('unknown')|timestamp_custom('%-I:%M %p','unknown') }}
+          {% if states('sensor.leave_home_time_jason')|lower not in ['off','','unknown','unavailable','none'] %}
+            {{ as_datetime(states('sensor.leave_home_time_jason'))|as_timestamp('unknown')|timestamp_custom('%-I:%M %p',true,'unknown') }}
           {% endif %}
         car_check: >
-          {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-              if is_state('sensor.current_shift','Afternoons')
-                else states('input_datetime.days_leave_home_time') %}
-          {{ now().replace(second=0,microsecond=0) == (today_at(leave_time) - timedelta(seconds=900)) }}
+          {% if states('sensor.leave_home_time_jason')|lower not in ['off','','unknown','unavailable','none'] %}
+            {{ now().replace(second=0,microsecond=0) == states('sensor.leave_home_time_jason')|as_datetime - timedelta(seconds=900) }}
+          {% endif %}
+      availability: "{{ is_number(states('sensor.jason_time_to_work')) }}"
 
     - unique_id: leave_home_time_sheri
-      state: > # add time exceeding threshold
-        {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-            if is_state('sensor.current_shift','Afternoons') else states('input_datetime.days_leave_home_time') %}
-        {% set add_sec = (states('sensor.sheri_time_to_work')|int(0) - states('input_number.commute_warning_threshold')|int(0))|abs * 60
-            if is_state('binary_sensor.work_commute_sheri_alert','on') else 0 %}
-        {{ (today_at(leave_time).timestamp() - add_sec)|timestamp_custom('%H:%M','unknown') }}
+      device_class: timestamp
+      state: >
+        {% if is_state('binary_sensor.work_today','on') %}
+          {% set leave_time = today_at(states('input_datetime.afternoons_leave_home_time'))
+              if is_state('sensor.today_shift','Afternoons') else today_at(states('input_datetime.days_leave_home_time')) %}
+          {% set add_sec = (states('sensor.sheri_time_to_work')|int(-1) - states('input_number.commute_warning_threshold')|int)|abs * 60
+              if is_state('binary_sensor.work_commute_sheri_alert','on') else 0 %}
+          {{ as_datetime((leave_time.timestamp() - add_sec)|timestamp_custom('%Y-%m-%dT%H:%M:%S%z',true,'unknown')).isoformat() }}
+        {% endif %}
       attributes:
         12hour: >
-          {% if states('sensor.leave_home_time_sheri')|lower in ['off','unknown','unavailable','none'] %}
-            {{ states('sensor.leave_home_time_sheri') }}
-          {% else %}
-            {{ today_at(states('sensor.leave_home_time_sheri'))|as_timestamp('unknown')|timestamp_custom('%-I:%M %p','unknown') }}
+          {% if states('sensor.leave_home_time_sheri')|lower not in ['off','','unknown','unavailable','none'] %}
+            {{ as_datetime(states('sensor.leave_home_time_sheri'))|as_timestamp('unknown')|timestamp_custom('%-I:%M %p',true,'unknown') }}
           {% endif %}
-        car_check: > # prevent duplicate with jason if home
-          {% if is_state('binary_sensor.jason_home','off') %}
-            {% set leave_time = states('input_datetime.afternoons_leave_home_time')
-                if is_state('sensor.current_shift','Afternoons')
-                  else states('input_datetime.days_leave_home_time') %}
-            {{ now().replace(second=0,microsecond=0) == (today_at(leave_time) - timedelta(seconds=900)) }}
+        car_check: > # false if jason home, prevent duplicate alert
+          {% if is_state('binary_sensor.jason_home','off') and states('sensor.leave_home_time_sheri')|lower not in ['off','','unknown','unavailable','none'] %}
+            {{ now().replace(second=0,microsecond=0) == states('sensor.leave_home_time_sheri')|as_datetime - timedelta(seconds=900) }}
           {% endif %}
+      availability: "{{ is_number(states('sensor.sheri_time_to_work')) }}"

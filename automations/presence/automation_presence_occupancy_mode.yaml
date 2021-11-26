@@ -1,6 +1,6 @@
-#######################################################################################################################
+###############################################################################
 ## Presence - Occupancy Mode
-#######################################################################################################################
+###############################################################################
 - id: presence_occupancy_mode #OCC
   alias: '[Presence] Occupancy Mode'
   description: 'Set occupancy mode options, validate occupancy mode change.'
@@ -11,12 +11,6 @@
     - platform: state
       entity_id: input_select.occupancy_mode
   action:
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.previous_occupancy_mode
-      data:
-        option: '{{ prev_mode }}'
-
     - condition: state
       entity_id: input_boolean.presence_automation
       state: 'on'
@@ -92,8 +86,10 @@
                   target:
                     entity_id:
                       - input_boolean.bedtime_delayed
-                      - input_boolean.volume_override
-                      - script.wake_up
+                      - script.someone_arrives_home
+                      - script.arrive_home_lights
+                      - script.arriving_home_notification
+                      - script.waketime
                       - script.morning_lights
 
         - conditions:
@@ -108,12 +104,12 @@
                 entity_id:
                   - input_boolean.guest_home
                   - input_boolean.bedtime_delayed
-                  - input_boolean.volume_override
                   - script.someone_arrives_home
+                  - script.arrive_home_lights
                   - script.arriving_home_notification
-                  - script.wake_up
-                  - script.bedtime
+                  - script.waketime
                   - script.morning_lights
+                  - script.bedtime
                   - script.bedtime_lights
 
             - service: timer.cancel # light timers cancelled here so lights / fans can turn off
@@ -161,9 +157,9 @@
                   target:
                     entity_id: input_boolean.guest_home
 
-#######################################################################################################################
+###############################################################################
 ## Presence - Set Occupancy Mode
-#######################################################################################################################
+###############################################################################
 - id: presence_set_occupancy_mode
   alias: '[Presence] Set Occupancy Mode'
   description: 'Set occupancy mode.'
@@ -195,9 +191,9 @@
               data:
                 option: Away
 
-#######################################################################################################################
+###############################################################################
 ## Presence - Occupancy Mode Reset
-#######################################################################################################################
+###############################################################################
 - id: presence_occupancy_mode_reset
   alias: '[Presence] Occupancy Mode Reset'
   description: 'Auto select occupancy mode.'
@@ -216,28 +212,37 @@
         entity_id: input_select.occupancy_mode
       data:
         option: >
-          {% set bed = as_datetime(states('sensor.next_bedtime')) %}
-          {% set wake = as_datetime(states('sensor.next_waketime')) %}
+          {% set time = now().timestamp() %}
+          {% set wake = 'off' if states('sensor.next_waketime') == 'off'
+              else as_datetime(states('sensor.next_waketime'))|as_timestamp %}
+          {% set bed = 'off' if states('sensor.next_bedtime') == 'off'
+              else as_datetime(states('sensor.next_bedtime'))|as_timestamp %}
+
+
+          {% set bed = bed if bed < wake and (wake - time < 86400) else bed - 86400 %} {# if bed > wake - past bedtime, -24h (86400) #}
+          {% set wake = wake if (wake - time < 86400) else wake - 86400 %} {# if wake > 24 hours, - 24h (86400) #}
+
           {% if is_state('binary_sensor.someone_home','off') %}
             {{ 'Vacation' if is_state('input_select.occupancy_mode','Vacation') else 'Away' }}
-          {% elif bed|lower in ['','off','unknown','unavailable','none']
-                or wake|lower in ['','off','unknown','unavailable','none'] %}
-            {{ 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
-          {% elif bed < now() < wake %}
+          {% elif (bed == 'off' or wake == 'off') %}
+            {{ 'Guest' if is_state('binary_sensor.owner_home','off') else 'Home' }}
+          {% elif bed < time < wake %}
             {{ 'Night' if is_state('input_boolean.bedtime_delayed','off') else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
           {% else %}
-            {{ 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
+            {{ 'Guest' if is_state('input_boolean.guest_home','on')
+                  and is_state('binary_sensor.owner_home','off') else 'Home' }}
           {% endif %}
 
-#######################################################################################################################
+###############################################################################
 ## Presence - Occupancy Notification
-#######################################################################################################################
+###############################################################################
 - id: presence_occupancy_notification #OCC
   alias: '[Presence] Occupancy Notification'
   description: 'Send notification when occupancy mode or alarm state has changed.'
   mode: restart
   trigger:
     - platform: state
+      id: occupancy
       entity_id: input_select.occupancy_mode
       to:
         - Home
@@ -247,6 +252,7 @@
         - Vacation
 
     - platform: state
+      id: alarm
       entity_id: alarm_control_panel.master
       to:
         - armed_home
@@ -268,34 +274,19 @@
     - condition: not
       conditions:
         - condition: state
-          entity_id: input_select.occupancy_mode
-          state: override
-
-        - condition: state
           entity_id: alarm_control_panel.master
           state:
             - triggered
             - arming
             - pending
-
-    - condition: state
-      entity_id:
-        - input_boolean.alarm_pending
-        - input_boolean.alarm_triggered
-      state: 'off'
   action:
-    - delay: 10 # allow corresponding occupancy/alarm mode state to set, prevent double tts
+    - delay: 5 # allow corresponding occupancy/alarm mode state to set, prevent double tts
 
-    - variables: # set after trigger, values after corresponding mode to change
+    - variables:
         occ_mode: "{{ states('input_select.occupancy_mode') }}"
         alarm_mode: "{{ states('sensor.alarm_status') }}"
-        occ_diff: "{{ states('input_select.occupancy_mode') != states('input_select.previous_occupancy_mode') }}"
-        alarm_diff: "{{ states('alarm_control_panel.master') != states('input_select.previous_alarm_mode') }}"
-
-    - condition: template
-      alias: 'Occupancy mode or alarm mode has changed'
-      value_template: '{{ occ_diff or alarm_diff }}'
-
+        occupancy_changed: '{{ states.input_select.occupancy_mode.last_changed.timestamp() < 60 }}'
+        alarm_changed: '{{ states.alarm_control_panel.master.last_changed.timestamp() < 60 }}'
     - choose:
         - conditions:
             - condition: state
@@ -310,14 +301,14 @@
               data:
                 variables:
                   message: |
-                    {%- if occ_diff -%}
+                    {%- if occupancy_changed -%}
                     The house is now in {{ occ_mode }} mode
                     {%- endif -%}
 
-                    {%- if occ_diff and alarm_diff -%}, and {% endif -%}
+                    {%- if occupancy_changed and alarm_changed -%}, and the {% elif alarm_changed %} The {% endif -%}
 
-                    {%- if alarm_diff and is_state('input_boolean.alarm_announcements','on') -%}
-                      The house alarm is {{ states('sensor.alarm_status') -}}
+                    {%- if alarm_changed and is_state('input_boolean.alarm_announcements','on') -%}
+                      house alarm is {{ states('sensor.alarm_status') -}}
                     {%- endif -%}.
                     {{ 'Personalized occupant automations are disabled in Guest mode.' if is_state(occ_mode,'Guest') }}
                   ignore_away: true
@@ -329,11 +320,9 @@
               entity_id: input_boolean.occupancy_notifications
               state: 'on'
 
-            # alarm triggered or occupancy mode changed (not on alarm state change only)
-            - "{{ is_state('input_boolean.alarm_triggered','on') or
-              not states('input_select.occupancy_mode') == states('input_select.previous_occupancy_mode') }}"
+            - '{{ occupancy_changed }}'
           sequence:
-            - service: notify.mobile
+            - service: notify.jason #TEMP
               data:
                 title: 'Home Occupancy Mode'
                 message: >-
@@ -366,9 +355,9 @@
                       action: URI
                       uri: app://com.flir.consumer.flir.lorexcloud
 
-#######################################################################################################################
+###############################################################################
 ## Presence - Turn Off Occupancy Notifications
-#######################################################################################################################
+###############################################################################
 - id: presence_turn_off_occupancy_notifications
   alias: '[Presence] Turn Off Occupancy Notifications'
   description: 'Turn off occupancy notifications boolean.'

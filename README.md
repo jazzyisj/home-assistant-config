@@ -70,16 +70,12 @@ Home Assistant (Hassio) configuration, updated to v2021.11.3
     #SWIPE - state-switch/swipe bug
     #STACK - stack-in-card bug, must be nested in vertical-stack
     #DARKSKY - darksky code to replace
-    #ENVCAN - envcan sensor issues/notes
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
     #GARAGE_HVAC - no thermostat
     #TV_VOL - TV volume notes
-    #VIRTUAL - replace virtual entities
-    #INFLUXDB - sensor for influx_db
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
     #UNLOCKED - code related to phone locked status for alarm disarming
-    #LOCATION - code related to phone location updates
     #LOCK_USER - new lock user code
     #OCC - occupancy automations
 
