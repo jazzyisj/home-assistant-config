@@ -212,25 +212,21 @@
         entity_id: input_select.occupancy_mode
       data:
         option: >
-          {% set time = now().timestamp() %}
-          {% set wake = 'off' if states('sensor.next_waketime') == 'off'
-              else as_datetime(states('sensor.next_waketime'))|as_timestamp %}
-          {% set bed = 'off' if states('sensor.next_bedtime') == 'off'
-              else as_datetime(states('sensor.next_bedtime'))|as_timestamp %}
-
-
-          {% set bed = bed if bed < wake and (wake - time < 86400) else bed - 86400 %} {# if bed > wake - past bedtime, -24h (86400) #}
-          {% set wake = wake if (wake - time < 86400) else wake - 86400 %} {# if wake > 24 hours, - 24h (86400) #}
+          {% set wake = 'off' if states('sensor.next_waketime') == 'off' else as_datetime(states('sensor.next_waketime')) %}
+          {% if states('sensor.next_bedtime') == 'off' %} off
+          {% else %}
+            {% set bed = today_at(state_attr('sensor.next_bedtime','24hour')) %}
+            {% set bed = bed + timedelta(days=1) if bed < today_at(states('input_datetime.day_reset')) < now() else bed %}
+          {% endif %}
 
           {% if is_state('binary_sensor.someone_home','off') %}
             {{ 'Vacation' if is_state('input_select.occupancy_mode','Vacation') else 'Away' }}
           {% elif (bed == 'off' or wake == 'off') %}
             {{ 'Guest' if is_state('binary_sensor.owner_home','off') else 'Home' }}
-          {% elif bed < time < wake %}
+          {% elif bed < now() < wake %}
             {{ 'Night' if is_state('input_boolean.bedtime_delayed','off') else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
           {% else %}
-            {{ 'Guest' if is_state('input_boolean.guest_home','on')
-                  and is_state('binary_sensor.owner_home','off') else 'Home' }}
+            {{ 'Guest' if is_state('input_boolean.guest_home','on') and is_state('binary_sensor.owner_home','off') else 'Home' }}
           {% endif %}
 
 ###############################################################################
@@ -284,17 +280,14 @@
 
     - variables:
         occ_mode: "{{ states('input_select.occupancy_mode') }}"
-        alarm_mode: "{{ states('sensor.alarm_status') }}"
-        occupancy_changed: '{{ states.input_select.occupancy_mode.last_changed.timestamp() < 60 }}'
-        alarm_changed: '{{ states.alarm_control_panel.master.last_changed.timestamp() < 60 }}'
+        occupancy_changed: '{{ now() - states.input_select.occupancy_mode.last_changed < timedelta(minutes=1) }}'
+        alarm_changed: '{{ now() - states.alarm_control_panel.master.last_changed < timedelta(minutes=1)  }}'
     - choose:
         - conditions:
             - condition: state
               entity_id: input_boolean.occupancy_announcements
               state: 'on'
           sequence:
-            - delay: 5 # allow occupancy mode/alarm to set if person has left (avoid duplicate announcement)
-
             - service: script.turn_on
               target:
                 entity_id: script.tts_play
@@ -303,13 +296,13 @@
                   message: |
                     {%- if occupancy_changed -%}
                     The house is now in {{ occ_mode }} mode
-                    {%- endif -%}
-
-                    {%- if occupancy_changed and alarm_changed -%}, and the {% elif alarm_changed %} The {% endif -%}
-
+                    {%- endif %}
+                    {%- if occupancy_changed and alarm_changed -%}, and the
+                    {% elif occupancy_changed %}.
+                    {% elif alarm_changed %} The {% endif %}
                     {%- if alarm_changed and is_state('input_boolean.alarm_announcements','on') -%}
                       house alarm is {{ states('sensor.alarm_status') -}}
-                    {%- endif -%}.
+                    {%- endif %}.
                     {{ 'Personalized occupant automations are disabled in Guest mode.' if is_state(occ_mode,'Guest') }}
                   ignore_away: true
                   min_volume: "{{ 20 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 30 }}"

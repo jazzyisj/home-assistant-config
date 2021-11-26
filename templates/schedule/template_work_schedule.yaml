@@ -30,36 +30,48 @@
         {% endif %}
 
     # work holiday start within 24 hours and end not in past
+    # use timestamps, calendar times not tz aware
     - name: 'Work Holiday Tomorrow'
       unique_id: work_holiday_tomorrow
       state: >
-        {% set start = state_attr('calendar.work_holiday','start_time')|as_timestamp('unknown') %}
-        {% set end = state_attr('calendar.work_holiday','end_time')|as_timestamp('unknown') %}
-        {% set time = now().timestamp() %}
-          {{ false if (start == 'unknown' or end == 'unknown')
-                else (start - time <= 86400 and end - time > 0) }}
-      availability: "{{ states('calendar.work_holiday')|lower not in ['unknown','unavailable','none'] }}"
+        {% if state_attr('calendar.work_holiday','start_time')|lower not in ['unknown','unavailable','none']
+            and state_attr('calendar.work_holiday','end_time')|lower not in ['unknown','unavailable','none'] %}
+          {% set start = state_attr('calendar.work_holiday','start_time')|as_timestamp %}
+          {% set end = state_attr('calendar.work_holiday','end_time')|as_timestamp %}
+          {% set time = now().timestamp() %}
+            {{ false if (start == 'unknown' or end == 'unknown')
+                  else (start - time <= 86400 and end - time > 0) }}
+        {% endif %}
+      availability: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
 
     # work layoff start within 24 hours and end more than 24 hours away
     # same for jason vacation, sheri vacation - both must be true
+    # use timestamps, calendar times not tz aware
     - name: 'Work Vacation'
       unique_id: work_vacation
       icon: mdi:beach
       state: >
         {% set time = now().timestamp() %}
-        {% set layoff_start =  state_attr('calendar.work_layoff','start_time')|as_timestamp('unknown') %}
-        {% set layoff_end =  state_attr('calendar.work_layoff','end_time')|as_timestamp('unknown') %}
-        {% set vac_jason_start =  state_attr('calendar.work_vacation_jason','start_time')|as_timestamp('unknown') %}
-        {% set vac_jason_end =  state_attr('calendar.work_vacation_jason','end_time')|as_timestamp('unknown') %}
-        {% set vac_sheri_start =  state_attr('calendar.work_vacation_sheri','start_time')|as_timestamp('unknown') %}
-        {% set vac_sheri_end =  state_attr('calendar.work_vacation_sheri','end_time')|as_timestamp('unknown') %}
-
-        {{ (false if layoff_start == 'unknown' or layoff_end == 'unknown'
-              else layoff_start - time < 86400 and layoff_end - time > 86400 )
-            or ((false if vac_jason_start == 'unknown' or vac_jason_end == 'unknown'
-                  else vac_jason_start - time < 86400 and vac_jason_end - time > 86400)
-              and (false if vac_sheri_start == 'unknown' or vac_sheri_end == 'unknown'
-                  else vac_sheri_start - time < 86400 and vac_sheri_end - time > 86400)) }}
+        {% if state_attr('calendar.work_layoff','start_time')|lower not in ['','unknown','unavailable','none']
+            and state_attr('calendar.work_layoff','end_time')|lower not in ['','unknown','unavailable','none'] %}
+          {% set layoff_start =  state_attr('calendar.work_layoff','start_time')|as_timestamp %}
+          {% set layoff_end =  state_attr('calendar.work_layoff','end_time')|as_timestamp %}
+        {% endif %}
+        {% if state_attr('calendar.work_vacation_jason','start_time')|lower not in ['','unknown','unavailable','none']
+            and state_attr('calendar.work_vacation_jason','end_time')|lower not in ['','unknown','unavailable','none']
+            and state_attr('calendar.work_vacation_sheri','end_time')|lower not in ['','unknown','unavailable','none']
+            and state_attr('calendar.work_vacation_sheri','end_time')|lower not in ['','unknown','unavailable','none'] %}
+          {% set vac_jason_start =  state_attr('calendar.work_vacation_jason','start_time')|as_timestamp %}
+          {% set vac_jason_end =  state_attr('calendar.work_vacation_jason','end_time')|as_timestamp %}
+          {% set vac_sheri_start =  state_attr('calendar.work_vacation_sheri','start_time')|as_timestamp %}
+          {% set vac_sheri_end =  state_attr('calendar.work_vacation_sheri','end_time')|as_timestamp %}
+        {% endif %}
+        {{ (false if layoff_start is not defined or layoff_end is not defined
+              else layoff_start - time < 86400 and layoff_end - time >= 86400)
+            or (false if vac_jason_start is not defined or vac_jason_end is not defined
+              or vac_sheri_start is not defined or vac_sheri_end is not defined
+                else vac_jason_start - time < 86400 and vac_jason_end - time >= 86400
+                and vac_sheri_start - time < 86400 and vac_sheri_end - time >= 86400) }}
       availability: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
 
     - unique_id: shift_selection_alert
@@ -88,7 +100,8 @@
       state: "{{ states('input_select.work_shift_selection') }}"
 
     # checks for next days/afternoons calandar event to be less than 24 hours away
-    # if today shift is unknown, none then tomorrow shift is unknown
+    # if today shift is off, tomorrow shift is off
+    # use timestamps, calendar times not tz aware
     - unique_id: tomorrow_shift
       icon: >
         {% if is_state('input_boolean.work_schedule','off') %} mdi:alpha-x-circle
@@ -108,22 +121,25 @@
 
           {% if is_state('input_boolean.work_shift_override','on') %}{{ states('input_select.work_shift_selection') }}
           {% elif is_state('sensor.today_shift','Off') %} Off
-          {% elif days_start < 86400 and days_end > 86400  %} Days
-          {% elif afts_start < 86400 and afts_end > 86400 %} Afternoons
+          {% elif days_start < 86400 and days_end >= 86400  %} Days
+          {% elif afts_start < 86400 and afts_end >= 86400 %} Afternoons
           {% else %}{{ states('sensor.today_shift') }}
           {% endif %}
-        {% else %} unknown
         {% endif %}
+      availability: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
 
+    # use timestamps, calendar times not tz aware
+    # none/null value - calendar is empty
     - name: 'Next Work Holiday'
       unique_id: next_work_holiday
       icon: mdi:calendar-heart
       state: >
-        {% set start = state_attr('calendar.work_holiday','start_time')|as_timestamp %}
         {% if state_attr('calendar.work_holiday','start_time')|lower == 'none' %} Off
-        {% elif is_state('calendar.work_holiday','on') %} Today
-        {% elif 0 > start - now().timestamp() <= 86400 %} Tomorrow
-        {% else%} {{ start|timestamp_custom('%a, %b %d',true,'unknown') }}
+        {% else %}
+          {% set start = state_attr('calendar.work_holiday','start_time')|as_timestamp %}
+          {% if is_state('calendar.work_holiday','on') %} Today
+          {% elif 0 > start - now().timestamp() <= 86400 %} Tomorrow
+          {% else%} {{ start|timestamp_custom('%a, %b %d','true') }}
+          {% endif %}
         {% endif %}
-      availability: > # none/null value - calendar is empty
-        {{ states('calendar.work_holiday')|lower not in ['unknown','unavailable'] }}
+      availability: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
