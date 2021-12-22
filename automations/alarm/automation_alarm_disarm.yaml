@@ -1,18 +1,14 @@
 #######################################################################################################################
 ## Alarm - Disarm
 #######################################################################################################################
-- id: alarm_disarm
-  alias: '[Alarm] Disarm'
-  description: 'Disarm triggered alarm.'
+- id: alarm_auto_disarm
+  alias: '[Alarm] Auto Disarm'
+  description: 'Automatically disarm house alarm.'
   trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: disarm_alarm
-  condition:
-    - condition: state
-      entity_id: alarm_control_panel.master
-      state: triggered
+    - platform: state
+      entity_id: input_boolean.alarm_automation
+      to: 'off'
+      for: 5 # allow automation check to turn boolean back on
   action:
     - service: script.disarm_alarm
       data:
@@ -27,7 +23,7 @@
   mode: queued
   variables:
     person: >
-      {% if trigger.id == 'lock_keypad' %}{% set to_state = trigger.to_state.state %}
+      {% if trigger.id == 'lock' %}{% set to_state = trigger.to_state.state %}
       {% else %}{% set action = trigger.event.data['action'] %}
       {% endif %}
       {% if action in ['disarm_alarm_jason','open_garage_jason'] or to_state == 'Unlocked (Jason)' %} jason
@@ -36,7 +32,7 @@
       {% endif %}
   trigger:
     - platform: state
-      id: lock_keypad
+      id: lock
       entity_id:
         - sensor.side_door_lock_status
         - sensor.front_door_lock_status
@@ -71,11 +67,14 @@
       entity_id: input_boolean.alarm_automation
       state: 'on'
 
-    - "{{ is_state('input_boolean.lock_automation','on')
-      if trigger.id == 'lock_keypad' else true }}"
+    - condition: template
+      alias: 'Lock automation is enabled if lock trigger'
+      value_template: >
+        {{ is_state('input_boolean.lock_automation','on')
+            if trigger.id == 'lock' else true }}
 
-    - "{{ trigger.from_state.state|lower not in ['','unknown','unavailable','none']
-      if trigger.id == 'lock_keypad' else true }}"
+    - "{{ trigger.from_state.state|lower not in ['unknown','unavailable','none']
+      if trigger.id == 'lock' else true }}"
   action:
     - choose:
         - conditions: "{{ person in ['jason','sheri'] }}"
@@ -96,14 +95,14 @@
     - choose:
         - conditions:
             - condition: trigger
-              alias: Alarm was disarmed with a lock keypad
-              id: lock_keypad
+              alias: 'Alarm was disarmed with a lock keypad'
+              id: lock
           sequence:
             - service: script.disarm_alarm
               data:
                 person: '{{ person }}'
       default:
-        - wait_template: > #UNLOCKED  #TODO not working on sheri phone??
+        - wait_template: > #UNLOCKED 
             {% if person == 'jason' %}
               {{ (is_state('binary_sensor.jphone_device_locked','off')
                     and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')))
@@ -111,8 +110,8 @@
             {% elif person == 'sheri' %}
               {{ (is_state('binary_sensor.sphone_device_locked','off')
                     and (is_state('binary_sensor.sheri_home','on') or is_state('input_boolean.sheri_almost_home','on')))
-                  or is_state('alarm_control_panel.master','disarmed') }} }}
-            {% elif trigger.id == 'lock_keypad' %} true
+                  or is_state('alarm_control_panel.master','disarmed') }}
+            {% elif trigger.id == 'lock' %} true
             {% endif %}
           timeout: 600
 

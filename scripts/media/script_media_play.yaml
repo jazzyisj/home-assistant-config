@@ -16,6 +16,7 @@ media_play:
       description: 'Resume media play option.'
       example: 'playlist'
   variables:
+    media_type: "{{ media_type|default(states('input_select.last_media')) }}"
     resume: '{{ resume|default(false) }}'
     speaker_groups: "{{ state_attr('sensor.media_players','group') }}"
     player: >
@@ -90,11 +91,9 @@ media_play:
                   {% endif %}
                   {{ message }}
       default:
-        - wait_template: >
-            {{ is_state('input_boolean.tts_playing','off')
-                and is_state('script.media_stop','off') }}
-          timeout: # wait for tts/previous stop script to finish
-            seconds: 300
+        - wait_template: "{{ is_state('input_boolean.tts_playing','off') and is_state('script.media_stop','off') }}"
+          timeout: # wait for tts/previous media stop script to finish
+            minutes: 5
 
         - choose:
             - conditions: '{{ not wait.completed }}' # something is wrong
@@ -107,79 +106,6 @@ media_play:
                     duration: 30000
                     message: '{{ media_type|title }} cannot play. Something has gone wrong.'
           default:
-            - choose:
-                - conditions: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on',true) }}"
-                  sequence:
-                    - service: script.turn_on
-                      target:
-                        entity_id: script.tts_play
-                      data:
-                        variables:
-                          message: 'Your media selection will play when the mobile speakerphone in use has been turned off.'
-                          quiet_play: true
-                          media_player: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
-                          min_volume: "{{ states('input_number.' ~ media_type ~ '_volume')|int(0) }}"
-
-                    - wait_template: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on',false) }}"
-                      timeout:
-                        minutes: 15
-                      continue_on_timeout: false # after timeout media will not play
-
-            - variables:
-                media_on: >
-                  {% set media_on = namespace(value=[]) %}
-                  {% set media_sensors = state_attr('group.media_sensors','entity_id') %}
-                  {% for sensor in media_sensors %}
-                    {% set media_type = media_sensors[loop.index0][14:] %}
-                    {% if is_state(sensor,'on') %}
-                      {% set found = namespace(value=0) %}
-                      {% set old_player = expand(state_attr('sensor.media_players','players'))
-                          |selectattr('name','eq',states('input_select.' ~ media_type ~ '_media_player'))
-                          |map(attribute='entity_id')|list|join('') %}
-                      {% set old_sensor = 'sensor.' ~ old_player.split('.')[1] %}
-                      {% if player in speaker_groups %}
-                        {% for pitem in players %}
-                          {% if old_player in speaker_groups %}
-                            {% for olditem in state_attr(old_sensor,'players') %}
-                              {% if olditem == pitem %}{% set found.value = 1 %}{% endif %}
-                            {% endfor %}
-                          {% elif pitem == old_player  %}
-                            {% set found.value =1 %}
-                          {% endif %}
-                        {% endfor %}
-                      {% else %}
-                        {% if old_player in speaker_groups %}
-                          {% for olditem in state_attr(old_sensor,'players') %}
-                            {% if olditem == player %}{% set found.value = 1 %}{% endif %}
-                          {% endfor %}
-                        {% elif old_player == player %}
-                          {% set found.value = 1 %}
-                        {% endif %}
-                      {% endif %}
-                      {% if found.value == 1 %}
-                        {% set media_on.value = media_on.value + [media_type] %}
-                      {% endif %}
-                    {% endif %}
-                  {% endfor %}
-                  {{ media_on.value }}
-
-            - choose: # stop previous media if new media playing on previous media player or member of previous media speaker group
-                - conditions: '{{ media_on|count > 0 }}'
-                  sequence:
-                    - repeat:
-                        count: '{{ media_on|count }}'
-                        sequence:
-                          - variables:
-                              media_on_type: '{{ media_on[repeat.index-1] }}'
-                              media_on_players: "{{ state_attr('sensor.' ~ media_on_type ~ '_media_player','players') }}"
-
-                          - service: script.media_stop
-                            data:
-                              media_type: '{{ media_on_type }}'
-
-                          - wait_template: "{{ expand(media_on_players)|selectattr('state','in',['playing','paused','idle','unknown','unavailable'])|list|count == 0 }}"
-                            timeout: 30
-
             - choose:
                 - conditions:
                     - condition: template
@@ -206,6 +132,81 @@ media_play:
                         message: '{{ media_type|title }} cannot play. Selected media player is unavailable.'
               default:
                 - choose:
+                    - conditions: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on',true) }}"
+                      sequence:
+                        - service: script.turn_on
+                          target:
+                            entity_id: script.tts_play
+                          data:
+                            variables:
+                              message: 'Your media selection will play when the mobile speakerphone in use has been turned off.'
+                              quiet_play: true
+                              media_player: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
+                              min_volume: "{{ states('input_number.' ~ media_type ~ '_volume')|int(0) }}"
+
+                        - wait_template: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on',false) }}"
+                          timeout:
+                            minutes: 15
+                          continue_on_timeout: false # after timeout media will not play
+
+                - variables:
+                    media_on: >
+                      {% set media_on = namespace(value=[]) %}
+                      {% set media_sensors = state_attr('group.media_sensors','entity_id') %}
+                      {% for sensor in media_sensors %}
+                        {% set loop_media_type = media_sensors[loop.index0][14:] %}
+                        {% if is_state(sensor,'on') and loop_media_type != media_type %}
+                          {% set found = namespace(value=0) %}
+                          {% set old_player = expand(state_attr('sensor.media_players','players'))
+                              |selectattr('name','eq',states('input_select.' ~ loop_media_type ~ '_media_player'))
+                              |map(attribute='entity_id')|list|join('') %}
+                          {% set old_sensor = 'sensor.' ~ old_player.split('.')[1] %}
+                          {% if player in speaker_groups %}
+                            {% for pitem in players %}
+                              {% if old_player in speaker_groups %}
+                                {% for olditem in state_attr(old_sensor,'players') %}
+                                  {% if olditem == pitem %}
+                                    {% set found.value = 1 %}{% endif %}
+                                {% endfor %}
+                              {% elif pitem == old_player %}
+                                {% set found.value =1 %}
+                              {% endif %}
+                            {% endfor %}
+                          {% else %}
+                            {% if old_player in speaker_groups %}
+                              {% for olditem in state_attr(old_sensor,'players') %}
+                                {% if olditem == player %}
+                                  {% set found.value = 1 %}{% endif %}
+                              {% endfor %}
+                            {% elif old_player == player %}
+                              {% set found.value = 1 %}
+                            {% endif %}
+                          {% endif %}
+                          {% if found.value == 1 %}
+                            {% set media_on.value = media_on.value + [loop_media_type] %}
+                          {% endif %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ media_on.value }}
+
+                - choose: # stop previous media if new media playing on previous media player or member of previous media speaker group
+                    - conditions: '{{ media_on|count > 0 and resume != false }}'
+                      sequence:
+                        - repeat:
+                            count: '{{ media_on|count }}'
+                            sequence:
+                              - variables:
+                                  media_on_type: '{{ media_on[repeat.index-1] }}'
+                                  media_on_players: "{{ state_attr('sensor.' ~ media_on_type ~ '_media_player','players') }}"
+
+                              - service: script.media_stop
+                                data:
+                                  media_type: '{{ media_on_type }}'
+
+                              - wait_template: "{{ expand(media_on_players)|selectattr('state','in',['playing','paused','idle','unknown','unavailable'])|list|count == 0 }}"
+                                timeout: 30
+
+                - choose:
                     #BLOOP set volumes to 0 before media play avoid google bloops if media player turns on
                     - conditions: "{{ resume != 'playlist' }}"
                       sequence:
@@ -226,7 +227,7 @@ media_play:
 
                 - wait_for_trigger:
                     - platform: template
-                      value_template: "{{  is_state(player,'playing')  }}"
+                      value_template: "{{ is_state(player,'playing') }}"
                       for: 2 # media players can momentarily show playing state even if media doesn't play (streaming radio)
                   timeout:
                     seconds: 15 #SPOTIFY slow
@@ -260,6 +261,12 @@ media_play:
                             - service: input_boolean.turn_off
                               target:
                                 entity_id: 'input_boolean.{{ media_type }}_failed'
+
+                            - service: input_select.select_option
+                              target:
+                                entity_id: input_select.last_media
+                              data:
+                                option: '{{ media_type }}'
 
                             - choose:
                                 - conditions: "{{ resume != 'playlist' }}"

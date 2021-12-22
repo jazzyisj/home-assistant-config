@@ -1,10 +1,9 @@
-
-#######################################################################################################################
+###############################################################################
 ## Scene - Shower Mode On
-#######################################################################################################################
+###############################################################################
 - id: scene_shower_mode_on
-  alias: "[Scene] Shower Mode On"
-  description: "Turn on shower mode."
+  alias: '[Scene] Shower Mode On'
+  description: 'Turn on shower mode.'
   trigger:
     - platform: state
       entity_id: input_boolean.shower_mode
@@ -23,52 +22,6 @@
       data:
         duration:
           minutes: "{{ states('input_number.shower_mode_duration')|int(0) }}"
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.light_automation
-              state: 'on'
-          sequence:
-            - choose:
-                - conditions:
-                    - condition: numeric_state
-                      alias: "Bathroom illuminance below threshold"
-                      entity_id: sensor.upstairs_bathroom_sensor_illuminance
-                      below: 50
-                  sequence:
-                    - service: light.turn_on
-                      target:
-                        entity_id: light.upstairs_bathroom_vanity_rgb_light
-
-            - service: light.turn_on
-              target:
-                entity_id: light.upstairs_bathroom_shower_light
-              data:
-                brightness: 255
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.vent_fan_automation
-              state: 'on'
-          sequence:
-            - service: automation.turn_off
-              target:
-                entity_id: automation.vent_fan_upstairs_bathroom_fan_in_use
-
-            - service: fan.turn_on
-              target:
-                entity_id: fan.upstairs_bathroom_fan
-              data:
-                percentage: 100
-
-            - delay: # delay to allow devices to change state
-                seconds: 5 #ZWAVE fans are slow to change
-
-            - service: automation.turn_on
-              target:
-                entity_id: automation.vent_fan_upstairs_bathroom_fan_in_use
 
     - choose:
         - conditions:
@@ -125,13 +78,12 @@
                   data:
                     preset: shower
 
-#######################################################################################################################
+###############################################################################
 ## Scene - Shower Mode Off
-## vent fans turn off with sensor/timer
-#######################################################################################################################
+###############################################################################
 - id: scene_shower_mode_off
-  alias: "[Scene] Shower Mode Off"
-  description: "Turn off shower mode."
+  alias: '[Scene] Shower Mode Off'
+  description: 'Turn off shower mode.'
   max_exceeded: silent # recursive call
   trigger:
     - platform: state
@@ -159,94 +111,53 @@
     - condition: state
       entity_id: input_select.occupancy_mode
       state:
-        - Night
         - Home
         - Guest
 
+    - condition: state
+      entity_id:
+        - input_boolean.media_player_automation
+        - input_boolean.media_preset_enabled_shower
+      state: 'on'
+
     - choose:
         - conditions:
-            - condition: state
-              entity_id: input_boolean.light_automation
-              state: 'on'
+            - condition: template
+              alias: 'Bathroom speaker is not in a playing speaker group.'
+              value_template: >
+                {% set media_type = states('input_select.media_preset_type_shower')|lower %}
+                {{ states('sensor.' ~ media_type ~ '_media_player') == 'media_player.bathroom_speaker' }}
           sequence:
-            - choose:
-                - conditions: # light may not have been turned on during shower start
-                    - condition: numeric_state
-                      alias: "Bathroom illuminance below threshold"
-                      entity_id: sensor.upstairs_bathroom_sensor_illuminance
-                      below: input_number.bathroom_illuminance_threshold
-                  sequence:
-                    - service: light.turn_on # no motion will turn it off
-                      target:
-                        entity_id: light.upstairs_bathroom_vanity_rgb_light
-                      data:
-                        transition: 2
-              default:
-                - service: light.turn_off
-                  target:
-                    entity_id: light.upstairs_bathroom_vanity_rgb_light
-                  data:
-                    transition: 2
-
-            - service: light.turn_off
-              target:
-                entity_id: light.upstairs_bathroom_shower_light
+            - service: script.media_stop
               data:
-                transition: 2
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id:
-                - input_boolean.media_player_automation
-                - input_boolean.media_preset_enabled_shower
-              state: 'on'
-
-            # night mode off turned media player, reset volume
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state:
-                - Home
-                - Guest
-          sequence:
-            - choose:
-                - conditions:
-                    - condition: template
-                      alias: "Bathroom speaker is not in a playing speaker group."
-                      value_template: >
-                        {% set media_type = states('input_select.media_preset_type_shower')|lower %}
-                        {{ states('sensor.' ~ media_type ~ '_media_player') == 'media_player.bathroom_speaker' }}
-                  sequence:
-                    - service: script.media_stop
-                      data:
-                        media_type: "{{ states('input_select.media_preset_type_shower')|lower }}"
-              default:
-                - choose:
-                    - conditions:
-                        - condition: state
-                          entity_id: input_boolean.tts_playing
-                          state: 'on'
-                      sequence:
-                        # set bathroom speaker restore volumes (tts, pre shower) to media volume
-                        # for appropriate post tts, shower off volume levels
-                        - service: input_number.set_value
-                          alias: "Set bathroom speaker restore volumes to media volume"
-                          target:
-                            entity_id:
-                              - input_number.bathroom_speaker_pre_shower_volume
-                              - input_number.bathroom_speaker_tts
-                          data:
-                            value: >
-                              {% set media_type = states('input_select.media_preset_type_shower')|lower %}
-                              {{ states('input_number.' ~ media_type ~ '_volume')|float(-1)/100 }}
-
-                        - wait_template: "{{ is_state('input_boolean.tts_playing','off') }}"
-                          timeout: 120
-                          continue_on_timeout: false
-
-                - service: media_player.volume_set
-                  alias: "Reset bathroom speaker to default media volume"
+                media_type: "{{ states('input_select.media_preset_type_shower')|lower }}"
+      default:
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.tts_playing
+                  state: 'on'
+              sequence:
+                # set bathroom speaker restore volumes (tts, pre shower) to media volume
+                # for appropriate post tts, shower off volume levels
+                - service: input_number.set_value
+                  alias: 'Set bathroom speaker restore volumes to media volume'
                   target:
-                    entity_id: media_player.bathroom_speaker
+                    entity_id:
+                      - input_number.bathroom_speaker_pre_shower_volume
+                      - input_number.bathroom_speaker_tts
                   data:
-                    volume_level: "{{ states('input_number.bathroom_speaker_pre_shower_volume')|float(-1) }}"
+                    value: >
+                      {% set media_type = states('input_select.media_preset_type_shower')|lower %}
+                      {{ states('input_number.' ~ media_type ~ '_volume')|float(-1)/100 }}
+
+                - wait_template: "{{ is_state('input_boolean.tts_playing','off') }}"
+                  timeout: 120
+                  continue_on_timeout: false
+
+        - service: media_player.volume_set
+          alias: 'Reset bathroom speaker to default media volume'
+          target:
+            entity_id: media_player.bathroom_speaker
+          data:
+            volume_level: "{{ states('input_number.bathroom_speaker_pre_shower_volume')|float(-1) }}"

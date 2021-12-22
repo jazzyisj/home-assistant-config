@@ -2,18 +2,16 @@
 ## Ceiling Fan - Upstairs Bedroom Fan In Use
 #######################################################################################################################
 - id: ceiling_fan_upstairs_bedroom_fan_in_use
-  alias: "[Ceiling Fan] Upstairs Bedroom Fan In Use"
-  description: "Turn in use timer on when device state changes."
+  alias: '[Ceiling Fan] Upstairs Bedroom Fan In Use'
+  description: 'Turn in use timer on when device state changes.'
   mode: restart
   trigger:
     - platform: state
       entity_id: fan.upstairs_bedroom_fan
-      to:
-        - 'on'
-        - 'off'
-      from:
-        - 'on'
-        - 'off'
+  condition:
+    - condition: state # fan states change on startup?
+      entity_id: input_boolean.startup_pending
+      state: 'off'
   action:
     - service: timer.start
       entity_id: timer.upstairs_bedroom_fan
@@ -22,12 +20,14 @@
 ## Ceiling Fan - Upstairs Bedroom Fan Auto On
 #######################################################################################################################
 - id: ceiling_fan_upstairs_bedroom_fan_auto_on
-  alias: "[Ceiling Fan] Upstairs Bedroom Fan Auto On"
-  description: "Turn ceiling fan on."
-  mode: restart
+  alias: '[Ceiling Fan] Upstairs Bedroom Fan Auto On'
+  description: 'Turn ceiling fan on.'
+  max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: binary_sensor.hvac_fan
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
       to: 'on'
   condition:
     - condition: state
@@ -37,28 +37,19 @@
     - condition: state
       entity_id: timer.upstairs_bedroom_fan
       state: idle
-
-    - condition: state # don't turn on just before bedtime
-      entity_id: binary_sensor.bedtime_active
-      state: 'off'
-
-    - condition: not # don't turn on at night
-      conditions:
-        - condition: state
-          entity_id: input_select.occupancy_mode
-          state: Night
   action:
-    - service: automation.turn_off # turn off automation so we don't trigger device in use timers
+    # prevent triggering device in use timers
+    - service: automation.turn_off
       entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
 
     - service: fan.turn_on
       target:
         entity_id: fan.upstairs_bedroom_fan
       data:
-        percentage: 50
+        percentage: 50 # fan auto on default speed
 
-    - delay: # delay to allow devices to change state
-        seconds: 15  #ZWAVE fans are slow to change
+    - delay: #ZWAVE fans are slow to report state change
+        seconds: 15
 
     - service: automation.turn_on
       entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
@@ -67,61 +58,70 @@
 ## Ceiling Fan - Upstairs Bedroom Fan Auto Off
 #######################################################################################################################
 - id: ceiling_fan_upstairs_bedroom_fan_auto_off #OCC
-  alias: "[Ceiling Fan] Upstairs Bedroom Fan Auto Off"
-  description: "Turn ceiling fan off."
-  mode: restart
+  alias: '[Ceiling Fan] Upstairs Bedroom Fan Auto Off'
+  description: 'Turn ceiling fan off.'
+  max_exceeded: silent
   trigger:
-    - platform: state # failsafe if fan left on
+    - platform: state
       entity_id: fan.upstairs_bedroom_fan
-      to: 'on'
       for:
         hours: 8
 
     - platform: state
+      id: occupancy
       entity_id: input_select.occupancy_mode
       to:
         - Away
         - Vacation
       for:
-        minutes: 2 # allow timer to cancel, occupant to leave
+        minutes: 1 # allow timer to cancel
 
     - platform: state
-      entity_id: sensor.climate_hvac_action
-      to: idle
+      id: schedule
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+      to: 'off'
 
-    - platform: state # run at startup to prevent fan from being stranded on
+    # prevent fan from being stranded on
+    - platform: state
+      id: startup
       entity_id: input_boolean.startup_pending
       to: 'off'
   condition:
     - condition: state
       entity_id:
         - input_boolean.ceiling_fan_automation
-        - fan.upstairs_bedroom_fan # only run if fan is on #ZWAVE - device ready
+        - fan.upstairs_bedroom_fan
       state: 'on'
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id == 'occupancy' else true }}
+
+    - condition: state
+      alias: 'HVAC fan or fan schedule is not on'
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+      state: 'off'
 
     - condition: state
       entity_id: timer.upstairs_bedroom_fan
       state: idle
-
-    - condition: template
-      alias: "Presence automation is enabled if trigger is occupancy mode"
-      value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-            if trigger.entity_id == 'input_select.occupancy_mode' else true }}
-
-    - condition: template
-      alias: "False if HVAC is running and HVAC control is on"
-      value_template: >
-        {{ is_state('input_boolean.hvac_fan_control','off') if not is_state('sensor.climate_hvac_action','idle') else true }}
   action:
-    - service: automation.turn_off  # turn off automation so we don't trigger device in use timers
+    # prevent triggering device in use timers
+    - service: automation.turn_off
       entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use
 
     - service: fan.turn_off
       entity_id: fan.upstairs_bedroom_fan
 
-    - delay: # delay to allow devices to change state
-        seconds: 15  #ZWAVE fans are slow to change
+    #ZWAVE fans are slow to report state change
+    - delay:
+        seconds: 15
 
     - service: automation.turn_on
       entity_id: automation.ceiling_fan_upstairs_bedroom_fan_in_use

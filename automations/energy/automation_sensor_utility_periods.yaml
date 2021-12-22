@@ -1,55 +1,34 @@
-#######################################################################################################################
+###############################################################################
 ## Energy - Utility Periods
 # https://www.home-assistant.io/integrations/utility_meter/
 # https://enwin.com/electric-rates-residential/
-# may 1 - oct 31 summer
-# nov 1 - april 30 - flip peak and mid
-# 7am - 11am mid - summer
-# 11am - 5 pm peak - summer
-# 5 pm - 7 pm mid - summer
-# 7pm - 7am offpeak
-# weekends holidays off peak
-#######################################################################################################################
 
-#######################################################################################################################
-## Energy - Peak Utility Period  0.1842
-#######################################################################################################################
-- id: energy_peak_utility_period
-  alias: "[Energy] Peak Utility Period"
-  description: "Set utility meters to peak period."
+## Peak Utility Period 0.1842
+## Midpeak Utility Period 0.1272
+## Offpeak Utility Period 0.0962
+## peak and midpeak swap May 1 - Oct 31
+###############################################################################
+
+###############################################################################
+## Energy - Set Utility Period
+###############################################################################
+- id: energy_set_utility_period
+  alias: '[Energy] Set Utility Period'
+  description: 'Reset utility meters period.'
   trigger:
-    - platform: time
-      at: '11:00:00'
-  condition:
-    - condition: state
-      entity_id: binary_sensor.utilities_workday
-      state: 'on'
-  action:
-    - service: utility_meter.select_tariff
-      target:
-        entity_id:
-          - utility_meter.daily_energy_use
-          - utility_meter.monthly_energy_use
-      data: # peak and midpeak swap May 1 - Oct 31
-        tariff: "{{ 'peak' if 5 >= now().month < 11 else 'midpeak' }}"
-
-#######################################################################################################################
-## Energy - Midpeak Utility Period  0.1272
-# peak and midpeak swap May 1 - Oct 31
-#######################################################################################################################
-- id: energy_midpeak_utility_period
-  alias: "[Energy] Midpeak Utility Period"
-  description: "Set utility meters to midpeak period."
-  trigger:
-    - platform: time
-      at: '07:00:00'
+    - platform: state
+      entity_id:
+        - input_boolean.startup_pending
+        - input_boolean.dev_mode
+      to: 'off'
 
     - platform: time
-      at: '17:00:00'
-  condition:
-    - condition: state
-      entity_id: binary_sensor.utilities_workday
-      state: 'on'
+      at:
+        - '07:00:00'
+        - '11:00:00'
+        - '17:00:00'
+        - '19:00:00'
+
   action:
     - service: utility_meter.select_tariff
       target:
@@ -57,22 +36,15 @@
           - utility_meter.daily_energy_use
           - utility_meter.monthly_energy_use
       data:
-        tariff: "{{ 'midpeak' if 5 >= now().month < 11 else 'peak' }}"
-
-#######################################################################################################################
-## Energy - Offpeak Utility Period 0.0962
-#######################################################################################################################
-- id: energy_offpeak_utility_period
-  alias: "[Energy] Offpeak Utility Period"
-  description: "Set utility meters to offpeak period."
-  trigger:
-    - platform: time
-      at: '19:00:00'
-  action:
-    - service: utility_meter.select_tariff
-      target:
-        entity_id:
-          - utility_meter.daily_energy_use
-          - utility_meter.monthly_energy_use
-      data:
-        tariff: offpeak
+        tariff: >
+          {% set time = states('sensor.time') %}
+          {% set summer = 5 >= now().month < 11 %}
+          {% if is_state('binary_sensor.utilities_workday','on') %}
+            {% if '00:00' < time < '07:00' %} offpeak
+            {% elif '07:00' <= time < '11:00' %} {{ 'midpeak' if summer else 'peak' }}
+            {% elif '11:00' <= time < '17:00'  %} {{ 'peak' if summer else 'midpeak' }}
+            {% elif '17:00' <= time < '19:00'  %} {{ 'midpeak' if summer else 'peak' }}
+            {% else %} offpeak
+            {% endif %}
+          {% else %} offpeak
+          {% endif %}

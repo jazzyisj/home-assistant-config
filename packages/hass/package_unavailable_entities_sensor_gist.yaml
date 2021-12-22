@@ -1,46 +1,43 @@
-###############################################################################
+#######################################################################################################################
 ## Package - Unavailable Entities Sensor
-## Count and list of entities with a state of unavailable, unknown, or none (null)
+## Count and list entities with a state of unavailable, unknown, or none (null)
 ##
 ## state: number of unavailable entities
-## attribute - entities: list object of unavailable entity ids
+## attribute.entities: list of unavailable entity ids
 ##
 ## NOTES:
 ##  - Home Assistant v0.117+ is required
-##  - This sensor updates once per minute.  State changes may take up to one minute to register.
+##  - Sensor updates once per minute so state changes may take up to one minute to register.
 ##  - The ignored_entities group to declare ignored entities.  This group is REQUIRED even if empty.
-##  - ignore_time is the number of seconds to ignore all unavailable sensors
-##  - ignore_time durations of less than 5 seconds can result in template_loop log warnings
-###############################################################################
+##  - ignore_sec is the number of seconds to ignore an entity once it becomes unavailable
+##  - WARNING - ignore_time durations of less than 5 seconds can result in template_loop log warnings
+#######################################################################################################################
 
-#OPTIONAL - Can be used to filter out template loop warnings if desired
-
-logger:
-  filters:
-    homeassistant.components.template.template_entity:
-      - "Template loop detected while processing event"
+#OPTIONAL - enable to filter out template loop warnings if needed
+# logger:
+#   filters:
+#     homeassistant.components.template.template_entity:
+#       - 'Template loop detected while processing event'
 
 # REQUIRED this is the template sensor
-sensor:
-  - platform: template
-    sensors:
-      unavailable_entities:
-        friendly_name: "Unavailable Entities"
-        unique_id: unavailable_entities
+template:
+  - sensor:
+      - unique_id: unavailable_entities
+        name: 'Unavailable Entities'
         unit_of_measurement: entities
-        value_template: >
+        state: >
           {% if state_attr('sensor.unavailable_entities','entities')|lower not in ['unknown','unavailable','none'] %}
             {{ state_attr('sensor.unavailable_entities','entities')|count }}
           {% endif %}
-        attribute_templates :
+        attributes:
           entities: >
-            {% set ignore_time = 15 %}
+            {% set ignore_sec = 60 %}
             {% set unavail = namespace(entities=[]) %}
             {% set entities = states|rejectattr('domain','eq','group')
               |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
               |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list %}
             {% for item in entities %}
-              {% if states[item].last_changed.timestamp() < now().timestamp() - ignore_time %}
+              {% if states[item].last_changed < now() - timedelta(seconds=ignore_sec) %}
                 {% set unavail.entities = unavail.entities + [item] %}
               {% endif %}
             {% endfor %}
@@ -50,14 +47,15 @@ sensor:
 #IMPORTANT - This group MUST exist even if empty for sensor template to render.
 group:
   ignored_entities:
-    entities: !include /config/include/entities/ignored_entities.yaml
+    entities:
+      !include /config/include/entities/ignored_entities.yaml
       #- binary_sensor.updater # always unknown after restart
 
 # OPTIONAL Example automation to demonstrate how you can utilize this sensor
 automation:
   - id: unavailable_entities_notification
-    alias: "Unavailable Entities Notification"
-    description: "Create persistent notification if there are unavailable entities, dismiss if none."
+    alias: 'Unavailable Entities Notification'
+    description: 'Create persistent notification if there are unavailable entities, dismiss if none.'
     mode: restart
     trigger:
       - platform: state
@@ -75,6 +73,6 @@ automation:
         default:
           - service: persistent_notification.create
             data:
-              title: "Unavailable Entities"
+              title: 'Unavailable Entities'
               message: "- {{ expand(state_attr('sensor.unavailable_entities','entities'))|map(attribute='entity_id')|join('\n- ') }}"
               notification_id: unavailable_entities

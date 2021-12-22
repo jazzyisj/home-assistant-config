@@ -82,26 +82,41 @@
       icon: mdi:weather-pouring
       state: >
         {% set found = namespace(value=0) %}
-        {% if state_attr('weather.windsor_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
-          and state_attr('weather.windsor_hourly','forecast')[0] is defined %}
         {% set threshold = 25 %}
-        {% set forecast = state_attr('weather.windsor_hourly','forecast') %}
-        {% for item in forecast %}
-          {% if loop.index0 < 12 and item.precipitation_probability|int(0) >= threshold %}
-            {% set found.value = 1 %}
+        {% if state_attr('weather.windsor_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
+            and state_attr('weather.windsor_hourly','forecast')[0] is defined %}
+          {% set forecast = state_attr('weather.windsor_hourly','forecast') %}
+          {% for item in forecast %}
+            {% if loop.index0 < 12 and item.precipitation_probability|int(0) >= threshold %}
+              {% set found.value = 1 %}
+            {% endif %}
+          {% endfor %}
+        {% elif state_attr('weather.kdtw_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
+            and state_attr('weather.kdtw_hourly','forecast')[0] is defined %}
+          {% set forecast = state_attr('weather.kdtw_hourly','forecast') %}
+          {% for item in forecast %}
+            {% if loop.index0 < 12 and item.precipitation_probability|int(0) >= threshold %}
+              {% set found.value = 1 %}
+            {% endif %}
+          {% endfor %}
+        {% elif state_attr('weather.home','forecast')|lower not in ['', '[]','unknown','unavailable','none']
+            and state_attr('weather.home','forecast')[0] is defined %}
+          {% if state_attr('weather.home','forecast')[0].precipitation_probability|int(0) >= threshold %}
+              {% set found.value = 1 %}
           {% endif %}
-        {% endfor %}
         {% endif %}
         {{ found.value == 1 }}
       availability: >
-        {% if state_attr('weather.windsor_hourly','forecast')|lower not in ['unknown','unavailable','none'] %}
-            {{ state_attr('weather.windsor_hourly','forecast')[0] is defined }}
-        {% endif %}
+        {{ (state_attr('weather.windsor_hourly','forecast')|lower not in ['unknown','unavailable','none']
+            and state_attr('weather.windsor_hourly','forecast')[0] is defined)
+          or (state_attr('weather.kdtw_hourly','forecast')|lower not in ['unknown','unavailable','none']
+            and state_attr('weather.kdtw_hourly','forecast')[0] is defined)
+          or (state_attr('weather.home','forecast')|lower not in ['unknown','unavailable','none']
+            and state_attr('weather.home','forecast')[0] is defined) }}
 
-###############################################################################
-## GDACS alerts are sorted by alert_level then effective date
-###############################################################################
-- binary_sensor:
+    ###############################################################################
+    ## GDACS alerts are sorted by alert_level then effective date
+    ###############################################################################
     - name: 'GDACS Alert Active'
       unique_id: gdacs_alert_active
       icon: mdi:pulse
@@ -110,26 +125,26 @@
         last_alert: > # sensor can be > 0 but no geo_location entities
           {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
             {{ states.geo_location|selectattr('attributes.source','eq','gdacs')
-                |sort(reverse=true,  attribute="attributes.from_date")
+                |sort(reverse=true,attribute='attributes.from_date')
                 |map(attribute='attributes.friendly_name')|first }}
           {% endif %}
         last_alert_desc: >
           {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
             {{ states.geo_location|selectattr('attributes.source','eq','gdacs')
-                |sort(reverse=true,  attribute="attributes.from_date")
+                |sort(reverse=true,attribute='attributes.from_date')
                 |map(attribute='attributes.description')|first }}
           {% endif %}
         last_alert_date: >
           {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
             {% set last_date = states.geo_location|selectattr('attributes.source','eq','gdacs')
-                |sort(reverse=true,  attribute="attributes.from_date")
+                |sort(reverse=true,attribute='attributes.from_date')
                 |map(attribute='attributes.from_date')|first %}
-            {{ last_date|as_timestamp('unknown')|timestamp_custom('%Y-%m-%d',true,'unknown') }}
+            {{ last_date|as_timestamp|timestamp_custom('%Y-%m-%d',true,none) }}
           {% endif %}
         last_alert_severity: >
           {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
             {{ states.geo_location|selectattr('attributes.source','eq','gdacs')
-                |sort(reverse=true, attribute="attributes.from_date")
+                |sort(reverse=true, attribute='attributes.from_date')
                 |map(attribute='attributes.alert_level')|first }}
           {% endif %}
 
@@ -159,18 +174,6 @@
         {% elif is_state('binary_sensor.pressure_falling','on') %} Falling
         {% else %} Steady
         {% endif %}
-
-    - unique_id: outdoor_temperature_daily_max
-      device_class: temperature
-      state_class: measurement
-      unit_of_measurement: °C
-      state: "{{ state_attr('sensor.outdoor_temperature_daily','max_value') }}"
-
-    - unique_id: outdoor_temperature_daily_min
-      device_class: temperature
-      state_class: measurement
-      unit_of_measurement: °C
-      state: "{{ state_attr('sensor.outdoor_temperature_daily','min_value') }}"
 
     - name: 'Precipitation Probability: NWS'
       unique_id: nws_precipitation_probability
@@ -209,7 +212,7 @@
 
     #IDEA add icons for extra
 
-    # envcan, nws, accuweather, darksky, climacell
+    # envcan, nws, accuweather, darksky
     - name: 'Current Condition'
       unique_id: current_condition #DARKSKY
       icon: mdi:weather-partly-rainy
@@ -222,8 +225,6 @@
           {% set condition = states('weather.home') %}
         {% elif states('sensor.dark_sky_icon')|lower not in ['unknown','unavailable','none'] %}
           {% set condition = states('sensor.dark_sky_icon') %}
-        {% elif states('weather.climacell_nowcast')|lower not in ['unknown','unavailable','none'] %}
-          {% set condition = states('weather.climacell_nowcast') %}
         {% endif %}
         {% if condition|lower == 'clear' and is_state('sensor.day_night','Day') %} sunny
         {% elif condition|lower == 'clear' and is_state('sensor.day_night','Night') %} clear-night
@@ -235,6 +236,7 @@
         {% elif condition|lower == 'light snow' %} snowy
         {% elif condition|lower == 'thunderstorm' %} lightning-rainy
         {% elif condition|lower == 'heavy rain' %} pouring
+        {% elif condition|lower == 'precipitation' %} rainy
         {% elif condition|lower == 'wind' %} windy
         {% else %} {{ condition|lower }}
         {% endif %}
@@ -244,16 +246,14 @@
           {% elif states('weather.kdtw_hourly')|lower not in ['unknown','unavailable','none'] %} National Weather Service
           {% elif states('weather.home')|lower not in ['unknown','unavailable','none'] %} Accuweather
           {% elif states('sensor.dark_sky_icon')|lower not in ['unknown','unavailable','none'] %} Dark Sky
-          {% elif states('weather.climacell_nowcast')|lower not in ['unknown','unavailable','none'] %} Climacell
           {% endif %}
       availability: >
         {{ states('sensor.windsor_condition')|lower not in ['unknown','unavailable','none']
           or states('weather.kdtw_hourly')|lower not in ['unknown','unavailable','none']
           or states('weather.home')|lower not in ['unknown','unavailable','none']
-          or states('sensor.dark_sky_icon')|lower not in ['unknown','unavailable','none']
-          or states('weather.climacell_nowcast')|lower not in ['unknown','unavailable','none'] }}
+          or states('sensor.dark_sky_icon')|lower not in ['unknown','unavailable','none'] }}
 
-    # envcan, nws, accuweather, climacell
+    # envcan, nws, accuweather
     - name: 'Outdoor Temperature'
       unique_id: outdoor_temperature
       device_class: temperature
@@ -266,23 +266,20 @@
           {{ states('sensor.kdtw_temperature')|float('unknown') }}
         {% elif is_number(state_attr('weather.home','temperature')) %}
           {{ state_attr('weather.home','temperature')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_temperature')) %}
-          {{ states('sensor.climacell_temperature')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.windsor_temperature')) %} Environment Canada
           {% elif is_number(states('sensor.kdtw_temperature')) %} National Weather Service
           {% elif is_number(state_attr('weather.home','temperature')) %} Accuweather
-          {% elif is_number(states('sensor.climacell_temperature')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_temperature'))
           or is_number(states('sensor.kdtw_temperature'))
-          or is_number(state_attr('weather.home','temperature'))
-          or is_number(states('sensor.climacell_temperature')) }}
+          or is_number(state_attr('weather.home','temperature')) }}
 
-    # accuweather, envcan, nws, climacell
+    #IDEA improve this sensor head index vs windchill etc, monitor they seem to jump around
+    # accuweather, envcan, nws
     - name: 'Outdoor Apparent Temperature'
       unique_id: outdoor_apparent_temperature
       device_class: temperature
@@ -301,8 +298,6 @@
           {{ states('sensor.kdtw_heat_index')|float('unknown') }}
         {% elif is_number(states('sensor.kdtw_wind_chill')) %}
           {{ states('sensor.kdtw_wind_chill')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_feels_like')) %}
-          {{ states('sensor.climacell_feels_like')|float('unknown') }}
         {% else %}
           {{ states('sensor.outdoor_temperature')|float('unknown') }}
         {% endif %}
@@ -314,11 +309,17 @@
             or is_number(states('sensor.windsor_wind_chill')) %} Environment Canada
           {% elif is_number(states('sensor.kdtw_heat_index'))
             or is_number(states('sensor.kdtw_wind_chill')) %} National Weather Service
-          {% elif is_number(states('sensor.climacell_feels_like')) %} Climacell
           {% else %} Temperature Sensor
           {% endif %}
+      availability: >
+        {{ is_number(states('sensor.home_realfeel_temperature'))
+            or is_number(states('sensor.home_apparent_temperature'))
+            or (is_number(states('sensor.windsor_humidex'))
+              or is_number(states('sensor.windsor_wind_chill')))
+            or (is_number(states('sensor.kdtw_heat_index'))
+              or is_number(states('sensor.kdtw_wind_chill'))) }}
 
-    # envcan, nws, accuweather, climacell
+    # envcan, nws, accuweather
     - name: 'Outdoor High Temperature'
       unique_id: outdoor_high_temperature
       device_class: temperature
@@ -333,9 +334,6 @@
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
           {{ state_attr('weather.home','forecast')[0].temperature|float('unknown') }}
-        {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['','[]','unknown','unavailable','none']
-            and state_attr('weather.climacell_daily','forecast')[0] is defined %}
-          {{ state_attr('weather.climacell_daily','forecast')[0].temperature|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
@@ -344,19 +342,15 @@
               and state_attr('weather.kdtw_daynight','forecast')[0] is defined %} National Weather Service
           {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
               and state_attr('weather.home','forecast')[0] is defined %} Accuweather
-          {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['','[]','unknown','unavailable','none']
-              and state_attr('weather.climacell_daily','forecast')[0] is defined %} Climacell
           {% endif %}
       availability: >
-        {{ is_number(states('sensor.windsor_high_temperature')
-          or (state_attr('weather.kdtw_daynight','forecast')|lower not in ['','[]','unknown','unavailable','none']
+        {{ is_number(states('sensor.windsor_high_temperature'))
+            or (state_attr('weather.kdtw_daynight','forecast')|lower not in ['','[]','unknown','unavailable','none']
                 and state_attr('weather.kdtw_daynight','forecast')[0] is defined)
-          or (state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none'])
-                and state_attr('weather.home','forecast')[0] is defined)
-          or (state_attr('weather.climacell_daily','forecast')|lower not in ['','[]','unknown','unavailable','none']
-                and state_attr('weather.climacell_daily','forecast')[0] is defined) }}
+            or (state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
+                and state_attr('weather.home','forecast')[0] is defined) }}
 
-    # envcan, nws, accuweather, climacell
+    # envcan, nws, accuweather
     - name: 'Outdoor Low Temperature'
       unique_id: outdoor_low_temperature
       device_class: temperature
@@ -368,23 +362,19 @@
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
           {{ state_attr('weather.home','forecast')[0].templow|float('unknown') }}
-        {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['','[]','unknown','unavailable','none'] %}
-          {{ state_attr('weather.climacell_daily','forecast')[0].templow|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.windsor_low_temperature')) %} Environment Canada
           {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
               and state_attr('weather.home','forecast')[0] is defined %} Accuweather
-          {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['','[]','unknown','unavailable','none'] %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_low_temperature'))
           or (state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
-                and state_attr('weather.home','forecast')[0] is defined)
-          or state_attr('weather.climacell_daily','forecast')|lower not in ['','[]','unknown','unavailable','none'] }}
+                and state_attr('weather.home','forecast')[0] is defined) }}
 
-    # envcan, nws, accuweather, climacell
+    # envcan, nws, accuweather
     - name: 'Dew Point'
       unique_id: dew_point
       device_class: temperature
@@ -397,23 +387,19 @@
           {{ states('sensor.kdtw_dew_point')|float('unknown') }}
         {% elif is_number(states('sensor.home_dew_point')) %}
           {{ states('sensor.home_dew_point')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_dew_point')) %}
-          {{ states('sensor.climacell_dew_point')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.windsor_dewpoint')) %} Environment Canada
           {% elif is_number(states('sensor.kdtw_dew_point')) %} National Weather Service
           {% elif is_number(states('sensor.home_dew_point')) %} Accuweather
-          {% elif is_number(states('sensor.climacell_dew_point')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_dewpoint'))
             or is_number(states('sensor.kdtw_dew_point'))
-            or is_number(states('sensor.home_dew_point'))
-            or is_number(states('sensor.climacell_dew_point')) }}
+            or is_number(states('sensor.home_dew_point')) }}
 
-    # envcan, nws, accuweather, darksky, climacell
+    # envcan, nws, accuweather, darksky
     - name: 'Outdoor Humidity'
       unique_id: outdoor_humidity #DARKSKY
       device_class: humidity
@@ -428,8 +414,6 @@
           {{ state_attr('weather.home','humidity')|int(0) }}
         {% elif is_number(states('sensor.dark_sky_humidity')) %}
           {{ states('sensor.dark_sky_humidity')|int(0) }}
-        {% elif is_number(states('sensor.climacell_humidity')) %}
-          {{ states('sensor.climacell_humidity')|int(0) }}
         {% endif %}
       attributes:
         provider: >
@@ -437,14 +421,12 @@
           {% elif is_number(states('sensor.kdtw_relative_humidity')) %} National Weather Service
           {% elif is_number(state_attr('weather.home','humidity')) %} Accuweather
           {% elif is_number(states('sensor.dark_sky_humidity')) %} Dark Sky
-          {% elif is_number(states('sensor.climacell_humidity')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_humidity'))
             or is_number(states('sensor.kdtw_relative_humidity'))
             or is_number(state_attr('weather.home','humidity'))
-            or is_number(states('sensor.dark_sky_humidity'))
-            or is_number(states('sensor.climacell_humidity')) }}
+            or is_number(states('sensor.dark_sky_humidity')) }}
 
     - name: 'Outdoor Humidity Today'
       unique_id: outdoor_humidity_today #DARKSKY
@@ -461,7 +443,7 @@
           {% endif %}
       availability: "{{ is_number(states('sensor.dark_sky_humidity_0d')) }}"
 
-    # envcan, nws, accuweather, darksky, climacell
+    # envcan, nws, accuweather, darksky
     - name: 'Precipitation Probability'
       unique_id: precipitation_probability #DARKSKY
       icon: mdi:weather-rainy
@@ -478,8 +460,6 @@
           {{ state_attr('weather.home','forecast')[0].precipitation_probability|int(0) }}
         {% elif is_number(states('sensor.dark_sky_precip_probability')) %}
           {{ states('sensor.dark_sky_precip_probability')|int(0) }}
-        {% elif is_number(state_attr('weather.climacell_nowcast','forecast')) %}
-          {{ state_attr('weather.climacell_nowcast','forecast')[0].precipitation_probability|int(0) }}
         {% endif %}
       attributes:
         provider: >
@@ -489,7 +469,6 @@
           {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
               and state_attr('weather.home','forecast')[0] is defined %} Accuweather
           {% elif is_number(states('sensor.dark_sky_precip_probability')) %} Dark Sky
-          {% elif is_number(state_attr('weather.climacell_nowcast','forecast')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_chance_of_precip'))
@@ -497,10 +476,9 @@
                   and state_attr('weather.kdtw_daynight','forecast')[0] is defined)
             or (state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
                   and state_attr('weather.home','forecast')[0] is defined)
-            or is_number(states('sensor.dark_sky_precip_probability'))
-            or is_number(state_attr('weather.climacell_nowcast','forecast')) }}
+            or is_number(states('sensor.dark_sky_precip_probability')) }}
 
-    # envcan, darksky, nws, accuweather, climacell
+    # envcan, darksky, nws, accuweather
     - name: 'Precipitation Probability Today'
       unique_id: precipitation_probability_today #DARKSKY
       icon: mdi:weather-rainy
@@ -517,8 +495,6 @@
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
           {{ state_attr('weather.home','forecast')[0].precipitation_probability|int(0) }}
-        {% elif state_attr('weather.climacell_nowcast','forecast')|lower not in ['','[]','unknown','unavailable','none'] %}
-          {{ state_attr('weather.climacell_nowcast','forecast')[0].precipitation_probability|int(0) }}
         {% endif %}
       attributes:
         provider: >
@@ -528,7 +504,6 @@
               and state_attr('weather.kdtw_daynight','forecast')[0] is defined %}%} NWS
           {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
               and state_attr('weather.home','forecast')[0] is defined %} Accuweather
-          {% elif state_attr('weather.climacell_nowcast','forecast')|lower not in ['','[]','unknown','unavailable','none'] %} Climacell
           {% endif %}
       availability: >
         {{ state_attr('weather.windsor','forecast')|lower not in ['','[]','unknown','unavailable','none']
@@ -536,10 +511,9 @@
             or (state_attr('weather.kdtw_daynight','forecast')|lower not in ['','[]','unknown','unavailable','none']
                   and state_attr('weather.kdtw_daynight','forecast')[0] is defined)
             or (state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
-                  and state_attr('weather.home','forecast')[0] is defined)
-            or state_attr('weather.climacell_nowcast','forecast')|lower not in ['','[]','unknown','unavailable','none'] }}
+                  and state_attr('weather.home','forecast')[0] is defined) }}
 
-    # darksky, climacell
+    # darksky
     - name: 'Precipitation Intensity'
       unique_id: precipitation_intensity #DARKSKY
       icon: mdi:weather-pouring
@@ -548,17 +522,13 @@
       state: >
         {% if is_number(states('sensor.dark_sky_precip_intensity')) %}
           {{ states('sensor.dark_sky_precip_intensity')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_precipitation_intensity')) %}
-          {{ states('sensor.climacell_precipitation_intensity')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.dark_sky_precip_intensity')) %} Dark Sky
-          {% elif is_number(states('sensor.climacell_precipitation_intensity')) %} Climacell
           {% endif %}
       availability: >
-        {{ is_number(states('sensor.dark_sky_precip_intensity'))
-            or is_number(states('sensor.climacell_precipitation_intensity')) }}
+        {{ is_number(states('sensor.dark_sky_precip_intensity')) }}
 
     # envcan, accuweather
     - name: 'Precipitation Yesterday - Rain'
@@ -582,7 +552,7 @@
         {{ is_number(states('sensor.windsor_precipitation_yesterday'))
             or is_number(states('sensor.home_precipitation')) }}
 
-    # darksky, climacell
+    # darksky
     - name: 'Precipitation Yesterday - Snow'
       unique_id: precipitation_yesterday_snow #IDEA state
       icon: mdi:weather-snowy-heavy
@@ -599,15 +569,12 @@
       state: >
         {% if states('sensor.dark_sky_precip')|lower not in ['unknown','unavailable','none'] %}
           {{ states('sensor.dark_sky_precip') }}
-        {% elif states('sensor.climacell_precipitation_type')|lower not in ['unknown','unavailable','none'] %}
-          {{ states('sensor.climacell_precipitation_type') }}
         {% else %}
           {{ 'rain' if states('sensor.outdoor_temperature')|int(0) > 0 else 'snow' }}
         {% endif %}
       attributes:
         provider: >
           {% if states('sensor.dark_sky_precip')|lower not in ['unknown','unavailable','none'] %} Dark Sky
-          {% elif states('sensor.climacell_precipitation_type')|lower not in ['unknown','unavailable','none'] %} Climacell
           {% else %} Outdoor Temperature
           {% endif %}
 
@@ -638,14 +605,12 @@
             'West-Northwest','Northwest','North-Northwest','North'] %}
         {% if is_number(states('sensor.nearest_storm_bearing')) %}
           {{ directions[((states('sensor.nearest_storm_bearing')|float('unknown')/360)|float*16)|round] }}
-        {% else %}
-          N/A
         {% endif %}
       attributes:
         provider: "{{ state_attr('sensor.nearest_storm_bearing','provider') }}"
       availability: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
 
-    # envcan, accuweather, nws, climacell
+    # envcan, accuweather, nws
     - name: 'Barometric Pressure'
       unique_id: barometric_pressure
       device_class: pressure
@@ -658,26 +623,19 @@
           {{ state_attr('weather.home','pressure')|float('unknown') }}
         {% elif is_number(states('sensor.kdtw_barometric_pressure')) %}
           {{ states('sensor.kdtw_barometric_pressure')|float('unknown')/100 }}
-        {% elif is_number(state_attr('weather.climacell_hourly','forecast'))
-            and state_attr('weather.climacell_hourly','forecast')[0] is defined %}
-          {{ state_attr('weather.climacell_hourly','forecast')[0].pressure|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(state_attr('weather.home','pressure')) %} Environment Canada
           {% elif is_number(states('sensor.windsor_pressure')) %} Accuweather
           {% elif is_number(states('sensor.kdtw_sea_level_pressure')) %} National Weather Service
-          {% elif is_number(state_attr('weather.climacell_hourly','forecast'))
-              and state_attr('weather.climacell_hourly','forecast')[0] is defined %} Climacell
           {% endif %}
       availability: >
         {{ is_number(state_attr('weather.home','pressure'))
             or is_number(states('sensor.windsor_pressure'))
-            or is_number(states('sensor.kdtw_sea_level_pressure'))
-            or (is_number(state_attr('weather.climacell_hourly','forecast'))
-                  and state_attr('weather.climacell_hourly','forecast')[0] is defined) }}
+            or is_number(states('sensor.kdtw_sea_level_pressure')) }}
 
-    # envcan, accuweather, nws, climacell
+    # envcan, accuweather, nws
     - name: 'Wind Speed'
       unique_id: wind_speed
       icon: mdi:weather-windy
@@ -690,23 +648,19 @@
           {{ states('sensor.home_wind')|float('unknown') }}
         {% elif is_number(states('sensor.kdtw_wind_speed')) %}
           {{ states('sensor.kdtw_wind_speed')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_wind_speed')) %}
-          {{ states('sensor.climacell_wind_speed')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.windsor_wind_speed')) %} Environment Canada
           {% elif is_number(states('sensor.home_wind')) %} Accuweather
           {% elif is_number(states('sensor.kdtw_wind_speed')) %} National Weather Service
-          {% elif is_number(states('sensor.climacell_wind_speed')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_wind_speed'))
             or is_number(states('sensor.home_wind'))
-            or is_number(states('sensor.kdtw_wind_speed'))
-            or is_number(states('sensor.climacell_wind_speed')) }}
+            or is_number(states('sensor.kdtw_wind_speed')) }}
 
-    # nws, accuweather, climacell
+    # nws, accuweather
     - name: 'Wind Speed Today'
       unique_id: wind_speed_today
       icon: mdi:weather-windy
@@ -720,27 +674,20 @@
           {% set day = states('sensor.home_wind_day_0d')|int(0) %}
           {% set night = states('sensor.home_wind_night_0d')|int(0) %}
           {{ [day,night]|max }}
-        {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['unknown','unavailable','none']
-            and state_attr('weather.climacell_daily','forecast')[0] is defined %}
-          {{ state_attr('weather.climacell_daily','forecast')[0].wind_speed|int(0) }}
         {% endif %}
       attributes:
         provider: >
           {% if state_attr('weather.kdtw_daynight','forecast')|lower not in ['unknown','unavailable','none']
               and state_attr('weather.kdtw_daynight','forecast')[0] is defined %} NWS
           {% elif states('sensor.home_wind')|lower not in ['unknown','unavailable','none'] %} Accuweather
-          {% elif state_attr('weather.climacell_daily','forecast')|lower not in ['unknown','unavailable','none']
-              and state_attr('weather.climacell_daily','forecast')[0] is defined %} Climacell
           {% endif %}
       availability: >
         {{ state_attr('weather.windsor','forecast')|lower not in ['unknown','unavailable','none']
             or (state_attr('weather.kdtw_daynight','forecast')|lower not in ['unknown','unavailable','none']
                   and state_attr('weather.kdtw_daynight','forecast')[0] is defined)
-            or states('sensor.home_wind')|lower not in ['unknown','unavailable','none']
-            or (state_attr('weather.climacell_daily','forecast')|lower not in ['unknown','unavailable','none']
-                  and state_attr('weather.climacell_daily','forecast')[0] is defined) }}
+            or states('sensor.home_wind')|lower not in ['unknown','unavailable','none'] }}
 
-    # envcan, accuweather, nws, darksky, climacell
+    # envcan, accuweather, nws, darksky
     - name: 'Wind Gust'
       unique_id: wind_gust # DARK SKY
       icon: mdi:weather-windy
@@ -758,8 +705,6 @@
           {{ states('sensor.kdtw_wind_gust')|float('unknown') }}
         {% elif is_number(states('sensor.dark_sky_wind_gust')) %}
           {{ states('sensor.dark_sky_wind_gust')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_wind_gust')) %}
-          {{ states('sensor.climacell_wind_gust')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
@@ -768,15 +713,13 @@
           {% elif is_number(states('sensor.home_wind_gust')) %} Accuweather
           {% elif is_number(states('sensor.kdtw_wind_gust')) %} National Weather Service
           {% elif is_number(states('sensor.dark_sky_wind_gust')) %} Dark Sky
-          {% elif is_number(states('sensor.climacell_wind_gust')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_wind_gust'))
             or is_number(states('sensor.windsor_wind_speed'))
             or is_number(states('sensor.home_wind_gust'))
             or is_number(states('sensor.kdtw_wind_gust'))
-            or is_number(states('sensor.dark_sky_wind_gust'))
-            or is_number(states('sensor.climacell_wind_gust')) }}
+            or is_number(states('sensor.dark_sky_wind_gust')) }}
 
     # darksky, accuweather
     - name: 'Wind Gust Today'
@@ -800,7 +743,7 @@
       availability: >
         {{ is_number(states('sensor.dark_sky_wind_gust_0d')) }}
 
-    # envcan, nws, accuweather, climacell
+    # envcan, nws, accuweather
     - name: 'Wind Bearing'
       unique_id: wind_bearing
       icon: mdi:compass
@@ -813,21 +756,17 @@
           {{ states('sensor.kdtw_wind_direction')|float('unknown') }}
         {% elif is_number(state_attr('weather.home','wind_bearing')) %}
           {{ state_attr('weather.home','wind_bearing')|float('unknown') }}
-        {% elif is_number(states('sensor.climacell_wind_bearing')) %}
-          {{ states('sensor.climacell_wind_bearing')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.windsor_wind_bearing')) %} Environment Canada
           {% elif is_number(states('sensor.kdtw_wind_direction')) %} National Weather Service
           {% elif is_number(state_attr('weather.home','wind_bearing')) %} Accuweather
-          {% elif is_number(states('sensor.climacell_wind_bearing')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_wind_bearing'))
             or is_number(states('sensor.kdtw_wind_direction'))
-            or is_number(state_attr('weather.home','wind_bearing'))
-            or is_number(states('sensor.climacell_wind_bearing')) }}
+            or is_number(state_attr('weather.home','wind_bearing')) }}
 
     - name: 'Wind Direction'
       unique_id: wind_direction
@@ -852,7 +791,7 @@
         {{ is_number(states('sensor.wind_gust'))
             and is_number(states('sensor.wind_bearing')) }}
 
-    # accuweather, darksky, climacell
+    # accuweather, darksky
     - name: 'Cloud Cover'
       unique_id: cloud_cover
       icon: mdi:cloud
@@ -863,19 +802,15 @@
           {{ states('sensor.home_cloud_cover')|int(0) }}
         {% elif is_number(states('sensor.dark_sky_cloud_coverage')) %}
           {{ states('sensor.dark_sky_cloud_coverage')|int(0) }}
-        {% elif is_number(states('sensor.climacell_cloud_cover')) %}
-          {{ states('sensor.climacell_cloud_cover')|int(0) }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.home_cloud_cover')) %} Accuweather
           {% elif is_number(states('sensor.dark_sky_cloud_coverage')) %} Dark Sky
-          {% elif is_number(states('sensor.climacell_cloud_cover')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.home_cloud_cover'))
-            or is_number(states('sensor.dark_sky_cloud_coverage'))
-            or is_number(states('sensor.climacell_cloud_cover')) }}
+            or is_number(states('sensor.dark_sky_cloud_coverage')) }}
 
     # accuweather, darksky
     - name: 'Cloud Cover Today'
@@ -900,7 +835,7 @@
         {{ is_number(states('sensor.home_cloud_cover_day_0d'))
             or is_number(states('sensor.dark_sky_cloud_coverage_0d')) }}
 
-    # envcan, accuweather, nws, climacell
+    # envcan, accuweather, nws
     - name: 'Visibility'
       unique_id: visibility
       icon: mdi:eye
@@ -913,18 +848,14 @@
           {{ state_attr('weather.home','visibility')|float('unknown') }}
         {% elif is_number(states('sensor.kdtw_visibility')) %}
           {{ states('sensor.kdtw_visibility')|float('unknown')/1000 }}
-        {% elif is_number(states('sensor.climacell_visibility')) %}
-          {{ states('sensor.climacell_visibility')|float('unknown') }}
         {% endif %}
       attributes:
         provider: >
           {% if is_number(states('sensor.windsor_visibility')) %} Environment Canada
           {% elif is_number(state_attr('weather.home','visibility')) %} Accuweather
           {% elif is_number(states('sensor.kdtw_visibility')) %} National Weather Service
-          {% elif is_number(states('sensor.climacell_visibility')) %} Climacell
           {% endif %}
       availability: >
         {{ is_number(states('sensor.windsor_visibility'))
             or is_number(state_attr('weather.home','visibility'))
-            or is_number(states('sensor.kdtw_visibility'))
-            or is_number(states('sensor.climacell_visibility')) }}
+            or is_number(states('sensor.kdtw_visibility')) }}

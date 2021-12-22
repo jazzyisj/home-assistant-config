@@ -2,75 +2,124 @@
 ## Template - System
 ###############################################################################
 - binary_sensor:
-    - unique_id: cpu_temperature_alert
+    - name: 'CPU Temperature Alert'
+      unique_id: cpu_temperature_alert
+      device_class: heat
       delay_on:
         minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
       state: >
-        {{ states('sensor.cpu_temperature')|int(0) > 65
+        {{ states('sensor.cpu_temperature')|int(-1) > 65
             and is_state('input_boolean.system_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: processor_use_alert
+    - name: 'Processor Use Alert'
+      unique_id: processor_use_alert
+      device_class: problem
       delay_on:
-        minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
+        minutes: 10
       state: >
-        {{ states('sensor.processor_use_percent')|int(0) > 60
+        {{ states('sensor.processor_use_percent')|int(-1) > 60
             and is_state('input_boolean.system_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: memory_use_alert
+    - name: 'Memory Use Alert'
+      unique_id: memory_use_alert
+      device_class: problem
       delay_on:
-        minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
+        minutes: 10
       state: >
-        {{ states('sensor.memory_use_percent')|int(0) > 75
+        {{ states('sensor.memory_use_percent')|int(-1) > 75
             and is_state('input_boolean.system_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: swap_use_alert
+    - name: 'Swap Use Alert'
+      unique_id: swap_use_alert
+      device_class: problem
       delay_on:
-        minutes: 10 # delay before triggering alert to reduce alerts from temporary spikes
+        minutes: 10
       state: >
-        {{ states('sensor.swap_use_percent')|int(0) > 80
+        {{ states('sensor.swap_use_percent')|int(-1) > 80
             and is_state('input_boolean.system_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: disk_use_alert
-      state: "{{ states('sensor.disk_use_percent_home')|int(0) > 60 and is_state('input_boolean.system_alerts','on') }}"
+    - name: 'Disk Use Alert'
+      unique_id: disk_use_alert
+      device_class: problem
+      state: >
+        {{ states('sensor.disk_use_percent_home')|int(-1) > 60
+            and is_state('input_boolean.system_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
 
 - sensor:
-    - name: 'Last Boot Date Time'
-      unique_id: last_boot_date_time
-      icon: mdi:clock-start
+    - name: 'Backup Size'
+      unique_id: backup_size
       state: >
-        {% set date = states('sensor.last_boot')|as_timestamp('unknown')|timestamp_custom('%d') %}
-        {% set date = '{:01}'.format(date|int(0)) %}
-        {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
-        {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
-        {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
-        {% else %}{% set date = date ~ 'th' %}
+        {% if state_attr('sensor.backup_state','size_in_home_assistant') != none %}
+          {{ state_attr('sensor.backup_state','size_in_home_assistant')[:-2]|int(-1) }}
         {% endif %}
-        {{ states('sensor.last_boot')|as_timestamp('unknown')|timestamp_custom('%H:%M on %a','unknown') }} {{ date }} {{ states('sensor.last_boot')|as_timestamp('unknown')|timestamp_custom('%b %Y',true,'unknown') }}
+
+    - name: 'Disk Status'
+      unique_id: disk_status
+      icon: mdi:harddisk
+      state: > 
+        {% if is_state('input_boolean.startup_pending','off') %}
+          {% if states('sensor.disk_use_percent_home')|int(-1) > 80
+              or is_state('sensor.pi_hole_status','Disconnected') %} critical
+          {% elif states('sensor.disk_use_percent_home')|int(-1) > 70
+              or states('sensor.hassio_db')|int(-1) > 1000
+              or states('sensor.home_assistant_log')|int(-1) > 100 %} severe
+          {% elif states('sensor.disk_use_percent_home')|int(-1) > 60
+              or states('sensor.backup_size')|int(-1) > 11
+              or states('sensor.hassio_db')|int(-1) > 750
+              or states('sensor.home_assistant_log')|int(-1) > 50
+              or states('sensor.alarm_snapshots')|int(-1) > 100
+              or states('sensor.tts')|int(-1) > 100 %} warning
+          {% elif states('sensor.disk_use_percent_home')|int(-1) > 50
+              or states('sensor.backup_size')|int(-1) > 8
+              or states('sensor.alarm_snapshots')|int(-1) > 50
+              or states('sensor.tts')|int(-1) > 50 %} minor
+          {% else %} ok
+          {% endif %}
+        {% endif %}
 
     - name: 'Server Uptime'
       unique_id: server_uptime
       icon: mdi:clock-start
       state: >
-        {% set up_time = now().timestamp() - states('sensor.last_boot')|as_timestamp %}
-        {% set minutes = (up_time // 60)|int(0) %}
-        {% set hours = (minutes // 60) %}
-        {% set days = (hours // 24) %}
-        {% set weeks = (days // 7) %}
-        {% set minutes = (minutes % 60) %}
-        {% set hours =  (hours % 24) %}
-        {% set days = (days % 7) %}
-        {% macro phrase(value, name) %}
-          {%- set value = value %}
-          {%- set end = 's' if value > 1 else '' %}
-          {{- '{} {}{}'.format(value, name, end) if value|int(0) > 0 else '' }}
-        {%- endmacro %}
-        {% set text = [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hr'), phrase(minutes, 'min') ]|select('!=','')|list|join(', ') %}
-        {% set last_comma = text.rfind(',') %}
-        {% if last_comma != -1 %}
-          {% set text = text[:last_comma] + ' and' + text[last_comma + 1:] %}
+        {% if states('sensor.last_boot')|lower not in ['unknown','unavailable','none'] %}
+          {% set uptime = now().timestamp() - states('sensor.last_boot')|as_timestamp %}
+          {% set minutes = (uptime // 60)|int(0) %}
+          {% set hours = (minutes // 60) %}
+          {% set days = (hours // 24) %}
+          {% set weeks = (days // 7) %}
+          {% set minutes = (minutes % 60) %}
+          {% set hours =  (hours % 24) %}
+          {% set days = (days % 7) %}
+          {% macro phrase(value, name) %}
+            {%- set value = value %}
+            {%- set end = 's' if value > 1 else '' %}
+            {{- '{} {}{}'.format(value, name, end) if value|int(0) > 0 else '' }}
+          {%- endmacro %}
+          {% set text = [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hr'), phrase(minutes, 'min') ]|select('!=','')|list|join(', ') %}
+          {% set last_comma = text.rfind(',') %}
+          {% if last_comma != -1 %}
+            {% set text = text[:last_comma] + ' and' + text[last_comma + 1:] %}
+          {% endif %}
+          {{ text }}
         {% endif %}
-        {{ text }}
+
+    - name: 'Last Boot Date Time'
+      unique_id: last_boot_date_time
+      icon: mdi:clock-start
+      state: >
+        {% if states('sensor.last_boot')|lower not in ['unknown','unavailable','none'] %}
+          {% set last_boot = states('sensor.last_boot')|as_timestamp|timestamp_local|as_datetime %}
+          {% set date = last_boot.strftime('%d') %}
+          {% set date = '{:01}'.format(date|int(0)) %}
+          {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
+          {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
+          {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
+          {% else %}{% set date = date ~ 'th' %}
+          {% endif %}
+          {{ last_boot.strftime('%a') }} {{ date }} {{ last_boot.strftime('%b %Y') }} {{ last_boot.strftime('at %-I:%M %p') }}
+        {% endif %}

@@ -18,7 +18,8 @@
       device_class: connectivity
       state: "{{ is_state('group.integration_online_sensors','on') }}"
 
-    - unique_id: integrations_online_alert
+    - name: 'Integration Online Alert'
+      unique_id: integrations_online_alert
       delay_on:
         minutes: 15 # allow for temporary disconnections before alerting
       state: >
@@ -42,7 +43,8 @@
             and is_state('input_boolean.hass_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: remote_ui_alert
+    - name: 'Remote UI Alert'
+      unique_id: remote_ui_alert
       delay_on:
         minutes: 5 # allow for temporary disconnections before alerting, prevent trigger on shutdown
       state: >
@@ -50,34 +52,26 @@
             and is_state('input_boolean.hass_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: device_offline_alert
-      delay_on:
-        minutes: 15 # allow for temporary disconnections before alerting
-      state: '{{ false }}'
-      # state: >
-      #   {{ state_attr('binary_sensor.device_offline_alert','count')|int(0) > 0
-      #       and is_state('input_boolean.hass_alerts','on')
-      #       and is_state('input_boolean.startup_pending','off') }}
-      # state: >
-      #   {% if state_attr('binary_sensor.device_offline_alert','entities')|lower not in ['unknown','unavailable','none'] %}
-      #     {{ state_attr('binary_sensor.device_offline_alert','entities')|count > 0 }}
-      #   {% endif %}
-      # attributes:
-      #   entities: >
-      #     {{ (states|selectattr('domain','in',['alarm_control_panel','cover','light','switch','fan','climate','camera','media_player'])
-      #         |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
-      #         |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list) +
-      #       (expand('group.device_sensors')|selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list) }}
-
-    - unique_id: unavailable_sensor_alert
-      delay_on:
+    - name: 'Device Offline Alert'
+      unique_id: device_offline_alert
+      delay_on: #TODO not turning off?
         minutes: 15 # allow for temporary disconnections before alerting
       state: >
-        {{ states('sensor.unavailable_sensors')|int(0) > 0
+        {{ states('sensor.offline_devices')|int(-1) > 0
             and is_state('input_boolean.hass_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: unknown_browser_alert
+    - name: 'Unavailable Sensor Alert'
+      unique_id: unavailable_sensor_alert
+      delay_on: #TODO not turning off?
+        minutes: 15 # allow for temporary disconnections before alerting
+      state: >
+        {{ states('sensor.unavailable_sensors')|int(-1) > 0
+            and is_state('input_boolean.hass_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
+    - name: 'Unknown Browser Alert'
+      unique_id: unknown_browser_alert
       state: >
         {{ states('sensor.unknown_browsers')|int(0) > 0
             and is_state('input_boolean.hass_alerts','on')
@@ -86,6 +80,28 @@
 - sensor:
     - unique_id: dummy
       state: ' '
+
+    - name: 'Hass Status'
+      unique_id: hass_status
+      icon: mdi:home-assistant
+      # must separate startup_pending -
+      # {% if is_state('input_boolean.startup_pending','on') %} critical
+      # {% el
+      state: >
+        {% if  is_state('sensor.disk_status','critical')
+            or states('sensor.unknown_browsers')|int(-1) > 0 %} critical
+        {% elif is_state('binary_sensor.integrations_online','off')
+            or is_state('binary_sensor.remote_ui','off')
+            or is_state('sensor.disk_status','severe') %} severe
+        {% elif states('sensor.offline_devices')|int(-1) > 0
+            or states ('sensor.offline_zwave_devices')|int(-1) > 0
+            or not is_state('sensor.backup_state','backed_up')
+            or is_state('sensor.disk_status','warning') %} warning
+        {% elif states('sensor.unavailable_sensors')|int(-1) > 0
+            or is_state('binary_sensor.hass_update','on')
+            or is_state('sensor.disk_status','minor') %} minor
+        {% else %} ok
+        {% endif %}
 
     - name: 'Connected Browsers'
       unique_id: connected_browsers
@@ -136,16 +152,16 @@
     - name: 'Last Restart Date Time'
       unique_id: last_restart_date_time
       icon: mdi:clock-start
-      device_class: timestamp
       state: > # display last hass restart date/time in friendly format
-        {% set date = states('sensor.uptime')|as_timestamp('unknown')|timestamp_custom('%d',true,'unknown') %}
+        {% set uptime = states('sensor.uptime')|as_timestamp|timestamp_local|as_datetime %}
+        {% set date = uptime.strftime('%d') %}
         {% set date = '{:01}'.format(date|int(0)) %}
         {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
         {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
         {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
         {% else %}{% set date = date ~ 'th' %}
         {% endif %}
-        {{ states('sensor.uptime')|as_timestamp('unknown')|timestamp_custom('%H:%M on %a',true,'unknown') }} {{ date }} {{ states('sensor.uptime')|as_timestamp('unknown')|timestamp_custom('%b %Y',true,'unknown') }}
+        {{ uptime.strftime('%a') }} {{ date }} {{ uptime.strftime('%b %Y') }} {{ uptime.strftime('at %-I:%M %p') }}
 
     - name: 'Offline Devices'
       unique_id: offline_devices
@@ -157,13 +173,14 @@
       attributes:
         entities: >
           {% set offline = namespace(devices=[]) %}
-          {% set entities = (states|selectattr('domain','in',['alarm_control_panel','cover','light','switch','fan','climate','camera','media_player'])
+          {% set entities = (states|selectattr('domain','in',['alarm_control_panel','cover','light','switch',
+                'fan','climate','camera','media_player','weather'])
               |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
               |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list) +
           (expand('group.device_sensors')|selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list) %}
 
           {% for item in entities %}
-            {% if states[item].last_changed.timestamp() < now().timestamp() - 60 -%}
+            {% if states[item].last_changed - now() < timedelta(seconds=60) -%}
               {% set offline.devices = offline.devices + [item] %}
             {% endif %}
           {% endfor %}
@@ -183,8 +200,34 @@
               |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
               |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list %}
           {% for item in entities %}
-            {% if states[item].last_changed.timestamp() < now().timestamp() - 60 -%}
+            {% if states[item].last_changed - now() < timedelta(seconds=60) -%}
               {% set unavail.sensors = unavail.sensors + [item] %}
             {% endif %}
           {% endfor %}
           {{ unavail.sensors }}
+
+    #IDEA get core, supervisor, os from API?
+    - name: 'Free Memory'
+      unique_id: free_memory
+      icon: mdi:memory
+      unit_of_measurement: '%'
+      state: >
+        {% set total = namespace(value=0) %}
+        {% set addons = expand('group.add_on_memory_sensors') %}
+        {% for sensor in addons if is_number(states(sensor.entity_id))%}
+          {% set total.value = total.value + states(sensor.entity_id)|float %}
+        {% endfor %}
+        {{ 100 - total.value }}
+
+    #IDEA get core, supervisor, os from API?
+    - name: 'Free CPU'
+      unique_id: free_cpu
+      icon: mdi:memory
+      unit_of_measurement: '%'
+      state: >
+        {% set total = namespace(value=0) %}
+        {% set addons = expand('group.add_on_cpu_sensors') %}
+        {% for sensor in addons if is_number(states(sensor.entity_id))%}
+          {% set total.value = total.value + states(sensor.entity_id)|float %}
+        {% endfor %}
+        {{ 100 - total.value }}

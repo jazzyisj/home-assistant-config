@@ -11,77 +11,78 @@
           {% if is_state('input_select.occupancy_mode','Night') %} true
           {% elif is_state('binary_sensor.scene_active','on') %} false
           {% else %}
-            {% set qstart = today_at(states('input_datetime.quiet_hours_start')) %}
-            {% set qend = today_at(states('input_datetime.quiet_hours_end')) %}
-
-            {# wake must be todays date - next_waketime will have switched to tomorrow after waketime #}
-            {% set wake = 'off' if states('sensor.next_waketime')|lower in ['off','','unknown','unavailable','none']
-                else today_at(state_attr('sensor.next_waketime','24hour')) %}
-
-            {% set bed = 'off' if states('sensor.next_bedtime')|lower in ['off','','unknown','unavailable','none']
-                else as_datetime(states('sensor.next_bedtime')) %}
-
-            {% if wake == 'off' or bed == 'off' %}
-              {# wake/bed is off, default to non-sync times #}
-              {% set wake = qstart %}
-              {% set bed = qend %}
-            {% elif bed != 'off' %}
-              {# day_reset < waketime < bedtime - next bedtime has switched to tomorrow #}
-              {% set bed = bed - timedelta(days=1) if today_at(states('input_datetime.day_reset')) < wake < bed else bed %}
+            {% if states('sensor.quiet_hours_start')|lower not in ['unknown','unavailable','none']
+                and states('sensor.quiet_hours_end')|lower not in ['unknown','unavailable','none'] %}
+              {{ states('sensor.quiet_hours_start')|as_datetime <= now() < states('sensor.quiet_hours_end')|as_datetime }}
             {% endif %}
-
-            {% if is_state('input_boolean.quiet_hours_bedtime_sync','on') %}
-              {# subtract pre bedtime #}
-              {% set start = bed - timedelta(minutes=states('input_number.quiet_minutes_before_bedtime')|int) %}
-              {# add post waketime #}
-              {% set end = wake + timedelta(states('input_number.quiet_minutes_after_waketime')|int) %}
-            {% else %}
-              {% set start = qstart %}
-              {% set end = qend %}
-            {% endif %}
-
-            {# time > endtime , waketime to tomorrows waketime #}
-            {% if wake != 'off' %}
-              {% set wake = wake + timedelta(days=1) if now() > end else wake %}
-            {% endif %}
-            {{ start <= now() < end  }}
           {% endif %}
         {% endif %}
 
     # bedtime script on, or after bedtime but not night mode yet, before wakeup
     - name: 'Bedtime Active'
       unique_id: bedtime_active
-      icon: mdi:bed-empty
+      icon: "{{ 'mdi:chevron-up-circle' if is_state('input_boolean.bedtime_delayed','on') else 'mdi:bed-empty' }}"
       delay_on:
         seconds: 15 # allow automation.schedule_bedtime to detect first bedtime trigger
       state: >
-        {% set wake = 'off' if states('sensor.next_waketime')|lower in ['off','','unknown','unavailable','none']
-            else states('sensor.next_waketime')|as_datetime %}
-        {% set bed = 'off' if states('sensor.next_bedtime')|lower in ['off','','unknown','unavailable','none']
-            else states('sensor.next_bedtime')|as_datetime %}
-
-        {% if wake != 'off' %}
-          {# if waketime > 24 hour away - next waketime has switched to tomorrow #}
-          {% set wake = wake - timedelta(days=1) if wake - now() > timedelta(days=1) else wake %}
+        {% if is_state('script.bedtime','on') %} true
+        {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %}
+          {% if states('sensor.bedtime_today')|lower not in ['unknown','unavailable','none'] %}
+            {% set house = today_at(states('input_datetime.house_waketime')) %}
+            {% set house = house + timedelta(days=1) if now() > house %}
+            {% set wake = states('sensor.waketime_today')|as_datetime
+                if states('sensor.waketime_today')|lower not in ['unknown','unavailable','none'] else house %}
+            {% set bedtime_today = states('sensor.bedtime_today')|as_datetime %}
+            {{ bedtime_today <= now() < wake }}
+          {% endif %}
         {% endif %}
 
-        {% if bed != 'off' %}
-          {# if now is before waketime and waketime is less than bedtime - next bedtime has switched to tomorrow #}
-          {% set bed = bed - timedelta(days=1) if today_at(states('input_datetime.day_reset')) < wake < bed else bed %}
-        {% endif %}
-
-        {{ is_state('script.bedtime','on')
-            or (states('input_select.occupancy_mode') in ['Home','Guest']
-              and (bed != 'off' and wake != 'off')
-              and bed <= now() < wake) }}
-
-    - unique_id: reminder_led_alert
+    - name: 'Reminder LED Alert'
+      unique_id: reminder_led_alert
       state: >
         {{ is_state('input_boolean.dexter_medication_active','on')
             or is_state('input_boolean.jason_medication_active','on')
-            or is_state('input_boolean.maddie_mealtime_active','on') }}
+            or is_state('input_boolean.maddie_mealtime_active','on')
+            or is_state('input_boolean.garbage_alert','on')
+            or is_state('input_boolean.recycle_alert','on')
+            or is_state('input_boolean.yardwaste_alert','on') }}
 
 - sensor:
+    - name: 'Quiet Hours Start'
+      unique_id: quiet_hours_start
+      device_class: timestamp
+      state: > 
+        {% if is_state('input_boolean.quiet_hours_enabled','on') %}
+          {% if is_state('input_boolean.quiet_hours_bedtime_sync','on')
+              and states('sensor.bedtime_today')|lower not in ['unknown','unavailable','none']
+              and states('sensor.waketime_today')|lower not in ['unknown','unavailable','none'] %}
+            {% set wake_today = states('sensor.waketime_today')|as_datetime %}
+            {% set bedtime = states('sensor.bedtime_today')|as_datetime %}
+            {{ bedtime - timedelta(minutes=states('input_number.quiet_minutes_before_bedtime')|int) }}
+          {% else %}
+            {% set qend = today_at(states('input_datetime.quiet_hours_end')) %}
+            {% set qstart = today_at(states('input_datetime.quiet_hours_start')) %}
+            {{ qstart + timedelta(days=1) if now() > qend > qstart else qstart }}
+          {% endif %}
+        {% else %} {{ none }}
+        {% endif %}
+
+    - name: 'Quiet Hours End'
+      unique_id: quiet_hours_end
+      device_class: timestamp
+      state: >
+        {% if is_state('input_boolean.quiet_hours_enabled','on') %}
+          {% if is_state('input_boolean.quiet_hours_bedtime_sync','on')
+              and states('sensor.waketime_today')|lower not in ['unknown','unavailable','none'] %}
+            {{ states('sensor.waketime_today')|as_datetime
+                + timedelta(minutes=states('input_number.quiet_minutes_after_waketime')|int) }}
+          {% else %}
+            {% set qend = today_at(states('input_datetime.quiet_hours_end')) %}
+            {{ qend + timedelta(days=1) if now() > qend else qend }}
+          {% endif %}
+        {% else %} {{ none }}
+        {% endif %}
+
     - name: 'TOD Greeting'
       unique_id: tod_greeting
       state: >
@@ -100,20 +101,16 @@
         {% else %} wknd
         {% endif %}
 
+    #MIDNIGHT #ISSUE with delayed work today next bedtime will be wrong (wknd) going from work off to work on until day_reset (delay)
     - name: 'Next Waketime'
       unique_id: next_waketime
       device_class: timestamp
       icon: mdi:weather-sunset-up
       state: >
-        {% set time = now().replace(second=0, microsecond=0) %} {# minute time resolution #}
         {% set guest = today_at(states('input_datetime.guest_waketime')) %}
-        {% set wake = 'off' %}
-
         {% if is_state('input_select.occupancy_mode','Guest') %}
           {% if is_state('input_boolean.guest_morning','on') %}
-            {# if now > guest wake, + 86400 to set next guest wake to tomorrow #}
-            {% set wake = as_datetime((guest|as_timestamp + 86400)
-                |timestamp_custom('%Y-%m-%dT%H:%M:%S%z',true,'unknown')) if time > guest else guest %}
+            {% set waketime = guest + timedelta(days=1) if now() > guest else guest %}
           {% endif %}
         {% else %}
           {% set days = today_at(states('input_datetime.days_waketime')) %}
@@ -121,159 +118,183 @@
           {% set wknd = today_at(states('input_datetime.weekend_waketime')) %}
           {% set house = today_at(states('input_datetime.house_waketime')) %}
           {% set set_alarms = state_attr('sensor.alarm_clock_next_alarm','set_alarms') %}
-          {% set wake_alarms = namespace(value=[]) %}
-
           {# set wake time today #}
           {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on') %}
             {% set wake_today = afts if is_state('sensor.today_shift','Afternoons') else days %}
           {% elif is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','on') %}
             {% set wake_today = wknd %}
           {% elif is_state('input_boolean.house_wakeup','on') %}
-            {% set wake_today = house + timedelta(days=1) if now() > house else house %}
-          {% else %} {% set wake_today = 'off' %}
+            {% set wake_today = house %}
+          {% else %} {% set wake_today = none %}
           {% endif %}
-
           {# set wake time tomorrow #}
           {% if is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_morning','on') %}
             {% set wake_tomorrow = afts + timedelta(days=1) if is_state('sensor.tomorrow_shift','Afternoons') else days + timedelta(days=1) %}
           {% elif is_state('binary_sensor.work_tomorrow','off')and is_state('input_boolean.weekend_morning','on') %}
             {% set wake_tomorrow = wknd + timedelta(days=1) %}
           {% else %}
-            {% set wake_tomorrow = house if is_state('input_boolean.house_wakeup','on') else 'off' %}
+            {% set wake_tomorrow = none if is_state('input_boolean.house_wakeup','off')
+                else house + timedelta(days=1) if now() > house else house %}
           {% endif %}
-
-          {% if wake_today == 'off' %}
+          {% if wake_today == none %}
             {# use house time if wake_today is off #}
-            {% set wake = wake_tomorrow if time > house else wake_today %}
+            {% set waketime = wake_tomorrow if now() > house else wake_today %}
           {% else %}
-            {# if time is after wake_today - next is wake_tomorrow #}
-            {# if time is after 4am and house not in night mode - house already awake, next wake is tomorrow #}
-            {% set wake = wake_tomorrow if (time > wake_today) else wake_today %}
+            {% set day_reset = today_at(states('input_datetime.day_reset')) %}
+            {# if now() is after wake_today - next is wake_tomorrow #}
+            {# if now is after day_reset and house not in night mode - house already awake, next wake is tomorrow #}
+            {% set waketime = wake_tomorrow if (now() > day_reset and not is_state('input_select.occupancy_mode','Night')) else wake_today %}
           {% endif %}
-
-          {# alarm clocks are set - select wake alarms #}
-          {% if set_alarms|count > 0 %}
-            {% set wake_ts = wake|as_timestamp %}
+          {# select wake alarms #}
+          {% if waketime != none and set_alarms != none and set_alarms|count > 0 %}
+            {% set wake_alarms = namespace(value=[]) %}
+            {% set wake_ts = waketime|as_timestamp %}
             {% for item in set_alarms %}
-              {% set item_ts = as_datetime(item)|as_timestamp %}
-              {# select set alarms within 4 hours of next wake time #}
-              {% if ((wake_ts - item_ts)|abs <= 14400) %}
+              {# select set alarms within 6 hours of next wake time - auto is always true #}
+              {% if ((wake_ts - item)|abs <= 21600) %}
                 {% set wake_alarms.value = wake_alarms.value + [item] %}
               {% endif %}
             {% endfor %}
-
             {# set next waketime to next wake alarm - wake_alarms(min) #}
             {% if wake_alarms.value|count > 0 %}
-              {% set wake = as_datetime(wake_alarms.value|min) %}
+              {% set waketime = wake_alarms.value|min|as_datetime %}
             {% endif %}
           {% endif %}
         {% endif %}
-        {{ wake if wake == 'off' else wake.isoformat() }}
+        {{ waketime }}
       attributes:
-        24hour: >
-          {% if states('sensor.next_waketime')|lower not in ['off','','unknown','unavailable','none'] %}
-            {{ as_datetime(states('sensor.next_waketime'))|as_timestamp('unknown')|timestamp_custom('%H:%M',true,'unknown') }}
-          {% endif %}
-        12hour: > #TEST %a
-          {% if states('sensor.next_waketime')|lower not in ['off','','unknown','unavailable','none'] %}
-            {{ as_datetime(states('sensor.next_waketime'))|as_timestamp('unknown')|timestamp_custom('%a %-I:%M %p',true,'unknown') }}
-          {% endif %}
+        12hour: "{{ states('sensor.next_waketime')|as_timestamp(none)|timestamp_custom('%a %-I:%M %p',true,'OFF') }}" #TEMP %a
+        24hour: "{{ states('sensor.next_waketime')|as_timestamp(none)|timestamp_custom('%H:%M',true,none) }}"
         pre_waketime: >
-          {% set time = now().replace(second=0,microsecond=0) %}
           {% set house = today_at(states('input_datetime.house_waketime')) %}
           {% set days = today_at(states('input_datetime.days_waketime')) - timedelta(minutes=30) %}
           {% set afts = today_at(states('input_datetime.afternoons_waketime')) - timedelta(minutes=30) %}
           {% set wknd = today_at(states('input_datetime.weekend_waketime')) - timedelta(minutes=30) %}
           {% set guest = today_at(states('input_datetime.guest_waketime')) - timedelta(minutes=30) %}
           {% if is_state('input_select.occupancy_mode','Night') %}
-            {% if time >= house %} true
+            {% if now() >= house %} true
             {% elif is_state('binary_sensor.owner_home','on') %}
-              {{ (time >= afts if is_state('sensor.today_shift','Afternoons') else time >= days)
-                  if is_state('binary_sensor.work_today','on') else time >= wknd }}
-            {% else %}{{ time >= guest }}
+              {{ (now() >= afts if is_state('sensor.today_shift','Afternoons') else now() >= days)
+                  if is_state('binary_sensor.work_today','on') else now() >= wknd }}
+            {% else %}{{ now() >= guest }}
             {% endif %}
           {% else %} false
           {% endif %}
 
-    #MIDNIGHT #VERIFY - today shift sensor delay 4 hours, bedtimes missed sunday night aft -> days
+    - name: 'Waketime Today'
+      unique_id: waketime_today
+      device_class: timestamp
+      icon: mdi:weather-sunset-up
+      state: >
+        {% set guest = today_at(states('input_datetime.guest_waketime')) %}
+        {% if is_state('input_select.occupancy_mode','Guest') %}
+          {{ guest if is_state('input_boolean.guest_morning','on') else none }}
+        {% else %}
+          {% set days = today_at(states('input_datetime.days_waketime')) %}
+          {% set afts = today_at(states('input_datetime.afternoons_waketime')) %}
+          {% set wknd = today_at(states('input_datetime.weekend_waketime')) %}
+          {% set house = today_at(states('input_datetime.house_waketime')) %}
+          {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on') %}
+            {% set wake_today = afts if is_state('sensor.today_shift','Afternoons') else days %}
+          {% elif is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','on') %}
+            {% set wake_today = wknd %}
+          {% elif is_state('input_boolean.house_wakeup','on') %}
+            {% set wake_today = house %}
+          {% else %} {% set wake_today = none %}
+          {% endif %}
+          {{ wake_today }}
+        {% endif %}
+
+    #MIDNIGHT today shift sensor delay 4 hours, bedtimes missed sunday night aft -> days
     - name: 'Next Bedtime'
       unique_id: next_bedtime
       device_class: timestamp
       icon: mdi:bed
       state: >
-        {% set time = now().replace(second=0, microsecond=0) %} {# minute time resolution #}
         {% set days = today_at(states('input_datetime.days_bedtime')) %}
         {% set afts = today_at(states('input_datetime.afternoons_bedtime')) %}
         {% set wknd = today_at(states('input_datetime.weekend_bedtime')) %}
         {% set guest = today_at(states('input_datetime.guest_bedtime')) %}
-        {% set wake = states('sensor.next_waketime')|as_datetime %}
-        {% set bed_today = 'off' %}
-
+        {% set wake = states('sensor.waketime_today')|as_datetime
+            if states('sensor.waketime_today')|lower not in ['unknown','unavailable','none'] else none %}
+        {% set bedtime = none %}
         {% if is_state('input_select.occupancy_mode','Guest')
             and is_state('input_boolean.guest_night','on') %}
-          {% set bed_today = guest %}
+          {% set bedtime = guest %}
         {% elif is_state('binary_sensor.work_schedule','off') %}
           {% if is_state('input_boolean.weekend_night','on') %}
-            {% set bed_today = wknd %}
+            {% set bedtime = wknd %}
           {% endif %}
         {% else %}
           {% if is_state('sensor.tomorrow_shift','Afternoons') %}
-            {% if wake != 'off' and time < afts  %}
+            {% if wake != none and (afts < wake and now() < afts)  %}
               {% if is_state('binary_sensor.work_today','on')
                   and is_state('input_boolean.workday_night','on') %}
-                {% set bed_today = afts %}
+                {% set bedtime = afts %}
               {% elif is_state('input_boolean.weekend_night','on') %}
-                {% set bed_today = wknd %}
+                {% set bedtime = wknd %}
               {% endif %}
             {% else %} {# after bedtime - tomorrow #}
               {% if is_state('binary_sensor.work_tomorrow','on')
                     and is_state('input_boolean.workday_night','on') %}
-                {% set bed_today = afts %}
+                {% set bedtime = afts %}
               {% elif is_state('input_boolean.weekend_night','on') %}
-                {% set bed_today = wknd %}
+                {% set bedtime = wknd %}
               {% endif %}
             {% endif %}
           {% else %} {# days/default #}
-            {% if wake != 'off' and time < days %}
+            {% if wake != none and (days < wake and now() < days) %}
               {% if is_state('binary_sensor.work_today','on')
                   and is_state('input_boolean.workday_night','on') %}
-                {% set bed_today = days %}
+                {% set bedtime = days %}
               {% elif is_state('input_boolean.weekend_night','on') %}
-                {% set bed_today = wknd %}
+                {% set bedtime = wknd %}
               {% endif %}
             {% else %} {# after bedtime - tomorrow #}
               {% if is_state('binary_sensor.work_tomorrow','on')
                   and is_state('input_boolean.workday_night','on') %}
-                {% set bed_today = days %}
+                {% set bedtime = days %}
               {% elif is_state('input_boolean.weekend_night','on') %}
-                {% set bed_today = wknd %}
+                {% set bedtime = wknd %}
               {% endif %}
             {% endif %}
           {% endif %}
         {% endif %}
-
-        {% if bed_today != 'off' %}
-          {% set bed_today = bed_today if time < bed_today else bed_today + timedelta(days=1) %}
-          {{ bed_today.isoformat() }}
-        {% else %} {{ bed_today }}
-        {% endif %}
+        {{ none if bedtime == none
+              else bedtime if now() < bedtime else bedtime + timedelta(days=1) }}
       attributes:
-        24hour: >
-          {% if states('sensor.next_bedtime')|lower not in ['off','','unknown','unavailable','none'] %}
-            {{ as_datetime(states('sensor.next_bedtime')).strftime('%H:%M') }}
-          {% endif %}
-        12hour: > #TEST %a
-          {% if states('sensor.next_bedtime')|lower not in ['off','','unknown','unavailable','none'] %}
-            {{ as_datetime(states('sensor.next_bedtime')).strftime('%a %-I:%M %p') }}
-          {% endif %}
+        12hour: "{{ states('sensor.next_bedtime')|as_timestamp(none)|timestamp_custom('%a %-I:%M %p',true,'OFF') }}" #TEMP %a
         delayed_bedtime: >
           {% if is_state('input_boolean.bedtime_delayed','on')
-              and states('sensor.next_bedtime')|lower not in ['off','','unknown','unavailable','none'] %}
-            {% set bedtime = as_datetime(states('sensor.next_bedtime')) %}
+              and states('sensor.next_bedtime')|lower not in ['unknown','unavailable','none'] %}
+            {% set bedtime = states('sensor.next_bedtime')|as_datetime %}
             {% if now() <= bedtime %}
               {% set bed = bedtime + timedelta(minutes=states('input_number.stay_awake_delay')|int) %}
             {% elif not is_state('timer.bedtime_delay','idle') %}
               {% set bed = state_attr('timer.bedtime_delay','finishes_at') %}
             {% endif %}
-            {% if bed is defined %} {{ bed.strftime('%-I:%M %p') }} {% endif %}
+            {{ bed|as_timestamp|timestamp_custom('%-I:%M %p','true',none) }}
           {% endif %}
+
+    - name: 'Bedtime Today'
+      unique_id: bedtime_today
+      device_class: timestamp
+      icon: mdi:bed
+      state: >
+        {% if is_state('input_select.occupancy_mode','Guest') %}
+            {% set bed_today = today_at(states('input_datetime.guest_bedtime')) if is_state('input_boolean.guest_night','on') %}
+          {% else %}
+            {% set days = today_at(states('input_datetime.days_bedtime')) %}
+            {% set afts = today_at(states('input_datetime.afternoons_bedtime')) %}
+            {% set wknd = today_at(states('input_datetime.weekend_bedtime')) %}
+            {% set wake = today_at(states('input_datetime.house_waketime'))
+                if states('sensor.waketime_today')|lower in ['unknown','unavailable','none']
+                  else states('sensor.waketime_today')|as_datetime %}
+            {% if is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','on') %}
+              {% set bed_today = afts if is_state('sensor.today_shift','Afternoons') else days %}
+            {% elif is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','on') %}
+              {% set bed_today = wknd %}
+            {% endif %}
+          {% endif %}
+          {{ bed_today }}
+

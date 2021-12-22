@@ -1,44 +1,44 @@
 # Home Assistant Configuration
 
-Home Assistant (Hassio) configuration, updated to v2021.11.3
+Home Assistant (Hassio) configuration, updated to v2021.12.4
 
 ### Entity Counts:
 
     Alarm_control_panel: 3
-    Alert: 71
-    Automation: 507
-    Binary_sensor: 377
-    Calendar: 7
+    Alert: 72
+    Automation: 513
+    Binary_sensor: 373
+    Calendar: 9
     Camera: 15
-    Climate: 4
+    Climate: 5
     Counter: 1
     Cover: 1
-    Device_tracker: 60
-    Fan: 9
-    Geo_location: 12
-    Group: 22
-    Input_boolean: 184
-    Input_datetime: 38
-    Input_number: 151
-    Input_select: 90
-    Input_text: 75
+    Device_tracker: 61
+    Fan: 6
+    Geo_location: 22
+    Group: 30
+    Input_boolean: 185
+    Input_datetime: 35
+    Input_number: 152
+    Input_select: 89
+    Input_text: 76
     Light: 47
     Lock: 4
-    Media_player: 25
-    Number: 6
+    Media_player: 26
+    Number: 7
     Person: 2
     Proximity: 2
     Remote: 1
-    Scene: 9
-    Script: 62
+    Scene: 8
+    Script: 65
     Select: 39
-    Sensor: 782
+    Sensor: 821
     Sun: 1
-    Switch: 52
-    Timer: 43
+    Switch: 50
+    Timer: 44
     Utility_meter: 2
     Variable: 1
-    Weather: 9
+    Weather: 6
     Zone: 4
 
 ### TAGS USED IN CODE

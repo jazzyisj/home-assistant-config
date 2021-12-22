@@ -5,6 +5,18 @@
   alias: '[Alarm Clock] Failed'
   description: 'Play announcement, reset alarm clock when failed.'
   max_exceeded: silent # recursive call
+  variables:
+    person: >
+      {% if (is_state('input_boolean.jason_phone_alarm_clock_notifications','on')
+          and is_state('binary_sensor.jason_home','on'))
+        and (is_state('input_boolean.sheri_phone_alarm_clock_notifications','on')
+          and is_state('binary_sensor.sheri_home','on')) %} mobile
+      {% elif is_state('input_boolean.jason_phone_alarm_clock_notifications','on')
+        and is_state('binary_sensor.jason_home','on') %} jason
+      {% elif is_state('input_boolean.sheri_phone_alarm_clock_notifications','on')
+        and is_state('binary_sensor.sheri_home','on') %} sheri
+      {% else %} off
+      {% endif %}
   trigger:
     - platform: state
       id: failed
@@ -40,28 +52,31 @@
       target:
         entity_id: input_boolean.alarm_clock_failed
 
-    - service: >
-        {% if is_state('input_boolean.jphone_alarm_clock_notifications','on')
-            and is_state('input_boolean.sphone_alarm_clock_notifications','on') %} notify.mobile
-        {% elif is_state('input_boolean.jphone_alarm_clock_notifications','on') %} notify.jason
-        {% elif is_state('input_boolean.sphone_alarm_clock_notifications','on') %} notify.sheri
-        {% endif %}
-      data:
-        title: 'Alarm Clock Failed'
-        message: "Alarm clock failed at {{ now().strftime('%-I:%M %p') }}."
-        data:
-          tag: alarm_clock_failed
-          group: Alert
-          channel: alarm_stream
-          importance: max
-          ttl: 0
-          priority: high
-          clickAction: /lovelace/schedule
-          color: !secret CRITICAL_COLOR
-          icon_url: !secret ALERT_ICON
-          actions:
-            - action: alarm_clock_failed_reset
-              title: Reset Alarm Clock
+    - choose:
+        - conditions: "{{ person in ['mobile','jason','sheri'] }}"
+          sequence:
+            - service: >
+                {% if is_state('input_boolean.jason_phone_alarm_clock_notifications','on')
+                    and is_state('input_boolean.sheri_phone_alarm_clock_notifications','on') %} notify.mobile
+                {% elif is_state('input_boolean.jason_phone_alarm_clock_notifications','on') %} notify.jason
+                {% elif is_state('input_boolean.sheri_phone_alarm_clock_notifications','on') %} notify.sheri
+                {% endif %}
+              data:
+                title: 'Alarm Clock Failed'
+                message: "Alarm clock failed at {{ now().strftime('%-I:%M %p') }}."
+                data:
+                  tag: alarm_clock_failed
+                  group: Alert
+                  channel: alarm_stream
+                  importance: max
+                  ttl: 0
+                  priority: high
+                  clickAction: /lovelace/schedule
+                  color: !secret CRITICAL_COLOR
+                  icon_url: !secret ALERT_ICON
+                  actions:
+                    - action: alarm_clock_failed_reset
+                      title: Reset Alarm Clock
 
     - repeat:
         sequence:
@@ -75,7 +90,10 @@
                   A scheduled alarm clock has failed to play.
                   Again, a scheduled alarm clock has failed to play.
                 quiet_play: true
-                min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 70 }}"
+                media_player: media_player.dining_room_speaker
+                min_volume: 70
+
+          #IDEA eventually to local tts if failed?
 
           - delay: 120 # delay between message
         until:

@@ -25,12 +25,13 @@
       state: 'off'
 
     - condition: template
-      alias: Workday/weekend/guest routine enabled, defaults to house waketime if next_waketime is Off
+      alias: Workday/weekend/guest routine enabled, defaults to house waketime if next_waketime is none
       value_template: >
         {% if is_state('binary_sensor.owner_home','off') %}
           {{ is_state('input_boolean.guest_night','on') }}
-        {% elif states('sensor.time') > (states('sensor.next_waketime')
-              if is_state('sensor.next_waketime','off') else states('input_datetime.house_waketime')[0:5]) %}
+        {% elif (now() > today_at(states('input_datetime.house_waketime'))
+            if states('sensor.next_waketime')|lower in ['unknown','unavailable','none']
+              else now() > states('sensor.next_waketime')|as_datetime) %}
             {{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_tomorrow','on')
                 else is_state('input_boolean.weekend_night','on') }}
         {% else %}
@@ -64,11 +65,7 @@
       alias: 'Someone home if trigger is night mode.' # always trigger if notification action
       value_template: "{{ is_state('binary_sensor.owner_home','on') if trigger.id == 'occ' else true }}"
   action:
-    - service: >
-        {% if is_state('binary_sensor.jason_home','on') and is_state('binary_sensor.sheri_home','on') %} notify.mobile
-        {% elif is_state('binary_sensor.jason_home','on') %} notify.jason
-        {% elif is_state('binary_sensor.sheri_home','on') %} notify.sheri
-        {% endif %}
+    - service: "{{ states('sensor.notify_service_home') }}"
       data:
         message: clear_notification
         data:
@@ -144,7 +141,7 @@
                     duration:
                       minutes: '{{ delay }}'
 
-                - wait_template: "{{ state_attr('timer.bedtime_delay','finishes_at')|lower not in ['','unknown','unavailable','none'] }}"
+                - wait_template: "{{ state_attr('timer.bedtime_delay','finishes_at')|lower != none }}"
                   timeout: 30
                   continue_on_timeout: false
 
@@ -260,7 +257,7 @@
                               min_volume: 35
 
                         - delay:
-                            minutes: "{{ states('input_number.bedtime_delay')|int(0) }}"
+                            minutes: "{{ states('input_number.night_mode_delay')|int }}"
 
                         - condition: state
                           entity_id: input_boolean.bedtime_delayed

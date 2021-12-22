@@ -1,3 +1,6 @@
+###############################################################################
+## Templates - Network
+###############################################################################
 - binary_sensor:
     - name: 'WIFI AP Upstairs Connected'
       unique_id: wifi_ap_upstairs_connected
@@ -44,37 +47,72 @@
       icon: mdi:pi-hole
       delay_on:
         minutes: 5 # allow for temporary disconnections before alerting
-      state: >-
+      state: >
         {{ states('sensor.pi_hole_domains_blocked')|lower in ['unknown','unavailable','none']
             and is_state('input_boolean.network_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
 
+    - name: 'PiHole Update Alert'
+      unique_id: pihole_update_alert
+      icon: mdi:pi-hole
+      state: >
+        {{ is_state('binary_sensor.pi_hole_core_update_available','on')
+            or is_state('binary_sensor.pi_hole_ftl_update_available','on')
+            or is_state('binary_sensor.pi_hole_web_update_available','on') }}
 - sensor:
+    - name: 'Network Status'
+      unique_id: network_status
+      icon: mdi:home-assistant
+      state: >
+        {% if is_state('binary_sensor.wan_connected','off')
+            or is_state('sensor.pi_hole_status','Disconnected') %} critical
+        {% elif states('sensor.pi_hole_status')|int(-1) == 'Disabled'
+            or states('sensor.speedtest_download')|int(-1) < 100
+            or states ('sensor.speedtest_upload')|int(-1) < 100
+            or states('sensor.speedtest_ping')|int(-1) > 50
+            or is_state('binary_sensor.unknown_network_device_alert','on') %} warning
+        {% elif states('sensor.speedtest_download')|int(-1) < 150
+            or states ('sensor.speedtest_upload')|int(-1) < 150
+            or states('sensor.speedtest_ping')|int(-1) > 25
+            or is_state('binary_sensor.pi_hole_ftl_update_available','on')
+            or is_state('binary_sensor.pi_hole_core_update_available','on')
+            or is_state('binary_sensor.pi_hole_web_update_available','on') %} minor
+        {% else %} normal
+        {% endif %}
+
     - name: 'JNET Router Uptime Verbose'
       unique_id: jnet_router_uptime_verbose
       icon: mdi:wifi
       state: > # sensor.jnet_router_uptime is seconds
         {%- set uptime = states('sensor.jnet_router_uptime')|int(-1) -%}
-        {%- set TIME_MAP = {
-            'w': (uptime / 604800) % 604800,
-            'd': (uptime / 86400) % 7,
-            'h': (uptime / 3600) % 24,
-            'm': (uptime / 60) % 60,
-            's': (uptime % 60) } -%}
-        {%- if TIME_MAP.w|int > 0 %}{{ TIME_MAP.w|int ~ ' weeks'}}, {% endif %}
-        {%- if TIME_MAP.d|int > 0 %}{{ TIME_MAP.d|int ~ ' days'}}, {% endif %}
-        {%- if TIME_MAP.h|int > 0 %}{{ TIME_MAP.h|int ~ ' hours'}}, {% endif %}
-        {%- if TIME_MAP.m|int > 0 %}{{ TIME_MAP.m|int ~ ' minutes'}}{% endif %}
+        {% if uptime > -1 %}
+          {%- set TIME_MAP = {
+              'w': (uptime / 604800) % 604800,
+              'd': (uptime / 86400) % 7,
+              'h': (uptime / 3600) % 24,
+              'm': (uptime / 60) % 60,
+              's': (uptime % 60) } -%}
+          {%- if TIME_MAP.w|int > 0 %}{{ TIME_MAP.w|int ~ ' weeks'}}, {% endif %}
+          {%- if TIME_MAP.d|int > 0 %}{{ TIME_MAP.d|int ~ ' days'}}, {% endif %}
+          {%- if TIME_MAP.h|int > 0 %}{{ TIME_MAP.h|int ~ ' hours'}}, {% endif %}
+          {%- if TIME_MAP.m|int > 0 %}{{ TIME_MAP.m|int ~ ' minutes'}}{% endif %}
+        {% endif %}
+      availability: "{{ is_number(states('sensor.jnet_router_uptime')) }}"
 
     - name: 'JNET Router Last Boot'
-      unique_id: jnet_router_last_boot_date_time
+      unique_id: jnet_router_last_boot
       icon: mdi:wifi
-      state: > #TODO sensor.jnet_router_uptime is seconds
-        {% set date = (now().timestamp() - states('sensor.jnet_router_uptime')|int(-1))|timestamp_custom('%d',true,'unknown') %}
-        {% set date = '{:01}'.format(date|int(0)) %}
-        {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
-        {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
-        {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
-        {% else %}{% set date = date ~ 'th' %}
+      state: > # sensor.jnet_router_uptime is seconds
+        {% set uptime = states('sensor.jnet_router_uptime')|int(-1) %}
+          {% if uptime > -1 %}
+          {% set last_boot = (now().timestamp() - uptime)|timestamp_local|as_datetime %}
+          {% set date = last_boot.strftime('%d') %}
+          {% set date = '{:01}'.format(date|int(0)) %}
+          {% if date in ('1','21','31') %}{% set date = date ~ 'st' %}
+          {% elif now().day in ('2','22') %}{% set date = date ~ 'nd' %}
+          {% elif now().day in ('3','23') %}{% set date = date ~ 'rd' %}
+          {% else %}{% set date = date ~ 'th' %}
+          {% endif %}
+          {{ last_boot.strftime('%a') }} {{ date }} {{ last_boot.strftime('%b %Y') }} {{ last_boot.strftime('at %-I:%M %p') }}
         {% endif %}
-        {{ states('sensor.last_boot')|as_timestamp('unknown')|timestamp_custom('%H:%M on %a',true,'unknown') }} {{ date }} {{ states('sensor.last_boot')|as_timestamp('unknown')|timestamp_custom('%b %Y',true,'unknown') }}
+      availability: "{{ is_number(states('sensor.jnet_router_uptime')) }}"

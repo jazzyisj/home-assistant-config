@@ -3,15 +3,15 @@
 ###############################################################################
 homeassistant:
   customize:
-    alert.pi_hole_disconnected:
-      friendly_name: "Pi-Hole"
+    alert.pihole_disconnected:
+      friendly_name: 'Pi-Hole'
       icon: mdi:pi-hole
       category: system
     binary_sensor.wan_connected:
       device_class: connectivity
       icon: mdi:wan
     sensor.myip:
-      friendly_name: "WAN IPV4"
+      friendly_name: 'WAN IPV4'
       icon: mdi:wan
     sensor.pi_hole_status:
       icon: mdi:pi-hole
@@ -21,9 +21,24 @@ shell_command:
   pi_hole_disable: !secret PIHOLE_DISABLE_CMD
   pi_hole_disable_time: !secret PIHOLE_DISABLE_TIME_CMD
 
+utility_meter:
+  wan_upload:
+    source: sensor.asuswrt_upload
+    cycle: hourly
+  wan_download:
+    source: sensor.asuswrt_download
+    cycle: hourly
+
+  router_received:
+    source: sensor.jnet_router_b_sent
+    cycle: hourly
+  router_sent:
+    source: sensor.jnet_router_b_received
+    cycle: hourly
+
 input_number:
   pi_hole_disable_time:
-    name: "Pi-Hole Disable Time"
+    name: 'Pi-Hole Disable Time'
     icon: mdi:timer-outline
     unit_of_measurement: min
     min: 0
@@ -35,55 +50,55 @@ switch:
   - platform: template
     switches:
       pi_hole_enabled:
-          friendly_name: "Pi-Hole Enabled"
-          icon_template: >-
-              {% if is_state('sensor.pi_hole_status', 'Enabled') %}
-                mdi:check-circle
+        friendly_name: 'Pi-Hole Enabled'
+        icon_template: >-
+          {% if is_state('sensor.pi_hole_status', 'Enabled') %}
+            mdi:check-circle
+          {% else %}
+            mdi:minus-circle
+          {% endif %}
+        value_template: "{{ is_state('sensor.pi_hole_status', 'Enabled') }}"
+        turn_on:
+          - service: shell_command.pi_hole_enable
+
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pi_hole_disable_time
+            data:
+              value: 0
+
+          - service: homeassistant.update_entity
+            target:
+              entity_id: sensor.pi_hole_status
+        turn_off:
+          - service: >
+              {% if states('input_number.pi_hole_disable_time')|float > 0 %}
+                  shell_command.pi_hole_disable_time
               {% else %}
-                mdi:minus-circle
+                  shell_command.pi_hole_disable
               {% endif %}
-          value_template: "{{ is_state('sensor.pi_hole_status', 'Enabled') }}"
-          turn_on:
-              - service: shell_command.pi_hole_enable
 
-              - service: input_number.set_value
-                target:
-                    entity_id: input_number.pi_hole_disable_time
-                data:
-                    value: 0
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pi_hole_disable_time
+            data:
+              value: 0
 
-              - service: homeassistant.update_entity
-                target:
-                    entity_id: sensor.pi_hole_status
-          turn_off:
-            - service: >
-                {% if states('input_number.pi_hole_disable_time')|float > 0 %}
-                    shell_command.pi_hole_disable_time
-                {% else %}
-                    shell_command.pi_hole_disable
-                {% endif %}
-
-            - service: input_number.set_value
-              target:
-                  entity_id: input_number.pi_hole_disable_time
-              data:
-                  value: 0
-
-            - service: homeassistant.update_entity
-              target:
-                  entity_id: sensor.pi_hole_status
+          - service: homeassistant.update_entity
+            target:
+              entity_id: sensor.pi_hole_status
 
 input_boolean:
   network_automation:
-    name: "Network Automation"
+    name: 'Network Automation'
     icon: mdi:sync-alert
   network_alerts:
-    name: "Network Alerts"
+    name: 'Network Alerts'
     icon: mdi:alert
 
 binary_sensor:
   - platform: ping # https://www.home-assistant.io/components/binary_sensor.ping/
-    name: "WAN Connected"
+    name: 'WAN Connected'
     host: 8.8.8.8
     count: 5
     scan_interval: 300
@@ -92,7 +107,7 @@ sensor:
   - platform: dnsip
 
   - platform: command_line
-    name: "Pi-Hole Status"
+    name: 'Pi-Hole Status'
     command: !secret PIHOLE_STATUS_CMD
     value_template: >-
       {% if is_state('binary_sensor.pihole_disconnected_alert','on') %} Disconnected
@@ -102,10 +117,10 @@ sensor:
       {% endif %}
 
 alert:
-  pi_hole_disconnected:
-    name: "Pi-Hole Disconnected"
-    title: "Pi-Hole Disconnected"
-    message: "Pi-Hole is disabled or disconnected."
+  pihole_disconnected:
+    name: 'PiHole Disconnected'
+    title: 'PiHole Disconnected'
+    message: 'PiHole is disabled or disconnected.'
     entity_id: binary_sensor.pihole_disconnected_alert
     state: 'on'
     repeat: 60
@@ -124,6 +139,32 @@ alert:
       actions:
         - action: URI
           uri: http://http://pi.hole/admin/index.php
-          title: "PiHole Admin"
+          title: 'PiHole Admin'
         - action: pause_pihole_disconnected
-          title: "Pause Alert"
+          title: 'Pause Alert'
+
+  pi_hole_update:
+    name: 'PiHole Update'
+    title: 'PiHole Update'
+    message: 'PiHole update available.'
+    entity_id: binary_sensor.pihole_update_alert
+    state: 'on'
+    repeat: 720
+    notifiers: jason
+    data:
+      tag: pihole_update
+      group: System
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      clickAction: /lovelace/system
+      color: !secret WARNING_COLOR
+      icon_url: !secret PROCESSOR_ICON #IMAGE
+      image: !secret PROCESSOR_IMAGE
+      actions:
+        - action: URI
+          uri: http://http://pi.hole/admin/index.php
+          title: 'PiHole Admin'
+        - action: pause_pihole_update 
+          title: 'Pause Alert'

@@ -26,7 +26,7 @@
       to: Night
 
     - platform: state
-      id: lock_keypad
+      id: lock
       entity_id: # do not auto arm with garage side door
         - sensor.back_door_lock_status
         - sensor.front_door_lock_status
@@ -56,9 +56,20 @@
       entity_id: input_boolean.alarm_temp_override
       state: 'off'
 
-    - "{{ trigger.from_state.state not in ['unknown','unavailable','none'] if trigger.id == 'lock_keypad' else true }}"
-    - "{{ is_state('input_boolean.lock_automation','on') if trigger.id in ['unlock_keypad','lock_keypad'] else true }}"
-    - "{{ is_state('input_boolean.presence_automation','on') if trigger.id in ['away','night'] else true }}"
+    - condition: template
+      alias: 'Lock automation is enabled if lock trigger'
+      value_template: >
+        {{ is_state('input_boolean.lock_automation','on')
+            if trigger.id == 'lock' else true }}
+
+    - "{{ trigger.from_state.state not in ['unknown','unavailable','none']
+      if trigger.id == 'lock' else true }}"
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id in ['away','night'] else true }}
   action:
     - choose:
         - conditions: "{{ trigger.id == 'disarmed' }}"
@@ -109,7 +120,7 @@
                 mode: "{{ 'night' if is_state('input_select.occupancy_mode','Night') else 'home' }}"
 
         - conditions:
-            - "{{ trigger.id in ['lock_keypad','away'] }}"
+            - "{{ trigger.id in ['lock','away'] }}"
 
             - condition: not
               alias: Alarm not already armed_away
@@ -120,40 +131,21 @@
                     - armed_away
                     - arming
           sequence:
-            - choose: #LOCK_USER #NOTE if nobody else home, guest should use lock code to lock door or alarm won't alarm away
+            - choose:
                 - conditions: "{{ trigger.id == 'away' or trigger.to_state.state == 'Locked (Keypad)' }}"
                   sequence:
-                    # arm alarm home right away to lock all doors
-                    - service: script.arm_alarm
-                      data:
-                        mode: home
-
-                    - delay: # wait to see if everyone leaves
+                    # wait to see if everyone leaves
+                    - wait_template: "{{ is_state('binary_sensor.someone_home','off') }}"
+                      timeout:
                         minutes: 5
 
-                    - condition: state
-                      entity_id: binary_sensor.someone_home
-                      state: 'off'
-
+                    #LOCK_USER if nobody else home guest must use lock code to lock door or alarm won't alarm away
                     - service: script.arm_alarm
                       data:
-                        mode: away
+                        mode: "{{ 'away' if is_state('binary_sensor.someone_home','off') else 'home' }}"
 
                 - conditions: "{{ trigger.to_state.state == 'Locked (Jason)' }}"
                   sequence:
-                    # arm alarm home right away to lock all doors
-                    - service: script.arm_alarm
-                      data:
-                        mode: home
-                        code: !secret ALARMO_JASON
-
-                    - delay: # wait to see if everyone leaves
-                        minutes: 5
-
-                    - condition: state
-                      entity_id: binary_sensor.someone_home
-                      state: 'off'
-
                     - service: script.arm_alarm
                       data:
                         mode: away
@@ -161,19 +153,6 @@
 
                 - conditions: "{{ trigger.to_state.state == 'Locked (Sheri)' }}"
                   sequence:
-                    # arm alarm home right away, lock all doors
-                    - service: script.arm_alarm
-                      data:
-                        mode: home
-                        code: !secret ALARMO_SHERI
-
-                    - delay: # wait to see if everyone leaves
-                        minutes: 5
-
-                    - condition: state
-                      entity_id: binary_sensor.someone_home
-                      state: 'off'
-
                     - service: script.arm_alarm
                       data:
                         mode: away

@@ -28,9 +28,7 @@
     - repeat:
         sequence:
           - variables:
-              open_time: >
-                {{ states.cover.garage_door_opener.last_changed.timestamp()
-                    |timestamp_custom('%-I:%M %p',true,'unknown') }}
+              open_time: "{{ states.cover.garage_door_opener.last_changed|as_timestamp(none)|timestamp_custom('%-I:%M %p',true,none) }}"
               open_duration: >
                 {% set seconds = now().timestamp() - states.cover.garage_door_opener.last_changed.timestamp() %}
                 {%- set TIME_MAP = {
@@ -116,7 +114,7 @@
       event_type: system_log_event
       event_data:
         level: ERROR
-  condition: "{{ garage_error not in ['','[]',empty] }}"
+  condition: "{{ garage_error in ['open','close'] }}"
   action:
     - service: input_boolean.turn_on
       target:
@@ -129,7 +127,7 @@
                     entity_id: input_boolean.garage_door_alerts
                     state: 'on'
                 sequence:
-                  - service: notify.jason #TEMP
+                  - service: "{{ states('sensor.notify_service_home') }}"
                     data:
                       title: 'Garage Door Alert'
                       message: >
@@ -177,12 +175,18 @@
               and is_state('input_boolean.garage_door_open_alert','off') }}
 
 #######################################################################################################################
-## Garage Door - Turn Off Alert
+## Garage Door - Clear Notifications
 #######################################################################################################################
-- id: garage_door_turn_off_alert
-  alias: '[Garage Door] Turn Off Alert'
-  description: 'Turn off garage door alert booleans.'
+- id: garage_door_clear_alert_notifications
+  alias: '[Garage Door] Clear Alert Notifications'
+  description: 'Clear notifications on all devices.'
   trigger:
+    - platform: state
+      entity_id:
+        - input_boolean.garage_door_close_alert
+        - input_boolean.garage_door_open_alert
+      to: 'off'
+
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
@@ -193,3 +197,13 @@
         entity_id:
           - input_boolean.garage_door_close_alert
           - input_boolean.garage_door_open_alert
+
+    - condition: state
+      entity_id: input_boolean.garage_door_alerts
+      state: 'on'
+
+    - service: notify.mobile
+      data:
+        message: clear_notification
+        data:
+          tag: garage_door_alert
