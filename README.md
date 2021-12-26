@@ -2,6 +2,8 @@
 
 Home Assistant (Hassio) configuration, updated to v2021.12.4
 
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_v1.png)
+
 ### Entity Counts:
 
     Alarm_control_panel: 3
