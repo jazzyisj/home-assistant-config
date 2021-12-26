@@ -60,7 +60,6 @@ Home Assistant (Hassio) configuration, updated to v2021.12.4
     #QUESTION - question I need to answer
 
     #DELETE - code tagged for deletion
-    #DEPRACATED - depracated option/code
     #DISABLED - disabled code
 
     #TRAFFIC - traffic cams down, disabled

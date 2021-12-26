@@ -6,6 +6,9 @@ arm_alarm:
   description: 'Arm house alarm.'
   icon: mdi:alarm-bell
   fields:
+    zone:
+      description: 'Alarm zone.'
+      example: 'master'
     mode:
       description: 'Alarm arm mode.'
       example: 'away'
@@ -16,26 +19,25 @@ arm_alarm:
       description: 'Bypass open sensors.'
       example: 'true'
   variables:
-    mode: "{{ default('away') }}"
+    zone: "{{ zone|default('master') }}"
+    mode: "{{ mode|default('away') }}"
     hass_code: !secret ALARMO_HA
     code: '{{ code|default(hass_code) }}'
     alarm_mode: 'armed_{{ mode }}'
   sequence:
     - condition: template
       alias: 'Alarm not already armed'
-      value_template: "{{ not is_state('alarm_control_panel.master',alarm_mode) }}"
+      value_template: "{{ not is_state('alarm_control_panel.' ~ zone,alarm_mode) }}"
 
     - choose:
         - conditions:
             - condition: not
-              alias: 'Alarm is not disarmed'
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: disarmed
+              alias: 'Alarm zone is not disarmed'
+              conditions: "{{ not is_state('alarm_control_panel.' ~ zone,'disarmed') }}"
           sequence:
             - service: script.disarm_alarm
               data:
+                zone: '{{ zone }}'
                 person: temp
 
     - choose:
@@ -50,8 +52,23 @@ arm_alarm:
                 skip_delay: true
 
       default:
+        - wait_template: > #TODO garage occupied sensor
+            {{ is_state('lock.garage_door_lock','locked')
+                and is_state('binary_sensor.garage_side_door','off')
+                and is_state('binary_sensor.garage_door_open','off')
+                and is_state('binary_sensor.garage_sensor_motion','off') }}
+          timeout:
+            minutes: 1
+
         - service: alarmo.arm
           data:
-            entity_id: alarm_control_panel.master
+            entity_id: >
+              {% if mode == 'home'
+                  and (is_state('lock.garage_door_lock','unlocked')
+                    or is_state('binary_sensor.garage_side_door','on')
+                    or is_state('binary_sensor.garage_door_open','on')
+                    or is_state('binary_sensor.garage_sensor_motion','on')) %} alarm_control_panel.home
+              {% else %} alarm_control_panel.master
+              {% endif %}
             mode: '{{ mode }}'
             code: '{{ code }}'

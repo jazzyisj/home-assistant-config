@@ -4,20 +4,32 @@
 - id: mobile_dnd_jason #OCC
   alias: '[Mobile] DND Jason'
   description: 'Turn DND on at night, off during day.'
+  max_exceeded: silent
   trigger:
     - platform: state
       entity_id: input_select.occupancy_mode
       to: Night
 
-    # before alarm clock so notifications go through
     - platform: state
-      entity_id: sensor.next_waketime
-      attribute: pre_waketime
-      to: true
-  condition:
-    - condition: state
+      id: from_night
+      entity_id: input_select.occupancy_mode
+      from: Night
+
+    - platform: state
+      entity_id: binary_sensor.waketime_active
+      to: 'on'
+
+    - platform: state
+      id: presence
       entity_id: binary_sensor.jason_home
-      state: 'on'
+  condition:
+    - condition: template
+      alias: 'House in Night mode if trigger is presence'
+      value_template: "{{ is_state('input_select.occupancy_mode','Night') if trigger.id == 'presence' else true }}"
+
+    - condition: template
+      alias: 'Waketime active is off if trigger is from Night mode'
+      value_template: "{{ is_state('binary_sensor.waketime_active','off') if trigger.id == 'from_night' else true }}"
   action:
     - choose:
         - conditions:
@@ -26,9 +38,12 @@
               state: Night
 
             - condition: state
-              entity_id: sensor.next_waketime
-              attribute: pre_waketime
-              state: false
+              entity_id: binary_sensor.waketime_active
+              state: 'off'
+
+            - condition: state
+              entity_id: binary_sensor.jason_home
+              state: 'on'
           sequence:
             - service: notify.jason
               data:
@@ -36,25 +51,52 @@
                 title: priority_only # alarms_only, off, priority_only, total_silence
       default:
         # turn dnd off
-        - service: notify.jason
-          data:
-            message: command_dnd
-            title: 'off'
+        - choose:
+            - conditions:
+                - condition: not
+                  conditions:
+                    - condition: state
+                      entity_id: sensor.jphone_do_not_disturb_sensor
+                      state: 'off'
+              sequence:
+                - service: notify.jason
+                  data:
+                    message: command_dnd
+                    title: 'off'
 
         # turn ringer on
-        - service: notify.jason
-          data:
-            message: command_ringer_mode
-            title: normal # normal, silent, vibrate
+        - choose:
+            - conditions:
+                - condition: not
+                  conditions:
+                    - condition: state
+                      entity_id: sensor.jphone_ringer_mode
+                      state: normal
+              sequence:
+                - service: notify.jason
+                  data:
+                    message: command_ringer_mode
+                    title: normal # normal, silent, vibrate
 
-        # turn all volumes up
-        - service: notify.jason
-          data:
-            message: command_volume_level
-            title: 7 # alarm 0-25, music 0-12, notification 0-7, ring 0-7
-            data:
-              channel: alarm_stream # alarm_stream, music_stream, notification_stream, ring_stream
+        - choose:
+            - conditions:
+                - condition: numeric_state
+                  entity_id: sensor.jphone_volume_level_alarm
+                  below: 7
+              sequence:
+                - service: notify.jason
+                  data:
+                    message: command_volume_level
+                    title: 7
+                    data:
+                      channel: alarm_stream
 
+        - choose:
+            - conditions:
+                - condition: numeric_state
+                  entity_id: sensor.jphone_volume_level_music
+                  below: 25
+              sequence:
         - service: notify.jason
           data:
             message: command_volume_level
@@ -62,6 +104,12 @@
             data:
               channel: music_stream
 
+        - choose:
+            - conditions:
+                - condition: numeric_state
+                  entity_id: sensor.jphone_volume_level_ringer
+                  below: 7
+              sequence:
         - service: notify.jason
           data:
             message: command_volume_level
@@ -69,9 +117,15 @@
             data:
               channel: notification_stream
 
-        - service: notify.jason
-          data:
-            message: command_volume_level
-            title: 7
-            data:
-              channel: ring_stream
+        - choose:
+            - conditions:
+                - condition: numeric_state
+                  entity_id: sensor.jphone_volume_level_ringer
+                  below: 7
+              sequence:
+                - service: notify.jason
+                  data:
+                    message: command_volume_level
+                    title: 7
+                    data:
+                      channel: ring_stream

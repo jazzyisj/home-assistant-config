@@ -121,9 +121,8 @@ set_media_player_volumes:
                         {{ states('input_number.alarm_clock_volume_' ~ state_attr('binary_sensor.alarm_clock','alarm_type'))
                             |float(-1)/100 if source == 'alarm_clock' }}
                       volume_factor:
-                        > # volume default 0.5/0.5 = 1 (no balance adjustment)
-                        {# #TODO this is still weird #}
-                        {{ (default_volume/0.5) ** states('input_number.volume_log_factor')|float(-1)
+                        > # volume default 0.5/0.5 = 1 (no adjustment)
+                        {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor')|float(-1)
                             if is_state('input_boolean.volume_balancing','on') else 1 }}
 
                   - service: media_player.volume_set
@@ -131,7 +130,7 @@ set_media_player_volumes:
                       entity_id: '{{ player }}'
                     data:
                       volume_level: > # volume > -1 value passed in parameters
-                        {% set quiet_hours = is_state('binary_sensor.quiet_hours','on')
+                        {% set quiet_time = is_state('binary_sensor.quiet_time','on')
                             and is_state('binary_sensor.volume_override','off') %}
 
                         {# SET NEW VOLUME - set all % to float #}
@@ -149,7 +148,7 @@ set_media_player_volumes:
                         {% elif source == 'reset' %}
                           {% set new = states('input_number.media_default_volume')|float(-1)/100
                             if media_type in media_types else default_volume %}
-                          {% if quiet_hours %}
+                          {% if quiet_time %}
                             {% set new = new if new < player_volume else player_volume %}
                           {% endif %}
                         {% else %} {# player volume if player on else previous saved value (current) #}
@@ -163,8 +162,8 @@ set_media_player_volumes:
                           {% set new = new * ( 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(-1)) %}
                         {% endif %}
 
-                        {# QUIET HOURS ENFORCEMENT #}
-                        {% if quiet_hours and not source_off and not source in ['alarm_clock','tts'] %}
+                        {# QUIET TIME ENFORCEMENT #}
+                        {% if quiet_time and not source_off and not source in ['alarm_clock','tts'] %}
                             {% if source in media_types %}
                               {% set quiet_volume = states('input_number.media_quiet_volume')|int(-1)/100 %}
                             {% else %}
@@ -177,9 +176,11 @@ set_media_player_volumes:
 
                         {# VOLUME EXCEPTIONS GO HERE #}
 
-                        {# LIMIT TO FULL VOLUME #}
+                        {# LIMIT VOLUME #}
                         {% if source_off %}{{ new }} {# do not balance restored volumes #}
-                        {% else %}{{ 1.00 if (new * volume_factor) > 1 else '%0.2f'|format((new * volume_factor)) }}
+                        {% else %}
+                          {% set vol = new * volume_factor %}
+                          {{ 1.00 if vol > 1 else 0 if vol < 0 else '%0.2f'|format(vol) }}
                         {% endif %}
 
     - delay: 1 # allow volumes to set

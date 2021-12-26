@@ -12,22 +12,23 @@
       icon: mdi:alert
       state: "{{ states.alert|selectattr('state','eq','off')|list|count > 0 }}"
 
-    - name: 'Integrations Online'
-      unique_id: integrations_online
-      icon: "{{ 'mdi:api' if is_state('binary_sensor.integrations_online','on') else 'mdi:api-off' }}"
+    - name: 'Integrations Connected'
+      unique_id: integrations_connected
+      icon: "{{ 'mdi:api' if is_state('binary_sensor.integrations_connected','on') else 'mdi:api-off' }}"
       device_class: connectivity
-      state: "{{ is_state('group.integration_online_sensors','on') }}"
+      state: "{{ is_state('group.integrations_connected_sensors','on') }}"
 
-    - name: 'Integration Online Alert'
-      unique_id: integrations_online_alert
+    - name: 'Integrations Connected Alert'
+      unique_id: integrations_connected_alert
       delay_on:
         minutes: 15 # allow for temporary disconnections before alerting
       state: >
-        {{ is_state('binary_sensor.integrations_online','off')
+        {{ is_state('binary_sensor.integrations_connected','off')
               and is_state('input_boolean.hass_alerts','on')
               and is_state('input_boolean.startup_pending','off') }}
 
-    - name: 'Uptime Robot' # overload uptime sensor - if uptime robot component not connected binary_sensor.hassio is unavailable
+    # overload uptime sensor - if uptime robot component not connected binary_sensor.hassio is unavailable
+    - name: 'Uptime Robot'
       unique_id: uptime_robot
       icon: "{{ 'mdi:sort-clock-descending' if is_state('binary_sensor.uptime_robot','on') else 'mdi:alert-circle' }}"
       device_class: connectivity
@@ -54,8 +55,8 @@
 
     - name: 'Device Offline Alert'
       unique_id: device_offline_alert
-      delay_on: #TODO not turning off?
-        minutes: 15 # allow for temporary disconnections before alerting
+      delay_on:
+        minutes: 1 # allow for temporary disconnections before alerting
       state: >
         {{ states('sensor.offline_devices')|int(-1) > 0
             and is_state('input_boolean.hass_alerts','on')
@@ -63,8 +64,8 @@
 
     - name: 'Unavailable Sensor Alert'
       unique_id: unavailable_sensor_alert
-      delay_on: #TODO not turning off?
-        minutes: 15 # allow for temporary disconnections before alerting
+      delay_on:
+        minutes: 1 # allow for temporary disconnections before alerting
       state: >
         {{ states('sensor.unavailable_sensors')|int(-1) > 0
             and is_state('input_boolean.hass_alerts','on')
@@ -78,19 +79,13 @@
             and is_state('input_boolean.startup_pending','off') }}
 
 - sensor:
-    - unique_id: dummy
-      state: ' '
-
     - name: 'Hass Status'
       unique_id: hass_status
       icon: mdi:home-assistant
-      # must separate startup_pending -
-      # {% if is_state('input_boolean.startup_pending','on') %} critical
-      # {% el
       state: >
         {% if  is_state('sensor.disk_status','critical')
             or states('sensor.unknown_browsers')|int(-1) > 0 %} critical
-        {% elif is_state('binary_sensor.integrations_online','off')
+        {% elif is_state('binary_sensor.integrations_connected','off')
             or is_state('binary_sensor.remote_ui','off')
             or is_state('sensor.disk_status','severe') %} severe
         {% elif states('sensor.offline_devices')|int(-1) > 0
@@ -114,7 +109,8 @@
       attributes:
         entities: "{{ states.sensor|selectattr('attributes.type','eq','browser_mod')|map(attribute='entity_id')|list }}"
 
-    - unique_id: unknown_browsers
+    - name: 'Unknown Browsers'
+      unique_id: unknown_browsers
       unit_of_measurement: browsers
       state: >
         {% if state_attr('sensor.unknown_browsers','entities')|lower not in ['unknown','unavailable','none'] %}
@@ -125,10 +121,11 @@
           {{ states.sensor|selectattr('attributes.type','eq','browser_mod')
             |selectattr('attributes.authorized','ne',true)|map(attribute='entity_id')|list }}
 
+    # display hass uptime in friendly format
     - name: 'Home Assistant Uptime'
       unique_id: home_assistant_uptime
       icon: mdi:clock-start
-      state: > # display home assistant system uptime in friendly format
+      state: >
         {% set up_time = now().timestamp() - states('sensor.uptime')|as_timestamp %}
         {% set minutes = (up_time // 60)|int(0) %}
         {% set hours = (minutes // 60) %}
@@ -149,10 +146,11 @@
         {% endif %}
         {{ text }}
 
+    # display hass restart date/time in friendly format
     - name: 'Last Restart Date Time'
       unique_id: last_restart_date_time
       icon: mdi:clock-start
-      state: > # display last hass restart date/time in friendly format
+      state: >
         {% set uptime = states('sensor.uptime')|as_timestamp|timestamp_local|as_datetime %}
         {% set date = uptime.strftime('%d') %}
         {% set date = '{:01}'.format(date|int(0)) %}
@@ -172,19 +170,13 @@
         {% endif %}
       attributes:
         entities: >
-          {% set offline = namespace(devices=[]) %}
-          {% set entities = (states|selectattr('domain','in',['alarm_control_panel','cover','light','switch',
-                'fan','climate','camera','media_player','weather'])
-              |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
-              |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list) +
-          (expand('group.device_sensors')|selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list) %}
-
-          {% for item in entities %}
-            {% if states[item].last_changed - now() < timedelta(seconds=60) -%}
-              {% set offline.devices = offline.devices + [item] %}
-            {% endif %}
-          {% endfor %}
-          {{ offline.devices }}
+          {% set ignore_ts = (now().timestamp() - 60)|as_datetime %}
+          {% set entities = states|selectattr('domain','in',['alarm_control_panel','cover','light','switch',
+              'fan','climate','camera','media_player','weather'])
+            |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
+            |rejectattr('last_changed','lt',ignore_ts)
+            |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list %}
+          {{ entities }}
 
     - name: 'Unavailable Sensors'
       unique_id: unavailable_sensors
@@ -195,16 +187,21 @@
         {% endif %}
       attributes:
         entities: >
-          {% set unavail = namespace(sensors=[]) %}
+          {% set ignore_ts = (now().timestamp() - 60)|as_datetime %}
           {% set entities = states|selectattr('domain','in',['sensor','binary_sensor'])
-              |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
-              |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list %}
-          {% for item in entities %}
-            {% if states[item].last_changed - now() < timedelta(seconds=60) -%}
-              {% set unavail.sensors = unavail.sensors + [item] %}
-            {% endif %}
-          {% endfor %}
-          {{ unavail.sensors }}
+            |rejectattr('entity_id','in',state_attr('group.ignored_entities','entity_id'))
+            |rejectattr('entity_id','search','_alarm_volume')
+            |rejectattr('entity_id','search','_next_alarm')
+            |rejectattr('entity_id','search','_memory_percent')
+            |rejectattr('entity_id','search','_cpu_percent')
+            |rejectattr('entity_id','search','_timers')
+            |rejectattr('entity_id','search','_alarms')
+            |rejectattr('entity_id','search','_device')
+            |rejectattr('entity_id','search','_do_not_disturb')
+            |rejectattr('entity_id','search','browser_')
+            |rejectattr('last_changed','lt',ignore_ts)
+            |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list %}
+          {{ entities }}
 
     #IDEA get core, supervisor, os from API?
     - name: 'Free Memory'

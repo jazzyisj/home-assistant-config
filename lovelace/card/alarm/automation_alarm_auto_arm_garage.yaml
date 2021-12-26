@@ -1,0 +1,87 @@
+###############################################################################
+## Alarm - Auto Arm Garage
+###############################################################################
+- id: alarm_auto_arm_garage
+  alias: '[Alarm] Auto Arm Garage Zone'
+  description: 'Auto arm alarm garage zone.'
+  mode: restart
+  variables:
+    master: >
+      {% set master = states('alarm_control_panel.master') %}
+      {% if master == 'disarmed' %} disarmed
+      {% else %} {{ master[6:] }}
+      {% endif %}
+    person: >
+      {% set state = trigger.to_state.state %}
+      {% if state == in ['Locked (Keypad)','Locked (Manual)'] %} hassio
+      {% else %} {{ state[8:-1]|lower }}
+      {% endif %}
+  trigger:
+    - platform: state
+      entity_id: sensor.garage_door_lock_status
+      to: #LOCK_USER
+        - Locked (Manual)
+        - Locked (Keypad)
+        - Locked (Jason)
+        - Locked (Sheri)
+        - Locked (Dawn)
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_automation
+        - input_boolean.lock_automation
+        - input_boolean.alarm_auto_arming
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - input_boolean.alarm_pending
+      state: 'off'
+  action:
+    - choose:
+        - conditions: "{{ master == 'disarmed' }}"
+          sequence:
+            - condition: not
+              conditions:
+                - condition: state
+                  entity_id: alarm_control_panel.garage
+                  state: disarmed
+              sequence:
+                - service: script.disarm_alarm
+                  data:
+                    person:
+                    zone: garage
+      default:
+        - choose:
+            - conditions: "{{ person == 'hassio' }}"
+              sequence:
+                - service: script.arm_alarm
+                  data:
+                    zone: garage
+                    mode: '{{ master }}'
+                    code: !secret ALARMO_HA
+
+            - conditions: "{{ person == 'jason' }}"
+              sequence:
+                - service: script.arm_alarm
+                  data:
+                    zone: garage
+                    mode: '{{ master }}'
+                    code: !secret ALARMO_JASON
+
+            - conditions: "{{ trigger.to_state.state == 'Locked (Sheri)' }}"
+              sequence:
+                - service: script.arm_alarm
+                  data:
+                    zone: garage
+                    mode: "{{ person == 'sheri' }}"
+                    code: !secret ALARMO_SHERI
+
+            - conditions: "{{ trigger.to_state.state == 'Locked (Dawn)' }}"
+              sequence:
+                - service: script.arm_alarm
+                  data:
+                    zone: garage
+                    mode: "{{ person == 'dawn' }}"
+                    code: !secret ALARMO_DAWN
