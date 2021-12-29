@@ -4,6 +4,7 @@
 - id: climate_hvac_window_door_open
   alias: '[Climate] HVAC Window Door Open'
   description: 'Turn off HVAC if window or door is open for extended time.'
+  mode: restart
   trigger:
     - platform: state
       entity_id: alert.hvac_window_door_open
@@ -14,106 +15,82 @@
       to: 'off'
   condition:
     - condition: state
-      entity_id: input_boolean.climate_automation
+      entity_id:
+        - input_boolean.climate_automation
+        - alert.hvac_window_door_open
       state: 'on'
 
     - condition: state
-      entity_id:
-        - alert.hvac_window_door_open
-        - input_boolean.startup_pending
+      entity_id: input_boolean.startup_pending
       state: 'off'
   action:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: alert.hvac_window_door_open
-              state: 'on'
-          sequence:
-            - service: automation.turn_off # don't change set mode
-              entity_id: automation.climate_set_thermostat_temperature
+    - service: climate.set_hvac_mode
+      target:
+        entity_id: climate.thermostat
+      data:
+        hvac_mode: 'off'
 
-            - service: climate.set_hvac_mode
-              target:
-                entity_id: climate.thermostat
-              data:
-                hvac_mode: 'off'
+    - repeat:
+        sequence:
+          - service: script.tts_play
+            data:
+              message: >
+                {% set msg = namespace(value='') %}
+                {% set entities =  expand(state_attr('binary_sensor.window_open','entities'))
+                    + expand(state_attr('binary_sensor.door_open','entities')) %}
+                {% set qty = entities|count %}
+                {%- for item in entities -%}
+                    {% if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
+                    {% set msg.value = msg.value ~ item.name %}
+                {% endfor %}
+                {%- set clist = ', and ' if msg.value.split(',')|count > 2 else ' and ' -%}
+                {%- set plural = 'are' if qty|int(0) > 1 else 'is' -%}
+                Attention! The upstairs thermostat has been turned off.
+                The {{ clist.join(msg.value.rsplit(', ', 1)) }} {{ plural }} open!
+              night_play: true
+              ignore_away: true
+              save_message: true
+              min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 60 }}"
 
-            - service: automation.turn_on
-              entity_id: automation.climate_set_thermostat_temperature
+          - wait_template: "{{ not is_state('alert.hvac_window_door_open','on') or not is_state('climate.thermostat','off') }}"
+            timeout: # wait to check if alert turns off/is paused or hvac has been turned back on
+              minutes: 15
 
-            - repeat:
-                sequence:
-                  - service: script.tts_play
-                    data:
-                      message: >
-                        {% set msg = namespace(value='') %}
-                        {% set entities =  expand(state_attr('binary_sensor.window_open','entities'))
-                            + expand(state_attr('binary_sensor.door_open','entities')) %}
-                        {% set qty = entities|count %}
-                        {%- for item in entities -%}
-                            {% if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
-                            {% set msg.value = msg.value ~ item.name %}
-                        {% endfor %}
-                        {%- set clist = ', and ' if msg.value.split(',')|count > 2 else ' and ' -%}
-                        {%- set plural = 'are' if qty|int(0) > 1 else 'is' -%}
-                        Attention! The upstairs thermostat has been turned off.
-                        The {{ clist.join(msg.value.rsplit(', ', 1)) }} {{ plural }} open!
-                      night_play: true
-                      ignore_away: true
-                      save_message: true
-                      min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 60 }}"
-
-                  - wait_template: "{{ not is_state('alert.hvac_window_door_open','on') or not is_state('climate.thermostat','off') }}"
-                    timeout: # wait to check if alert turns off/paused or hvac turned back on
-                      minutes: 15
-
-                  - choose:
-                      - conditions:
-                          - condition: not
-                            conditions:
-                              - condition: state # someone turned the thermostat back on (or alert turned off)
-                                entity_id: climate.thermostat
-                                state: 'off'
-
-                              - condition: state # alert is not off
-                                entity_id: alert.hvac_window_door_open
-                                state: idle
-                        sequence:
-                          - service: alert.turn_off
-                            entity_id: alert.hvac_window_door_open
-
-                          - wait_template: "{{ is_state('alert.hvac_window_door_open','idle') }}"
-                            timeout: # wait before turning alert back on
-                              hours: 2
-
-                          - choose:
-                              - conditions: '{{ not wait.completed }}' # alert still active
-                                sequence:
-                                  - service: automation.turn_off # don't change stored mode
-                                    entity_id: automation.climate_mode_changed
-
-                                  - service: climate.set_hvac_mode
-                                    target:
-                                      entity_id: climate.thermostat
-                                    data:
-                                      hvac_mode: 'off'
-
-                                  - service: automation.turn_on
-                                    entity_id: automation.climate_mode_changed
-
-                                  - service: alert.turn_on
-                                    entity_id: alert.hvac_window_door_open
-                    default:
-                      - wait_template: "{{ not is_state('alert.hvac_window_door_open','on') }}"
-                        timeout: # wait before replay tts
-                          minutes: 30
-                until:
+          - choose:
+              - conditions:
                   - condition: not
                     conditions:
-                      - condition: state
+                      - condition: state # someone turned the thermostat back on
+                        entity_id: climate.thermostat
+                        state: 'off'
+
+                      - condition: state # alert hasn't turned off/been paused
                         entity_id: alert.hvac_window_door_open
                         state: 'on'
+                sequence:
+                  # climate was turned back on so turn off the alert
+                  - service: alert.turn_off
+                    entity_id: alert.hvac_window_door_open
 
+                  - wait_template: "{{ is_state('alert.hvac_window_door_open','idle') }}"
+                    timeout: # wait before turning alert back on
+                      hours: 2
+
+                  - choose:
+                      - conditions: '{{ not wait.completed }}' # alert was still active
+                        sequence:
+                          - service: alert.turn_on # restarts automation
+                            entity_id: alert.hvac_window_door_open
+            default:
+              - wait_template: "{{ is_state('alert.hvac_window_door_open','idle') }}"
+                timeout: # wait before replay tts
+                  minutes: 30
+        until:
+          - condition: state
+            entity_id: alert.hvac_window_door_open
+            state: 'idle'
+
+    # reset back to original
     - service: climate.set_hvac_mode
       target:
         entity_id: climate.thermostat
