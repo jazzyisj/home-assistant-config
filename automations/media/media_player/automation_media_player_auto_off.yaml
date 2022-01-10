@@ -6,23 +6,11 @@
   description: 'Automatically stop and turn off media players.'
   mode: restart
   variables:
-    #TODO change to media_on where else
-    # media_sensors: "{{ state_attr('group.media_sensors','entity_id') }}"
-    # media_types: >
-    #   {% set media_types = namespace(value=[]) %}
-    #   {% for sensor in media_sensors %}
-    #     {% set media_types.value = media_types.value + [sensor[14:]] %}
-    #   {% endfor %}
-    #   {{ media_types.value }}
-    # don't turn off tv's when alarm triggered, they switch to security cams
-    players: >
-      {% set players = expand(state_attr('sensor.media_players','single'))
-          |rejectattr('attributes.device_class','eq','tv') if trigger.id == 'alarm'
-          else expand(state_attr('sensor.media_players','single')) %}
-      {{ players|map(attribute='entity_id')|list }}
-    media_on: >
-      {{ states.media_player|selectattr('attributes.type','eq','master')
-          |selectattr('state','ne','off')|map(attribute='entity_id')|list }}
+    media_players: >
+      {% set media_players = expand(state_attr('sensor.media_players','single')) %}
+      {% set media_players = media_players|rejectattr('attributes.device_class','eq','tv')
+          if trigger.id == 'alarm' else media_players %}
+      {{ media_players|map(attribute='entity_id')|list }}
   trigger:
     - platform: state
       id: occupancy
@@ -36,6 +24,13 @@
       id: alarm
       entity_id: alarm_control_panel.alarm
       to: triggered
+
+    - platform: state
+      id: mute
+      entity_id: switch.system_mute
+      to: 'on'
+      for:
+        minutes: 15
   condition:
     - condition: state
       entity_id: input_boolean.media_player_automation
@@ -48,40 +43,11 @@
             if trigger.id == 'occupancy' else true }}
 
     - condition: template
+      alias: 'Alarm automation is enabled if alarm trigger'
       value_template: >
         {{ is_state('input_boolean.alarm_automation','on')
             if trigger.id == 'alarm' else true }}
   action:
-    - choose:
-        - conditions: '{{ media_on|count > 0 }}'
-          sequence:
-            - repeat:
-                count: '{{ media_on|count }}'
-                sequence:
-                  - service: media_player.turn_off
-                    target:
-                      entity_id: '{{ media_on[repeat.index -1] }}'
-
-    # stop any remaining media players (req for browser players)
-    - choose:
-        - conditions: >
-            {{ expand(players)|selectattr('state','in',['on','playing','paused'])
-                |list|count > 0 }}
-          sequence:
-            - service: media_player.media_stop
-              target:
-                entity_id: >
-                  {{ expand(players)|selectattr('state','in',['playing','paused'])
-                    |map(attribute='entity_id')|list }}
-
-    # turn off any remaining media players
-    - choose:
-        - conditions: >
-            {{ expand(players)|selectattr('state','in',['on','home','playing','paused','idle'])
-                |list|count > 0 }}
-          sequence:
-            - service: media_player.turn_off
-              target:
-                entity_id: >
-                  {{ expand(players)|selectattr('state','in',['on','home','playing','paused','idle'])
-                      |map(attribute='entity_id')|list }}
+    - service: script.media_players_off
+      data:
+        media_players: '{{ media_players }}'

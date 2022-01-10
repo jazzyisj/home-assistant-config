@@ -1,0 +1,140 @@
+###############################################################################
+## Fan - Bathroom Fan In Use
+###############################################################################
+- id: fan_bathroom_fan_in_use
+  alias: '[Fan] Bathroom Fan In Use'
+  description: 'Turn in use timer on when device state changes.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: fan.bathroom_fan
+  condition:
+    - condition: state # fan states change on startup
+      entity_id: input_boolean.startup_pending
+      state: 'off'
+  action:
+    - service: timer.start
+      entity_id: timer.bathroom_fan
+
+###############################################################################
+## Vent Fan - Bathroom Auto On
+###############################################################################
+- id: fan_bathroom_fan_auto_on
+  alias: '[Fan] Bathroom Fan Auto On'
+  description: 'Turn fan on when bathroom alert turns on.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.bathroom_humidity_fan
+        - binary_sensor.bathroom_mold_fan
+        - binary_sensor.bathroom_temperature_fan
+      to: 'on'
+
+    - platform: state
+      id: shower
+      entity_id: input_boolean.shower_scene
+      to: 'on'
+
+    - platform: time_pattern
+      minutes: '/15'
+  condition:
+    - condition: state
+      entity_id: input_boolean.fan_automation
+      state: 'on'
+
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.bathroom_humidity_fan
+          state: 'on'
+
+        - condition: state
+          entity_id: binary_sensor.bathroom_mold_fan
+          state: 'on'
+
+        - condition: state
+          entity_id: binary_sensor.bathroom_temperature_fan
+          state: 'on'
+
+        - condition: state
+          entity_id: input_boolean.shower_scene
+          state: 'on'
+  action:
+    # prevent triggering device in use timers
+    - service: automation.turn_off
+      entity_id: group.fan_bathroom_fan_in_use
+
+    - service: fan.turn_on
+      target:
+        entity_id: fan.bathroom_fan
+      data:
+        percentage: >
+          {% if is_state('binary_sensor.bathroom_sensor_humidity_fan','on')
+              or is_state('input_boolean.shower_scene','on') %} 100
+          {% elif is_state('binary_sensor.bathroom_mold_fan','on') %} 66
+          {% else %} 33
+          {% endif %}
+
+    - delay: 5 #ZWAVE fans are slow to report state change
+
+    - service: automation.turn_on
+      entity_id: automation.fan_bathroom_fan_in_use
+
+###############################################################################
+## Vent Fan - Bathroom Auto Off
+###############################################################################
+- id: fan_bathroom_fan_auto_off
+  alias: '[Fan] Bathroom Fan Auto Off'
+  description: 'Turn vent fan off when alerts turn off.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.bathroom_humidity_fan
+        - binary_sensor.bathroom_mold_fan
+        - binary_sensor.bathroom_temperature_fan
+      to: 'off'
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_fan
+
+    - platform: time_pattern
+      minutes: '/15'
+
+    # prevent fan from being stranded on
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.fan_automation
+        - fan.bathroom_fan
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - binary_sensor.bathroom_humidity_fan
+        - binary_sensor.bathroom_mold_fan
+        - binary_sensor.bathroom_temperature_fan
+        - input_boolean.shower_scene
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.bathroom_fan
+      state: idle
+  action:
+    # prevent triggering device in use timers
+    - service: automation.turn_off
+      entity_id: group.fan_bathroom_fan_in_use
+
+    - service: fan.turn_off
+      entity_id: fan.bathroom_fan
+
+    - delay: 5 #ZWAVE fans are slow to report state change
+
+    - service: automation.turn_on
+      entity_id: automation.fan_bathroom_fan_in_use

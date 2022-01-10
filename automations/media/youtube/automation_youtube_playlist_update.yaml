@@ -3,31 +3,30 @@
 ###############################################################################
 - id: youtube_playlist_update
   alias: '[Youtube] Playlist Update'
-  description: 'Update youtube playlist input options.'
-  initial_state: true
+  description: 'Update spotify playlist select options, restore previous selection on startup.'
   mode: restart
   variables:
-    selected_playlists: "{{ expand('group.youtube_selected_playlists')|map(attribute='entity_id')|list }}"
-    stored_playlists: "{{ expand('group.youtube_stored_playlists')|map(attribute='entity_id')|list }}"
+    selected_playlists: "{{ state_attr('group.youtube_selected_playlists','entity_id') }}"
+    stored_playlists: "{{ state_attr('group.youtube_stored_playlists','entity_id') }}"
   trigger:
-    - platform: state
+    - platform: homeassistant
       id: startup
-      entity_id: input_boolean.startup_pending
-      to: 'off'
+      event: start
 
     - platform: state
-      entity_id: sensor.youtube_playlists
+      entity_id: sensor.youtube_playlists #TEMPLATE trigger on reload
       attribute: playlists
+      to: ~
   condition:
-    - "{{ states('sensor.youtube_playlists')|lower not in ['','unknown','unavailable','none'] }}"
-
-    - condition: state
-      entity_id:
-        - binary_sensor.youtube_connected
-        - binary_sensor.wan_connected
-      state: 'on'
+    - condition: template
+      value_template: >
+        {{ state_attr('sensor.youtube_playlists','playlists')|lower
+            not in ['','[]','unknown','unavailable','none'] if trigger.id != 'startup' else true }}
   action:
-    - wait_template: "{{ is_state('sensor.youtube_playlists','ok') }}" # error if not popuplated (eg startup)
+    # wait for sensor to populate (startup)
+    - wait_template: >
+        {{ state_attr('sensor.youtube_playlists','playlists')|lower
+            not in ['','[]','unknown','unavailable','none'] }}
       timeout:
         minutes: 10
       continue_on_timeout: false
@@ -57,20 +56,30 @@
           - input_select.alarm_clock_youtube_nap
       data:
         options: >
-          [{% for item in state_attr('sensor.youtube_playlists','playlists') -%}
-            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+          {% set options = namespace(value=[]) %}
+          {% for item in state_attr('sensor.youtube_playlists','playlists') -%}
+            {% set options.value = options.value + [item.name ] %}
+          {% endfor %}
+          {{ options.value }}
 
-    - repeat: # restore previous selection (values reset when options reloaded)
-        count: '{{ selected_playlists|count }}'
-        sequence:
-          - choose:
-              - conditions: "{{ states(stored_playlists[repeat.index-1])|lower not in ['','unknown','unavailable','none'] }}"
+    - choose:
+        - conditions: "{{ trigger.id == 'startup' }}" #NOTE only req on startup, now automatic
+          sequence:
+            - repeat: # restore previous selection (values reset when options reloaded)
+                count: '{{ selected_playlists|count }}'
                 sequence:
-                  - service: input_select.select_option
-                    target:
-                      entity_id: '{{ selected_playlists[repeat.index-1] }}'
-                    data:
-                      option: '{{ states(stored_playlists[repeat.index-1]) }}'
+                  - variables:
+                      select_entity: '{{ selected_playlists[repeat.index-1] }}'
+                      stored_value: '{{ states(stored_playlists[repeat.index-1]) }}'
+
+                  - choose:
+                      - conditions: "{{ stored_value in state_attr(select_entity,'options') }}"
+                        sequence:
+                          - service: input_select.select_option
+                            target:
+                              entity_id: '{{ select_entity }}'
+                            data:
+                              option: '{{ stored_value }}'
 
     - service: automation.turn_on
       target:
@@ -82,8 +91,8 @@
 - id: youtube_store_playlist_selection
   alias: '[Youtube] Store Playlist Selection'
   description: 'Update stored youtube playlist selection.'
-  initial_state: true
-  mode: restart
+  mode: queued
+  max: 25
   trigger:
     - platform: state
       entity_id:
@@ -100,6 +109,7 @@
         - input_select.alarm_clock_youtube_nap
         - input_select.media_preset_youtube_jason
         - input_select.media_preset_youtube_sheri
+  condition: "{{ states(trigger.entity_id)|lower not in ['unknown','unavailable','none'] }}"
   action:
     - service: input_text.set_value
       target:
@@ -121,9 +131,7 @@
     - platform: state
       entity_id: media_player.youtube_hassio
       attribute: media_playlist
-  condition:
-    - "{{ state_attr(trigger.entity_id,'media_playlist')|lower not in ['unknown','unavailable','none'] }}"
-    - "{{ playlist in state_attr(entity,'options') }}" # only update if current playlist is a sensor playlist
+  condition: "{{ playlist in state_attr(entity,'options') }}" # only update if current playlist is a sensor playlist
   action:
     - service: automation.turn_off
       target:

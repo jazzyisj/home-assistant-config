@@ -2,23 +2,35 @@
 ## Radio - Playlist Update
 ###############################################################################
 - id: radio_playlist_update
-  alias: "[Radio] Playlist Update"
-  description: "Update radio playlist input options, restore previous selection."
-  initial_state: true
+  alias: '[Radio] Playlist Update'
+  description: 'Update radio station select options, restore previous selection on startup.'
   mode: restart
   variables:
-    selected_playlists: "{{ expand('group.radio_selected_playlists')|map(attribute='entity_id')|list }}"
-    stored_playlists: "{{ expand('group.radio_stored_playlists')|map(attribute='entity_id')|list }}"
+    selected_playlists: "{{ state_attr('group.radio_selected_playlists','entity_id') }}"
+    stored_playlists: "{{ state_attr('group.radio_stored_playlists','entity_id') }}"
   trigger:
-    - platform: state
+    - platform: homeassistant
       id: startup
-      entity_id: input_boolean.startup_pending
-      to: 'off'
+      event: start
 
     - platform: state
-      entity_id: sensor.streaming_radio_stations
+      entity_id: sensor.streaming_radio_stations #TEMPLATE trigger on reload
       attribute: stations
+      to: ~
+  condition:
+    - condition: template
+      value_template: >
+        {{ state_attr('sensor.streaming_radio_stations','stations')|lower
+            not in ['','[]','unknown','unavailable','none'] if trigger.id != 'startup' else true }}
   action:
+    # wait for sensor to populate (startup)
+    - wait_template: >
+        {{ state_attr('sensor.streaming_radio_stations','stations')|lower
+           not in ['','[]','unknown','unavailable','none'] }}
+      timeout:
+        minutes: 10
+      continue_on_timeout: false
+
     - service: automation.turn_off
       target:
         entity_id: &radio_automations
@@ -45,20 +57,30 @@
           - input_select.alarm_clock_radio_nap
       data:
         options: >
-          [{% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
-            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+          {% set options = namespace(value=[]) %}
+          {% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
+            {% set options.value = options.value + [item.name ] %}
+          {% endfor %}
+          {{ options.value }}
 
-    - repeat: # restore previous selection (values reset when options reloaded)
-        count: "{{ selected_playlists|count }}"
-        sequence:
-          - choose:
-              - conditions: "{{ states(stored_playlists[repeat.index-1])|lower not in ['','unknown','unavailable','none'] }}"
+    - choose:
+        - conditions: "{{ trigger.id == 'startup' }}" #NOTE only req on startup, now automatic
+          sequence:
+            - repeat: # restore previous selection (values reset when options reloaded)
+                count: '{{ selected_playlists|count }}'
                 sequence:
-                  - service: input_select.select_option
-                    target:
-                      entity_id: "{{ selected_playlists[repeat.index-1] }}"
-                    data:
-                      option: "{{ states(stored_playlists[repeat.index-1]) }}"
+                  - variables:
+                      select_entity: '{{ selected_playlists[repeat.index-1] }}'
+                      stored_value: '{{ states(stored_playlists[repeat.index-1]) }}'
+
+                  - choose:
+                      - conditions: "{{ stored_value in state_attr(select_entity,'options') }}"
+                        sequence:
+                          - service: input_select.select_option
+                            target:
+                              entity_id: '{{ select_entity }}'
+                            data:
+                              option: '{{ stored_value }}'
 
     - service: automation.turn_on
       target:
@@ -68,15 +90,17 @@
 ## Radio - Store Playlist Selection
 ###############################################################################
 - id: radio_store_playlist_selection
-  alias: "[Radio] Store Playlist Selection"
-  description: "Update stored radio playlist selection."
-  mode: restart
+  alias: '[Radio] Store Playlist Selection'
+  description: 'Update stored radio playlist selection.'
+  mode: queued
+  max: 25
   trigger:
     - platform: state
       entity_id: *radio_selects
+  condition: "{{ states(trigger.entity_id)|lower not in ['unknown','unavailable','none'] }}"
   action:
     - service: input_text.set_value
       target:
         entity_id: "{{ trigger.entity_id|replace('input_select','input_text') }}"
       data:
-        value: "{{ states(trigger.entity_id) }}"
+        value: '{{ states(trigger.entity_id) }}'

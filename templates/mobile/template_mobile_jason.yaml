@@ -4,7 +4,7 @@
 ## UConnect MAC - 48:A9:D2:E5:12:66
 ###############################################################################
 - binary_sensor:
-    #NOTE will always be true after a restart for timedelta - last updated is set to restart time
+    #NOTE will always be true after a restart for timedelta when last updated is set to restart time
     - name: 'Jason Phone Connected'
       unique_id: jason_phone_connected
       icon: "{{ 'mdi:cellphone-wireless' if is_state('binary_sensor.jason_phone_connected','on') else 'mdi:cellphone-off' }}"
@@ -19,20 +19,26 @@
     - name: 'Jason Phone: Connected Alert'
       unique_id: jason_phone_connected_alert
       device_class: problem
+      delay_on:
+        minutes: 5 # delay to prevent firing on template reload, temporary disconnections
       state: >
         {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
           {{ is_state('binary_sensor.jason_phone_connected','off') }}
         {% endif %}
+
     - name: 'Jason Phone: Ringer Alert'
       unique_id: jphone_ringer_alert
       device_class: problem
       delay_on:
         minutes: 15
-      state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+      state: > # set ringer vol default to max to prevent false alerts
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.jason_phone_connected','on') %}
           {{ (is_state('sensor.jphone_do_not_disturb_sensor','priority_only')
                 or is_state('sensor.jphone_ringer_mode','off')
-                or (states('sensor.jphone_volume_level_ringer')|int < 1 and not is_state('sensor.jphone_phone_state','offhook')))
+                or (states('sensor.jphone_volume_level_ringer')|int(7) < 1
+                  and not is_state('sensor.jphone_phone_state','offhook')))
               and not is_state('binary_sensor.quiet_time','on')
               and not is_state('input_select.occupancy_mode','Night') }}
         {% endif %}
@@ -41,7 +47,9 @@
       unique_id: jphone_bluetooth_alert
       device_class: problem
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.jason_phone_connected','on') %}
           {{ is_state('binary_sensor.jphone_bluetooth_state','off')
               and is_state('device_tracker.jphone_bt','not_home') }}
         {% endif %}
@@ -57,7 +65,8 @@
         {% if is_state('binary_sensor.jason_phone_connected','on') %}
           {{ states('sensor.jphone_wifi_connection') in ['JNET2','JNET-ROUTER'] }}
         {% else %}
-           {{ is_state('device_tracker.jason_phone_wifi','home') }}
+           {{ is_state('device_tracker.jason_phone_wifi','home')
+              or is_state('device_tracker.jason_phone_router_wifi','home') }}
         {% endif %}
 
     # phone wifi - person home but not connected to WIFI
@@ -95,7 +104,10 @@
       icon: mdi:crosshairs-gps
       device_class: problem
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.jason_phone_connected','on')
+            and states('sensor.jphone_bluetooth_connection')|lower not in ['unknown','unavailable','none'] %}
           {{ is_state('binary_sensor.jphone_high_accuracy_mode','on')
               and not is_state('binary_sensor.commute_active','on')
               and not is_state('binary_sensor.jphone_is_charging','on')
@@ -107,13 +119,17 @@
     - name: 'Jason Phone: Headphones Alert'
       unique_id: jphone_headphones_alert
       device_class: problem
-      state:
-        > #ISSUE mobile app headphone sensor doesen't detect bluetooth devices
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
-          {% set connected = '00:18:6B:97:9B:B9' in state_attr('sensor.jphone_bluetooth_connection','connected_paired_devices') %}
+      #BUGFIX mobile app headphone sensor doesen't detect bluetooth devices
+      state: >
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.jason_phone_connected','on') %}
+          {% set connected = '00:18:6B:97:9B:B9' in state_attr('sensor.jphone_bluetooth_connection','connected_paired_devices')
+              if states('sensor.jphone_bluetooth_connection')|lower not in ['unknown','unavailable','none'] else false %}
           {{ is_state_attr('binary_sensor.jason_home','just_arrived','true')
-              and (is_state('device_tracker.jason_headphones_bt','home') or connected )
-              and not is_state('alert.phone_mobile_headphone_jason','off') }}
+              and not is_state('alert.phone_mobile_headphone_jason','off')
+              and (is_state('binary_sensor.jphone_headphones','on')
+                or (is_state('device_tracker.jason_headphones_bt','home') or connected )) }}
         {% endif %}
       delay_on:
         minutes: 5
@@ -122,7 +138,9 @@
       unique_id: jphone_battery_alert
       device_class: problem
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.jason_phone_connected','on') %}
           {% set level = 50 if is_state('binary_sensor.work_commute_active','on') else 20 %}
           {{ states('sensor.jphone_battery_level')|int(-1) < level and is_state('binary_sensor.jphone_is_charging','off') }}
         {% endif %}

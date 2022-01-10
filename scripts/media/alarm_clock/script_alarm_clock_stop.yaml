@@ -1,6 +1,6 @@
-#######################################################################################################################
+###############################################################################
 ## Alarm Clock Stop
-#######################################################################################################################
+###############################################################################
 alarm_clock_stop:
   alias: 'Alarm Clock Stop'
   description: 'Turn off alarm clock.'
@@ -12,15 +12,19 @@ alarm_clock_stop:
       example: 'nap'
   variables:
     alarm_types: "{{ ['auto','manual','nap'] }}"
-    alarm_type: "{{ alarm_type if alarm_type not in ['',empty] else state_attr('binary_sensor.alarm_clock','alarm_type') }}"
-    media_type: "{% if alarm_type in alarm_types %}{{ states('input_select.alarm_clock_sound_' ~ alarm_type)|lower }}{% endif %}"
-    player: "{{ states('input_text.active_alarm_clock_media_player') }}"
-    players: >
-      {% if player|lower not in ['off','','unknown','unavailable','none'] %}
-        {% if is_state_attr('media_player.' ~ player.split('.')[1],'type','group') %}
-          {% set players = state_attr('sensor.' ~ player.split('.')[1],'players') %}
+    alarm_type: "{{ alarm_type|default(state_attr('binary_sensor.alarm_clock','alarm_type')) }}"
+    media_type: >
+      {% if alarm_type in alarm_types %}
+        {{ states('input_select.alarm_clock_sound_' ~ alarm_type)|lower }}
+      {% endif %}
+    media_players: >
+      {% set alarm_player = states('input_text.active_alarm_clock_media_player') %}
+      {% if alarm_player|lower not in ['off','','unknown','unavailable','none'] %}
+        {% set player = alarm_player.split('.')[1] %}
+        {% if is_state_attr('media_player.' ~ player,'type','group') %}
+          {% set media_players = state_attr('sensor.' ~ player,'players') %}
         {% endif %}
-        {{ [player] if players|count == 0 else players }}
+        {{ [alarm_player] if media_players|count == 0 else media_players }}
       {% endif %}
   sequence:
     - choose:
@@ -51,21 +55,9 @@ alarm_clock_stop:
                           target:
                             entity_id: input_boolean.alarm_clock_nap
 
-                # - choose:
-                #     - conditions: "{{ expand(players)|selectattr('state','in',['playing','paused'])|list|count > 0 }}"
-                #       sequence:
-                #         - service: media_player.media_stop
-                #           alias: 'Stop alarm clock media players' # req for browser players
-                #           target:
-                #             entity_id: "{{ expand(players)|selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list }}"
-
-                - choose:
-                    - conditions: "{{ expand(players)|selectattr('state','in',['idle','playing','paused'])|list|count > 0 }}"
-                      sequence:
-                        - service: media_player.turn_off
-                          alias: 'Turn of alarm clock media players'
-                          target:
-                            entity_id: "{{ expand(players)|selectattr('state','in',['idle','playing','paused'])|map(attribute='entity_id')|list }}"
+                - service: script.media_players_off
+                  data:
+                    media_players: '{{ media_players }}'
 
                 - service: timer.cancel
                   target:
@@ -94,7 +86,7 @@ alarm_clock_stop:
                           target:
                             entity_id: input_boolean.radio
 
-                - service: script.set_media_player_volumes
+                - service: script.media_players_set_volumes
                   data:
                     media_players: "{{ state_attr('sensor.media_players','single') }}"
                     source: alarm_clock_off
@@ -103,8 +95,15 @@ alarm_clock_stop:
                 - service: switch.turn_off
                   target:
                     entity_id: 'switch.alarm_clock_{{ alarm_type }}'
+
+                - choose:
+                    - conditions: "{{ alarm_type == 'manual' and is_state('input_boolean.alarm_clock_manual_repeat','off') }}"
+                      sequence:
+                        - service: input_boolean.turn_off
+                          target:
+                            entity_id: input_boolean.alarm_clock_manual
       default:
-        - service: system_log.write #IDEA where else do this?
+        - service: system_log.write
           data:
             level: error
             logger: '{{ this.entity_id }}'

@@ -76,7 +76,6 @@ Home Assistant (Hassio) configuration, updated to v2021.12.6
     #TV_VOL - TV volume notes
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
-    #UNLOCKED - code related to phone locked status for alarm disarming
     #LOCK_USER - new lock user code
     #OCC - occupancy automations
 

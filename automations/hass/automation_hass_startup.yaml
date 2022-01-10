@@ -1,6 +1,6 @@
-#######################################################################################################################
+###############################################################################
 ## Hass - Startup
-#######################################################################################################################
+###############################################################################
 - id: hass_startup
   alias: '[Hass] Startup'
   description: 'Turn on delayed automations, send restart notification.'
@@ -26,12 +26,13 @@
     # use offline zwave devices sensor - binary sensor will always be on at startup
     - wait_template: >
         {{ is_state('input_boolean.startup_pending','off')
-            or (is_state('group.integrations_connected_sensors','on')
+            or (is_state('binary_sensor.wan_connected','on')
+              and is_state('group.integrations_connected_sensors','on')
               and is_state('sensor.offline_zwave_devices','0')
               and is_state('sensor.offline_devices','0')
               and is_state('sensor.unavailable_sensors','0')) }}
       timeout:
-        minutes: 2
+        minutes: 5
 
     - service: input_boolean.turn_off
       entity_id: input_boolean.startup_pending
@@ -76,29 +77,34 @@
                 title: *start_title
                 message: *start_message
                 data:
-                  tag: &start_tag hass_restart
+                  tag: hass_restart
                   group: System
                   channel: General
                   importance: max
                   ttl: 0
                   priority: high
-                  clickAction: &start_url /lovelace/home
+                  notification_icon: '{{ states.input_boolean.startup_pending.attributes.icon }}'
+                  icon_url: !secret HASSIO_ICON
+                  ledColor: !secret NOTIFY_COLOR
                   color: !secret NOTIFY_COLOR
-                  icon_url: !secret &start_icon HASSIO_ICON
+                  vibrationPattern: !secret GENERAL_VIBRATION
+                  clickAction: /lovelace-mobile/home
 
             - choose:
                 - conditions:
                     - condition: state
-                      entity_id: binary_sensor.jason_home
+                      entity_id:
+                        - binary_sensor.wan_connected # push causes error if no wan
+                        - binary_sensor.jason_home
                       state: 'on'
 
                     - condition: state
                       entity_id: input_select.occupancy_mode
                       state: Home
 
-                    - condition: state # push causes error if no wan
-                      entity_id: binary_sensor.wan_connected
-                      state: 'on'
+                    - condition: state
+                      entity_id: device_tracker.jason_laptop_wifi
+                      state: home
                   sequence:
                     - service: notify.push
                       data:
@@ -106,27 +112,27 @@
                         message: *start_message
                         target: jlaptop
                         data:
-                          tag: *start_tag
+                          tag: hass_restart
                           timestamp: '{{ now().timestamp() }}'
                           priority: high
                           ttl: 0
                           renotify: true
                           silent: true
                           requireInteraction: false
-                          url: *start_url
+                          url: /lovelace/home
                           image: !secret HASSIO_IMAGE
-                          icon: *start_icon
+                          icon: !secret HASSIO_ICON
                           badge: !secret HASSIO_BADGE
                           actions:
                             - title: Close
                               action: close_hass_restart
 
-#######################################################################################################################
-## Hass - Close Restart Notification
-#######################################################################################################################
-- id: hass_close_restart_notifications
-  alias: '[Hass] Close Restart Notifications'
-  description: 'Clear notifications on all devices.'
+###############################################################################
+## Hass - Clear Restart Notification
+###############################################################################
+- id: hass_clear_restart_notification
+  alias: '[Hass] Clear Restart Notification'
+  description: 'Clear notification.'
   max_exceeded: silent
   trigger:
     - platform: event #NOTE from_state of a dismissed persistent notifcations is null, must use state_changed event
@@ -172,34 +178,3 @@
 
     - delay:
         seconds: 30 # prevent recursive triggers
-
-#NOTE {
-#     "event_type": "state_changed",
-#     "data": {
-#         "entity_id": "persistent_notification.startup_delay",
-#         "old_state": {
-#             "entity_id": "persistent_notification.startup_delay",
-#             "state": "notifying",
-#             "attributes": {
-#                 "title": "Automation Startup",
-#                 "friendly_name": "Automation Startup",
-#                 "message": "Waiting for startup to complete."
-#             },
-#             "last_changed": "2021-09-11T23:00:34.650562+00:00",
-#             "last_updated": "2021-09-11T23:00:34.650562+00:00",
-#             "context": {
-#                 "id": "66468a6efef1c1630e6f88361aa061f5",
-#                 "parent_id": null,
-#                 "user_id": null
-#             }
-#         },
-#         "new_state": null
-#     },
-#     "origin": "LOCAL",
-#     "time_fired": "2021-09-11T23:01:55.726371+00:00",
-#     "context": {
-#         "id": "c40958059060a3e52d6843a3c6b662f9",
-#         "parent_id": null,
-#         "user_id": "e57d4fdfccce4e7e98ec86526571b6f6"
-#     }
-# }

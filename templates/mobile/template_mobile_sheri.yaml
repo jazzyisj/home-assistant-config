@@ -1,9 +1,12 @@
 ###############################################################################
 ## Templates - Mobile Sheri
-## Sheri Headphones btooth MAC - 5C:56:A4:32:E7:0E
+## Sheri Headphones btooth MAC - 5C:56:A4:32:E7:0E, B8:AD:3E:A5:5B:00 (old)
 ## UConnect MAC - 48:A9:D2:E5:12:66
+# {% set devices = state_attr('sensor.sphone_bluetooth_connection','connected_paired_devices') %}
+# {% set connected = '5C:56:A4:32:E7:0E' in devices or 'B8:AD:3E:A5:5B:00' in devices %
 ###############################################################################
 - binary_sensor:
+    #NOTE will always be true after a restart for timedelta when last updated is set to restart time
     - name: 'Sheri Phone Connected'
       unique_id: sheri_phone_connected
       icon: "{{ 'mdi:cellphone-wireless' if is_state('binary_sensor.sheri_phone_connected','on') else 'mdi:cellphone-off' }}"
@@ -18,6 +21,8 @@
     - name: 'Sheri Phone: Connected Alert'
       unique_id: sheri_phone_connected_alert
       device_class: problem
+      delay_on:
+        minutes: 5 # delay to prevent firing on template reload, temporary disconnections
       state: >
         {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
           {{ is_state('binary_sensor.sheri_phone_connected','off') }}
@@ -29,7 +34,9 @@
       delay_on:
         minutes: 15
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.sheri_phone_connected','on') %}
           {{ (is_state('sensor.sphone_do_not_disturb_sensor','priority_only')
                 or is_state('sensor.sphone_ringer_mode','off')
                 or (states('sensor.sphone_volume_level_ringer')|int < 1 and not is_state('sensor.sphone_phone_state','offhook')))
@@ -41,7 +48,9 @@
       unique_id: sphone_bluetooth_alert
       device_class: problem
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.sheri_phone_connected','on') %}
           {{ is_state('binary_sensor.sphone_bluetooth_state','off')
               and is_state('device_tracker.sphone_bt','not_home') }}
         {% endif %}
@@ -58,7 +67,7 @@
           {{ states('sensor.sphone_wifi_connection') in ['JNET2','JNET-ROUTER'] }}
         {% else %}
            {{ is_state('device_tracker.sheri_phone_wifi','home')
-                and is_state('device_tracker.sheri_phone_router_wifi','home') }}
+              or is_state('device_tracker.sheri_phone_router_wifi','home') }}
         {% endif %}
 
     # phone wifi - person home but not connected to WIFI
@@ -67,11 +76,12 @@
       unique_id: sheri_phone_wifi_disconnected
       device_class: problem
       state: >
-        {% if is_state('person.sheri','home') %}
+        {% if is_state('person.sheri','home') and is_state('input_boolean.mobile_alerts','on') %}
           {% if is_state('binary_sensor.sheri_phone_connected','on') %}
               {{ states('sensor.sphone_wifi_connection') not in ['JNET2','JNET-ROUTER'] }}
           {% else  %}
-            {{ not is_state('device_tracker.sheri_phone_wifi','home') }}
+            {{ not is_state('device_tracker.sheri_phone_wifi','home')
+                and is_state('device_tracker.sheri_phone_router_wifi','home') }}
           {% endif %}
         {% endif %}
 
@@ -95,7 +105,9 @@
       icon: mdi:crosshairs-gps
       device_class: problem
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.sheri_phone_connected','on') %}
           {{ is_state('binary_sensor.sphone_high_accuracy_mode','on')
               and not is_state('binary_sensor.commute_active','on')
               and not is_state('binary_sensor.sphone_is_charging','on')
@@ -108,12 +120,16 @@
       unique_id: sphone_headphones_alert
       device_class: problem
       state:
-        > #ISSUE mobile app headphone sensor doesen't detect bluetooth devices
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
-          {% set connected = '5C:56:A4:32:E7:0E' in state_attr('sensor.sphone_bluetooth_connection','connected_paired_devices') %}
+        > #BUGFIX mobile app headphone sensor doesen't detect bluetooth devices
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.sheri_phone_connected','on') %}
+          {% set devices = state_attr('sensor.sphone_bluetooth_connection','connected_paired_devices') %}
+          {% set connected = '5C:56:A4:32:E7:0E' in devices or 'B8:AD:3E:A5:5B:00' in devices %}
           {{ is_state_attr('binary_sensor.sheri_home','just_arrived','true')
-              and (is_state('device_tracker.sheri_headphones_bt','home') or connected )
-              and not is_state('alert.phone_mobile_headphone_sheri','off') }}
+              and not is_state('alert.phone_mobile_headphone_sheri','off')
+              and (is_state('binary_sensor.sphone_headphones','on')
+                or (is_state('device_tracker.sheri_headphones_bt','home') or connected )) }}
         {% endif %}
       delay_on:
         minutes: 5
@@ -122,7 +138,9 @@
       unique_id: sphone_battery_alert
       device_class: problem
       state: >
-        {% if is_state('input_boolean.mobile_alerts','on') and is_state('input_boolean.startup_pending','off') %}
+        {% if is_state('input_boolean.mobile_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.sheri_phone_connected','on') %}
           {% set level = 50 if is_state('binary_sensor.work_commute_active','on') else 20 %}
           {{ states('sensor.sphone_battery_level')|int(-1) < level and is_state('binary_sensor.sphone_is_charging','off') }}
         {% endif %}
@@ -154,11 +172,10 @@
           {% if states('sensor.sheri_phone_last_update')|lower not in ['unknown','unavailable','none'] %}
             {% set time = states('sensor.sheri_phone_last_update')|as_datetime %}
             {{ time.strftime('Today at %-I:%M %p') if now().day == time.day else time.strftime('%A, %-I:%M %p') }}
-          {% else %} unknown
           {% endif %}
-        last_seen: "{{ state_attr('device_tracker.sheri_tracker','last_seen')|as_timestamp('unknown') }}"
-        last_updated: "{{ states.sensor.sphone_last_update_trigger.last_updated|as_timestamp('unknown') }}"
-        last_gps: "{{ states.device_tracker.sphone.last_updated|as_timestamp('unknown') }}"
+        last_seen: "{{ state_attr('device_tracker.sheri_tracker','last_seen')|as_timestamp(none) }}"
+        last_updated: '{{ states.sensor.sphone_last_update_trigger.last_updated|as_timestamp(none) }}'
+        last_gps: '{{ states.device_tracker.sphone.last_updated|as_timestamp(none) }}'
         minutes_since_update: >
           {% set last_seen = state_attr('sensor.sheri_phone_last_update','last_seen')|int(-1) %}
           {% set last_updated = state_attr('sensor.sheri_phone_last_update','last_updated')|int(-1) %}
@@ -166,7 +183,6 @@
           {% if last_seen > -1 and last_updated > -1 and last_gps > -1 %}
             {% set last_update = [last_seen,last_updated,last_gps]|max %}
             {{ ((now().timestamp() - last_update)/60)|int }}
-          {% else %} unknown
           {% endif %}
 
     - name: 'Sheri Phone: Next Alarm'
@@ -175,6 +191,6 @@
       device_class: timestamp
       state: >
         {{ states('sensor.sphone_next_alarm')|as_datetime if is_state('input_boolean.sheri_phone_alarm_clock_enabled','on')
-              and states('sensor.sphone_next_alarm') != 'unavailable' else none }}
+            and states('sensor.sphone_next_alarm') != 'unavailable' else none }}
       attributes:
         12hour: "{{ states('sensor.sheri_phone_next_alarm')|as_timestamp(none)|timestamp_custom('%-I:%M %p',true,none) }}"

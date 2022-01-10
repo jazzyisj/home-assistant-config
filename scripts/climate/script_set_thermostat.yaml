@@ -1,0 +1,131 @@
+###############################################################################
+## Set Thermostat
+###############################################################################
+set_thermostat:
+  alias: 'Set Thermostat'
+  description: 'Set thermostat to preset mode/temperatures.'
+  icon: mdi:thermostat
+  mode: restart
+  variables:
+    boost_temp: "{{ states('sensor.hvac_boost')|int(0) }}"
+    occupancy_mode: "{{ states('input_select.occupancy_mode') }}"
+  sequence:
+    - choose:
+        - conditions: "{{ states('climate.thermostat') != states('input_select.hvac_mode') }}"
+          sequence:
+            - service: climate.set_hvac_mode
+              target:
+                entity_id: climate.thermostat
+              data:
+                hvac_mode: "{{ states('input_select.hvac_mode') }}"
+
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: input_select.hvac_mode
+          state: 'off'
+
+    # if override on, cancel eco to preheat/cool house
+    - service: climate.set_preset_mode
+      target:
+        entity_id: climate.thermostat
+      data:
+        preset_mode: >
+          {{ 'eco' if occupancy_mode in ['Away','Vacation']
+              and is_state('input_boolean.hvac_presence_override','off') else 'none' }}
+
+    - wait_template: > # wait for eco mode to register in away mode (Nest slow)
+        {% if occupancy_mode in ['Away','Vacation'] and is_state('input_boolean.hvac_presence_override','off') %}
+          {{ is_state_attr('climate.thermostat','preset_mode','eco') }}
+        {% else %}
+          {{ is_state_attr('climate.thermostat','preset_mode','none') }}
+        {% endif %}
+      timeout: 5
+
+    - condition: template # error if temp is set in off/eco mode
+      alias: 'HVAC mode is not off or eco mode'
+      value_template: >
+        {{ not is_state_attr('climate.thermostat','hvac_mode','off')
+            and is_state_attr('climate.thermostat','preset_mode','none') }}
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: climate.thermostat
+              state: heat
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.thermostat
+              data:
+                hvac_mode: heat
+                temperature: >
+                  {% set default_heat_temp = 21 %}
+                  {% if occupancy_mode == 'Home' or is_state('input_boolean.hvac_presence_override','on') %}
+                    {% set temp = states('input_number.home_heat_temperature')|int(default_heat_temp) %}
+                  {% elif occupancy_mode == 'Night' %}
+                    {% set temp = states('input_number.night_heat_temperature')|int(default_heat_temp) %}
+                  {% elif occupancy_mode == 'Guest' %}
+                    {% set temp = states('input_number.guest_heat_temperature')|int(default_heat_temp) %}
+                  {% else %}
+                    {% set temp = states('input_number.home_heat_temperature')|int(default_heat_temp) %}
+                  {% endif %}
+                  {{ temp + boost_temp }}
+
+        - conditions:
+            - condition: state
+              entity_id: climate.thermostat
+              state: cool
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.thermostat
+              data:
+                hvac_mode: cool
+                temperature: >
+                  {% set default_cool_temp = 27 %}
+                  {% if occupancy_mode == 'Home' or is_state('input_boolean.hvac_presence_override','on') %}
+                  {% set temp = states('input_number.home_cool_temperature')|int(default_cool_temp) %}
+                  {% elif occupancy_mode == 'Night' %}
+                    {% set temp = states('input_number.night_cool_temperature')|int(default_cool_temp) %}
+                  {% elif occupancy_mode == 'Guest' %}
+                    {% set temp = states('input_number.guest_cool_temperature')|int(default_cool_temp) %}
+                  {% else %}
+                    {% set temp = states('input_number.home_cool_temperature')|int(default_cool_temp) %}
+                  {% endif %}
+                  {{ temp + boost_temp }}
+
+        - conditions:
+            - condition: state
+              entity_id: climate.thermostat
+              state: heat_cool
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.thermostat
+              data:
+                hvac_mode: heat_cool
+                target_temp_low: >
+                  {% set default_heat_temp = 22 %}
+                  {% if occupancy_mode == 'Home' or is_state('input_boolean.hvac_presence_override','on') %}
+                    {% set temp = states('input_number.home_heat_temperature')|int(default_heat_temp) %}
+                  {% elif occupancy_mode == 'Night' %}
+                    {% set temp = states('input_number.night_heat_temperature')|int(default_heat_temp) %}
+                  {% elif occupancy_mode == 'Guest' %}
+                    {% set temp = states('input_number.guest_heat_temperature')|int(default_heat_temp) %}
+                  {% else %}
+                    {% set temp = states('input_number.home_heat_temperature')|int(default_heat_temp) %}
+                  {% endif %}
+                  {{ temp + boost_temp }}
+                target_temp_high: >
+                  {% set default_heat_temp = 28 %}
+                  {% if occupancy_mode == 'Home' or is_state('input_boolean.hvac_presence_override','on') %}
+                    {% set temp = states('input_number.home_cool_temperature')|int(default_cool_temp) %}
+                  {% elif occupancy_mode == 'Night' %}
+                    {% set temp = states('input_number.night_cool_temperature')|int(default_cool_temp) %}
+                  {% elif occupancy_mode == 'Guest' %}
+                    {% set temp = states('input_number.guest_cool_temperature')|int(default_cool_temp) %}
+                  {% else %}
+                    {% set temp = states('input_number.home_cool_temperature')|int(default_cool_temp) %}
+                  {% endif %}
+                  {{ temp + boost_temp }}

@@ -1,35 +1,38 @@
-#######################################################################################################################
+###############################################################################
 ## Media Player - Volume Reset
-#BUG webOS TV's don't report volume level - exclude or they volume gets set to 0 (excludes chromcast too - ok, keeps all TV behaviour the same)
-#######################################################################################################################
+###############################################################################
 - id: media_player_volume_reset
   alias: '[Media Player] Volume Reset'
   description: 'Reset media player volumes when home mode or quiet time change.'
   mode: restart
   variables:
-    media_sensors: "{{ state_attr('group.media_sensors','entity_id') }}"
-    other_players: >
-      {% set players = namespace(value=[]) %}
-      {% for sensor in media_sensors %}
-        {% set media_type = sensor[14:] %}
-        {% if is_state(sensor,'on') %}
-          {% set players.value = players.value
-              + expand(state_attr('sensor.' ~ media_type ~ '_media_player','players'))
-                  |selectattr('state','in',['playing','paused'])|map(attribute='entity_id')|list %}
-        {% endif %}
-      {% endfor %}
-      {{ expand(state_attr('sensor.media_players','single'))|rejectattr('attributes.device_class','eq','tv')
-          |rejectattr('entity_id','in',players.value)|map(attribute='entity_id')|list }}
+    media_types: "{{ state_attr('binary_sensor.media_on','media_types')|default([]) }}"
+    #BUG #TV_VOL webOS TV's don't report volume level - volume gets set to 0
     players: >
-      {{ expand(state_attr('sensor.media_players','single'))
-          |rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list }}
+      {% set players = expand(state_attr('sensor.media_players','single'))
+          |rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list %}
+      {% set other_players = namespace(value=[]) %}
+      {% for media_type in media_types %}
+        {% set other_players.value = other_players.value
+          + expand(state_attr('sensor.' ~ media_type ~ '_media_player','players'))
+            |map(attribute='entity_id')|list %}
+      {% endfor %}
+      {{ expand(players)|rejectattr('entity_id','in',other_players.value)
+          |map(attribute='entity_id')|list }}
   trigger:
     - platform: state # reset when quiet time turns on or off
-      entity_id: binary_sensor.quiet_time
+      entity_id: binary_sensor.quiet_time #TEMPLATE trigger on reload
+      to:
+        - 'on'
+        - 'off'
+      from:
+        - 'on'
+        - 'off'
 
     - platform: state # reset to default when override turned off
       entity_id: binary_sensor.volume_override
       to: 'off'
+      from: 'on'
 
     - platform: state # quiet time/occupancy mode may have changed during while offline/disabled
       entity_id: input_boolean.media_player_automation
@@ -52,80 +55,35 @@
       entity_id: input_boolean.startup_pending
       state: 'off'
   action:
-    - service: automation.turn_off
-      target:
-        entity_id: &volume_automations
-          - automation.media_player_volume_changed
-          - automation.media_volume_changed
-
-    - repeat: # set all players default/quiet (current if < default/quiet and != 0)
-        while:
-          - condition: template
-            value_template: '{{ repeat.index <= players|count }}'
-        sequence:
-          - variables:
-              player: '{{ players[repeat.index-1] }}'
-              name: "{{ player.split('.')[1] }}"
-              volume: > # reset 0 values to quiet in quiet time
-                {% set current = '%0.2f'|format(states('input_number.' ~ name ~ '_current_volume')|float(0))|float %}
-                {% set default = '%0.2f'|format(states('input_number.' ~ name ~ '_default_volume')|float(0))|float %}
-
-                {% if is_state_attr(player,'device_class','speaker') %}
-                  {% set quiet = states('input_number.speaker_quiet_volume')|int(0)/100 %}
-                {% else %}
-                  {% set quiet = states('input_number.tv_quiet_volume')|int(0)/100 %}
-                {% endif %}
-
-                {% if is_state('binary_sensor.quiet_time','on') %}{{ quiet if current > quiet else (current if current > 0 else quiet) }}
-                {% else %}{{ default }}
-                {% endif %}
-
-          - service: input_number.set_value # set input to match volume
-            target:
-              entity_id: "input_number.{{ name ~ '_current_volume' }}"
-            data:
-              value: '{{ volume }}'
-
-    # reset all media type players
-    - repeat:
-        count: '{{ media_sensors|count }}'
-        sequence:
-          - variables:
-              media_type: '{{ media_sensors[repeat.index-1][14:] }}'
-          - choose:
-              - conditions: "{{ is_state(media_sensors[repeat.index-1],'on') }}"
+    - choose:
+        - conditions: '{{ media_types|count > 0 }}'
+          sequence:
+            # reset all media type players
+            - repeat:
+                count: '{{ media_types|count }}'
                 sequence:
+                  - variables:
+                      media_type: '{{ media_types[repeat.index -1] }}'
+
                   - choose:
                       - conditions:
                           - condition: state
                             entity_id: binary_sensor.mobile_phone_in_use
                             state: 'on'
                         sequence:
-                          - service: script.save_media_player_volumes # save values to restore when phone off
+                          - service: script.media_players_save_volumes # save values to restore when phone off
                             data:
+                              media_type: '{{ media_type }}'
                               media_players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','players') }}"
                               source: reset
                     default:
-                      - service: script.set_media_player_volumes # set new media volumes
+                      - service: script.media_players_set_volumes # set new media volumes
                         data:
-                          media_players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','players') }}"
                           media_type: '{{ media_type }}'
+                          media_players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','players') }}"
                           source: reset
 
-                      - delay: 1 # allow media player volumes to change
-
-                      - choose:
-                          - conditions: "{{ is_number(state_attr(states('sensor.' ~ media_type ~ '_media_player'),'volume_level')) }}" # off if not number
-                            sequence:
-                              - service: input_number.set_value # set input to match current volume
-                                target:
-                                  entity_id: 'input_number.{{ media_type}}_volume'
-                                data:
-                                  value: >
-                                    {{ '%0.0f'|format(state_attr(states('sensor.' ~ media_type ~ '_media_player'),'volume_level')
-                                      |float(0)*100) }}
-
-    # save new alarm_clock restore volumes if alarm_clock on so they are set to new values when alarm clock off
+    # save new alarm_clock restore volumes if alarm clock is on to restore when alarm clock turns off
     # do this after radio - more recent values for overlapping players
     - choose:
         - conditions:
@@ -133,8 +91,9 @@
               entity_id: binary_sensor.alarm_clock
               state: 'on'
           sequence:
-            - service: script.save_media_player_volumes
+            - service: script.media_players_save_volumes
               data:
+                media_type: "{{ states('input_select.alarm_clock_sound_' ~ state_attr('binary_sensor.alarm_clock','alarm_type')) }}"
                 media_players: "{{ state_attr('sensor.alarm_clock_media_player','players') }}"
                 source: reset
 
@@ -146,19 +105,15 @@
               entity_id: input_boolean.tts_playing
               state: 'on'
           sequence:
-            - service: script.save_media_player_volumes
+            - service: script.media_players_save_volumes
               data:
                 media_players: "{{ state_attr('sensor.tts_media_player','players') }}"
                 source: reset
 
     - choose: # reset all other media player volumes
-        - conditions: '{{ other_players|count > 0 }}'
+        - conditions: '{{ players|count > 0 }}'
           sequence:
-            - service: script.set_media_player_volumes
+            - service: script.media_players_set_volumes
               data:
-                media_players: '{{ other_players }}'
+                media_players: '{{ players }}'
                 source: reset
-
-    - service: automation.turn_on
-      target:
-        entity_id: *volume_automations

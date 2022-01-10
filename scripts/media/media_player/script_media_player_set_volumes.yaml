@@ -1,15 +1,15 @@
-#######################################################################################################################
+###############################################################################
 ## Set Media Player Volumes
-# does not set speaker group volumes, group volumes are determined by individual media players
-# reset - default/quiet volume or current volume if lower than quiet
-# radio/spotify - passed parameter volume/quiet
-# alarm_clock - alarm clock volume - no quiet enforcement
-# tts_all/phone_all - set all active to quiet volume during tts play
-# source_off - restore saved source volumes - no quiet enforcement
-# defaults to reset all media players if no source/media player parameter specified
-#######################################################################################################################
-set_media_player_volumes:
-  alias: 'Set Media Player Volumes'
+## #NOTE single players only, group volumes are determined by individual media players
+## reset - adjusted default/quiet volume
+## media_type (radio, spotify, youtube)
+## alarm_clock - no quiet enforcement
+## tts_all/phone_all - lower volume during tts play
+## source_off - restore saved source volumes
+## defaults to reset all media single players if no source/media player parameter specified
+###############################################################################
+media_players_set_volumes:
+  alias: 'Media Players Set Volumes'
   description: 'Set media player volumes.'
   icon: mdi:play-box-multiple-outline
   mode: queued
@@ -18,42 +18,28 @@ set_media_player_volumes:
     source:
       description: 'Source calling this script.'
       example: 'tts_off'
-    media_players:
-      description: 'Media player list.'
-      example: '[media_player.dining_room_display, media_player.bedroom_display]'
     media_type: # req for alarm_clock
       description: 'Media type if applicable.'
       example: 'spotify'
+    media_players:
+      description: 'Media player list.'
+      example: '[media_player.dining_room_hub, media_player.bedroom_hub]'
   variables:
-    media_sensors: "{{ state_attr('group.media_sensors','entity_id') }}"
-    media_types: >
-      {% set media_types = namespace(value=[]) %}
-      {% for sensor in media_sensors %}
-        {% set media_types.value = media_types.value + [sensor[14:]] %}
-      {% endfor %}
-      {{ media_types.value }}
-    media_type: "{{ media_type|default('none') }}"
-    source: "{{ source|default('none') }}"
+    source: "{{ source|default('reset') }}"
     media_tts: "{{ source[-4:] == '_tts' }}"
     source_off: "{{ media_tts or source in ['alarm_clock_off','phone_off','tts_off'] }}"
-    players: > #TV_VOL - reject tvs - no volume_level attribute
-      {% if media_players not in ['',empty] %}
-        {% set players = media_players %}
-      {% else %}
-        {% set players = state_attr('sensor.media_players','single') %}
+    media_type: '{{ media_type|default(none) }}'
+    media_types: "{{ state_attr('sensor.media_types','media_types') }}"
+    media_players: > #TV_VOL - reject tvs - no volume_level attribute
+      {% set media_players = media_players|default(state_attr('sensor.media_players','single')) %}
+      {% if not (media_players is iterable and (media_players is not string and media_players is not mapping)) %}
+        {% set media_players = [media_players] %}
       {% endif %}
-      {% set players = expand(players)|rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list %}
-      {{ players }}
+      {{ expand(media_players)|rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list }}
   sequence:
-    - condition: state # do not run if system is muted
-      entity_id: input_boolean.mute_all
+    - condition: state # do not run if system is muted (kills mute)
+      entity_id: switch.system_mute
       state: 'off'
-
-    - service: automation.turn_off
-      target:
-        entity_id: automation.media_player_volume_changed
-      data:
-        stop_actions: false
 
     - choose:
         - conditions: >
@@ -65,34 +51,34 @@ set_media_player_volumes:
           sequence:
             - service: script.turn_on # checks if phone on to save values
               target:
-                entity_id: script.save_media_player_volumes
+                entity_id: script.media_players_save_volumes
               data:
                 variables:
                   source: phone
-                  media_players: '{{ players }}'
+                  media_players: '{{ media_players }}'
 
         - conditions: "{{ source in ['phone_all','tts_all'] }}"
           sequence:
             - service: script.turn_on # checks if phone on to save values
               target:
-                entity_id: script.save_media_player_volumes
+                entity_id: script.media_players_save_volumes
               data:
                 variables:
-                  source: '{{ source[0:-4] }}'
-                  media_players: '{{ players }}'
+                  source: '{{ source[0:-4] }}' # strip '_all'
+                  media_players: '{{ media_players }}'
 
     - repeat:
         while:
           - condition: template
-            value_template: '{{ repeat.index <= players|count }}'
+            value_template: '{{ repeat.index <= media_players|count }}'
         sequence:
           - variables:
-              player: '{{ players[repeat.index-1] }}'
+              player: '{{ media_players[repeat.index-1] }}'
               player_name: "{{ player.split('.')[1] }}"
               source_volume: >
                 {% if media_tts %}{{ states('input_number.' ~ player_name ~ '_tts')|float(-1) }}
                 {% elif source_off %}{{ states('input_number.' ~ player_name ~ '_' ~ source[0:-4])|float(-1) }}
-                {% else %} 0
+                {% else %} -1
                 {% endif %}
           - choose:
               - conditions:
@@ -101,90 +87,76 @@ set_media_player_volumes:
                     value_template: "{{ states(player)|lower not in ['unknown','unavailable','none'] }}"
 
                   - condition: template
-                    # user may have adj vol in off state don't override
-                    alias: 'Source volume is not zero when source is off'
+                    alias: 'Source volume is not zero if source_off' # user may have adj vol in off state don't override
                     value_template: '{{ source_volume > 0 if source_off else true }}'
 
                   #BLOOP don't set volumes if media player isn't on to prevent volume adjust pops (phone_all, phone_off)
                   - condition: template
                     alias: 'Media player is not off if source is phone_off, phone_all'
-                    value_template: >
-                      {{ states(player) not in ['idle','off']
-                          if source in ['phone_all','phone_off'] else true }}
+                    value_template: "{{ states(player) not in ['idle','off'] if source in ['phone_all','phone_off'] else true }}"
                 sequence:
                   - variables:
-                      player_volume: "{{ '%0.2f'|format(state_attr(player,'volume_level')|float(0)) }}" # vol 0 = off
+                      player_volume: "{{ '%0.2f'|format(state_attr(player,'volume_level')|float(-1)) }}" # vol -1 = off
                       current_volume: "{{ states('input_number.' ~ player_name ~ '_current_volume')|float(-1) }}"
-                      default_volume: "{{ states('input_number.' ~ player_name ~ '_default_volume')|float(-1) }}"
+                      default_volume: >
+                        {% set def = states('input_number.' ~ player_name ~ '_default_volume')|float(-1) %}
+                        {{ def if def > 0 else 0.5 }}
+                      quiet_volume: >
+                        {{ states('input_number.tv_quiet_volume')|int(-1)/100
+                            if state_attr(player,'device_class') == 'tv'
+                              else states('input_number.speaker_quiet_volume')|int(-1)/100 }}
                       media_volume: "{{ states('input_number.' ~ source ~ '_volume')|float(-1)/100 if source in media_types }}"
+                      tts_volume: "{{ 0 if player in state_attr('sensor.tts_media_player','players') else 0.15 }}"
+                      phone_volume: '{{ player_volume if player_volume < 0.2 else 0.2 }}'
+                      reset_volume: >
+                        {{ states('input_number.media_default_volume')|float/100
+                            if media_type in media_types else default_volume }}
                       alarm_clock_volume: >
                         {{ states('input_number.alarm_clock_volume_' ~ state_attr('binary_sensor.alarm_clock','alarm_type'))
                             |float(-1)/100 if source == 'alarm_clock' }}
-                      volume_factor:
-                        > # volume default 0.5/0.5 = 1 (no adjustment)
-                        {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor')|float(-1)
-                            if is_state('input_boolean.volume_balancing','on') else 1 }}
-
-                  - service: media_player.volume_set
-                    target:
-                      entity_id: '{{ player }}'
-                    data:
-                      volume_level: > # volume > -1 value passed in parameters
-                        {% set quiet_time = is_state('binary_sensor.quiet_time','on')
-                            and is_state('binary_sensor.volume_override','off') %}
-
-                        {# SET NEW VOLUME - set all % to float #}
-                        {% if source_off %}
-                          {% set new = source_volume %}
-                        {% elif source == 'tts_all' %}
-                          {% set new = 0 if player in state_attr('sensor.tts_media_player','players') else 0.15 %}
-                        {% elif source == 'phone_all'
-                            or (source in media_types and is_state('binary_sensor.mobile_phone_in_use','on')) %}
-                          {% set new = player_volume if player_volume < 0.2 else 0.2 %}
-                        {% elif source in media_types %}
-                          {% set new = media_volume %}
-                        {% elif source == 'alarm_clock' %}
-                          {% set new =  alarm_clock_volume %}
-                        {% elif source == 'reset' %}
-                          {% set new = states('input_number.media_default_volume')|float(-1)/100
-                            if media_type in media_types else default_volume %}
-                          {% if quiet_time %}
-                            {% set new = new if new < player_volume else player_volume %}
-                          {% endif %}
-                        {% else %} {# player volume if player on else previous saved value (current) #}
-                          {% set new = player_volume if player_volume > 0 else current_volume %}
-                        {% endif %}
-
-                        {# MEDIA TYPE VOLUME ADJUSTMENT #}
-                        {% if media_type in media_types or source in media_types %}
+                      media_adjustment: >
+                        {% if media_type in media_types or source in media_types
+                            and is_state('input_boolean.media_type_volume_adjustments','on') %}
                           {% set media_type = source if media_type not in media_types else media_type %}
                           {% set media_type =  ('spotify' if 'spotify' in media_type else media_type) %}
-                          {% set new = new * ( 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(-1)) %}
+                          {{ 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(0) }}
+                        {% else %} 1 {# no adjustment #}
+                        {% endif %}
+                      #NOTE volume default 0.5/0.5 = 1 (no adjustment)
+                      volume_factor: >
+                        {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor')|float(-1)
+                            if is_state('input_boolean.volume_balancing','on') else 1 }}
+                      new_volume: >
+                        {% if source_off %} {% set volume = source_volume %}
+                        {% elif source == 'tts_all' %} {% set volume = tts_volume %}
+                        {% elif source == 'phone_all' or (source in media_types
+                            and is_state('binary_sensor.mobile_phone_in_use','on')) %} {% set volume = phone_volume %}
+                        {% elif source in media_types %} {% set volume = media_volume %}
+                        {% elif source == 'alarm_clock' %} {% set volume = alarm_clock_volume %}
+                        {% elif source == 'reset' %} {% set volume = reset_volume %}
+                        {% else %} {% set volume = player_volume if player_volume > 0 else current_volume %}
                         {% endif %}
 
-                        {# QUIET TIME ENFORCEMENT #}
-                        {% if quiet_time and not source_off and not source in ['alarm_clock','tts'] %}
-                            {% if source in media_types %}
-                              {% set quiet_volume = states('input_number.media_quiet_volume')|int(-1)/100 %}
-                            {% else %}
-                              {% set quiet_volume = states('input_number.tv_quiet_volume')|int(-1)/100
-                                  if state_attr(player,'device_class') == 'tv'
-                                    else states('input_number.speaker_quiet_volume')|int(-1)/100 %}
-                            {% endif %}
-                            {% set new = new if new < quiet_volume else quiet_volume %}
+                        {% if is_state('binary_sensor.quiet_time','on')
+                            and is_state('binary_sensor.volume_override','off')
+                            and not source in ['alarm_clock','tts'] %}
+                          {% set volume = volume if volume < quiet_volume else quiet_volume %}
                         {% endif %}
 
-                        {# VOLUME EXCEPTIONS GO HERE #}
-
-                        {# LIMIT VOLUME #}
-                        {% if source_off %}{{ new }} {# do not balance restored volumes #}
+                        {% if source_off %}{{ volume }} {# do not adjust restored volumes #}
                         {% else %}
-                          {% set vol = new * volume_factor %}
-                          {{ 1.00 if vol > 1 else 0 if vol < 0 else '%0.2f'|format(vol) }}
+                          {% set volume = volume * media_adjustment|float(1) * volume_factor|float(1) %}
+                          {{ 1 if volume > 1 else 0 if volume < 0 else '%0.2f'|format(volume) }}
                         {% endif %}
 
-    - delay: 1 # allow volumes to set
+                  - choose:
+                      - conditions: '{{ new_volume >= 0 }}'
+                        sequence:
+                          - service: media_player.volume_set
+                            target:
+                              entity_id: '{{ player }}'
+                            data:
+                              volume_level: '{{ new_volume }}'
 
-    - service: automation.turn_on
-      target:
-        entity_id: automation.media_player_volume_changed
+    - delay: 1 # allow last volumes to set so we don't trigger automation.media_player_volume_changed
+

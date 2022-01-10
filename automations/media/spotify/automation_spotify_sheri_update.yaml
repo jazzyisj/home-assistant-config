@@ -2,34 +2,32 @@
 ## Spotify Sheri - Playlist Update
 ###############################################################################
 - id: spotify_sheri_playlist_update
-  alias: "[Spotify] Sheri Playlist Update"
-  description: "Update spotify playlist input options, restore previous selection."
-  initial_state: true
+  alias: '[Spotify] Sheri Playlist Update'
+  description: 'Update spotify playlist select options, restore previous selection on startup.'
   mode: restart
   variables:
-    selected_playlists: "{{ expand('group.spotify_sheri_selected_playlists')|map(attribute='entity_id')|list }}"
-    stored_playlists: "{{ expand('group.spotify_sheri_stored_playlists')|map(attribute='entity_id')|list }}"
+    select_entity: input_select.spotify_sheri_playlist
+    stored_value: '{{ states(select_entity) }}'
+    playlist_sensor: sensor.playlists_sensor_sheri
   trigger:
-    - platform: state
+    - platform: homeassistant
       id: startup
-      entity_id: input_boolean.startup_pending
-      to: 'off'
+      event: start
 
     - platform: state
-      entity_id: sensor.playlists_sensor_sheri
+      entity_id: sensor.playlists_sensor_sheri #TEMPLATE trigger on reload
       attribute: playlists
+      to: ~
   condition:
-    - condition: state
-      entity_id:
-        - binary_sensor.spotify_connected
-        - binary_sensor.wan_connected
-      state: 'on'
-
-    - condition: state
-      entity_id: input_boolean.startup_pending
-      state: 'off'
+    - condition: template
+      value_template: >
+        {{ state_attr(playlist_sensor,'playlists')|lower
+            not in ['','[]','unknown','unavailable','none'] if trigger.id != 'startup' else true }}
   action:
-    - wait_template: "{{ state_attr('sensor.playlists_sensor_sheri','playlists')|lower not in ['','[]','unknown','unavailable','none']}}"
+    # wait for sensor to populate (startup)
+    - wait_template: >
+        {{ state_attr(playlist_sensor,'playlists')|lower
+            not in ['','[]','unknown','unavailable','none'] }}
       timeout:
         minutes: 10
       continue_on_timeout: false
@@ -44,35 +42,39 @@
 
     - service: input_select.set_options
       target:
-        entity_id: input_select.spotify_sheri_playlist
+        entity_id: '{{ select_entity }}'
       data:
         options: >
-          [{% for item in state_attr('sensor.playlists_sensor_sheri','playlists') -%}
+          [{% for item in state_attr(playlist_sensor,'playlists') -%}
             "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
 
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.spotify_sheri_playlist
-      data:
-        option: "{{ states('input_text.spotify_sheri_playlist') }}"
+    - choose: #NOTE only req on startup, now automatic
+        - conditions: "{{ trigger.id == 'startup' and stored_value in state_attr(select_entity,'options') }}"
+          sequence:
+            - service: input_select.select_option
+              target:
+                entity_id: '{{ select_entity }}'
+              data:
+                option: '{{ stored_value }}'
 
     - service: automation.turn_on
       target:
         entity_id: *spotify_automations
 
-#######################################################################################################################
+###############################################################################
 ## Spotify Sheri - Playlist Selection Update
-#######################################################################################################################
+###############################################################################
 - id: spotify_sheri_playlist_selection_update
-  alias: "[Spotify] Sheri Playlist Selection Update"
-  description: "Update spotify playlist input selection."
-  initial_state: true
+  alias: '[Spotify] Sheri Playlist Selection Update'
+  description: 'Update playlist selection when changed in media player.'
   mode: restart
+  variables:
+    playlist: "{{ state_attr(trigger.entity_id,'media_playlist') }}"
   trigger:
     - platform: state
       entity_id: media_player.spotify_sheri
       attribute: media_playlist
-  condition: "{{ state_attr(trigger.entity_id,'media_playlist') in state_attr('input_select.spotify_sheri_playlist','options') }}"
+  condition: "{{ playlist in state_attr('input_select.spotify_sheri_playlist','options') }}"
   action:
     - service: automation.turn_off
       target:
@@ -84,7 +86,7 @@
       target:
         entity_id: input_select.spotify_sheri_playlist
       data:
-        option: "{{ state_attr('media_player.spotify_sheri','media_playlist') }}"
+        option: '{{ playlist }}'
 
     - service: automation.turn_on
       target:

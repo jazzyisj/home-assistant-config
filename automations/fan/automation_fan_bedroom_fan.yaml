@@ -1,0 +1,138 @@
+###############################################################################
+## Fan - Bedroom Fan In Use
+###############################################################################
+- id: fan_bedroom_fan_in_use
+  alias: '[Fan] Bedroom Fan In Use'
+  description: 'Turn in use timer on when device state changes.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: fan.bedroom_fan
+      to: ~
+  action:
+    - service: timer.start
+      entity_id: timer.bedroom_fan
+
+###############################################################################
+## Fan - Bedroom Fan Auto On
+###############################################################################
+- id: fan_bedroom_fan_auto_on
+  alias: '[Fan] Bedroom Fan Auto On'
+  description: 'Turn ceiling fan on.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+      to: 'on'
+  condition:
+    - condition: state
+      entity_id: input_boolean.fan_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: fan.bedroom_fan
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.bedroom_fan
+      state: idle
+
+    - condition: not
+      conditions:
+        - condition: state
+          entity_id: input_select.occupancy_mode
+          state: Night
+
+        - condition: state
+          entity_id: binary_sensor.bedtime_active
+          state: 'on'
+  action:
+    # prevent triggering device in use timers
+    - service: automation.turn_off
+      entity_id: automation.fan_bedroom_fan_in_use
+
+    - service: fan.turn_on
+      target:
+        entity_id: fan.bedroom_fan
+      data:
+        percentage: 50 # fan auto on default speed
+
+    - delay: #ZWAVE fans are slow to report state change
+        seconds: 15
+
+    - service: automation.turn_on
+      entity_id: automation.fan_bedroom_fan_in_use
+
+###############################################################################
+## Fan - Bedroom Fan Auto Off
+###############################################################################
+- id: fan_bedroom_fan_auto_off #OCC
+  alias: '[Fan] Bedroom Fan Auto Off'
+  description: 'Turn ceiling fan off.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: fan.bedroom_fan
+      for:
+        hours: 8
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 1 # allow timer to cancel
+
+    - platform: state
+      id: schedule
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+      to: 'off'
+
+    # prevent fan from being stranded on
+    - platform: state
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.fan_automation
+        - fan.bedroom_fan
+      state: 'on'
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id == 'occupancy' else true }}
+
+    - condition: state
+      alias: 'HVAC fan or fan schedule is not on'
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.bedroom_fan
+      state: idle
+  action:
+    # prevent triggering device in use timers
+    - service: automation.turn_off
+      entity_id: automation.fan_bedroom_fan_in_use
+
+    - service: fan.turn_off
+      entity_id: fan.bedroom_fan
+
+    #ZWAVE fans are slow to report state change
+    - delay:
+        seconds: 15
+
+    - service: automation.turn_on
+      entity_id: automation.fan_bedroom_fan_in_use

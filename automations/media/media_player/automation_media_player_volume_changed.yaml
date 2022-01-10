@@ -1,45 +1,59 @@
-#######################################################################################################################
-## Media Player Volume Changed
-#BUG cast device volume changes aren't picked up when media player is off state - no fix
-#######################################################################################################################
+###############################################################################
+## Media Media Player Volume Changed
+###############################################################################
 - id: media_player_volume_changed
   alias: '[Media Player] Volume Changed'
-  description: 'Update stored volume when media player volume changes.'
-  initial_state: true # may have been turned off when automations were reloaded
+  description: 'Update media volume when media type media player volume.'
   mode: queued
   max: 20
   max_exceeded: error
   variables:
-    player_name: "{{ trigger.entity_id.split('.')[1] }}"
-    default_volume_entity: 'input_number.{{ player_name }}_default_volume'
-    player_volume: "{{ '%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float(0) * 100) }}"
-    quiet_volume: >
-      {% if is_state_attr(trigger.entity_id,'device_class','tv') %}{% set quiet_volume = states('input_number.tv_quiet_volume')|float %}
-      {% else %}{% set quiet_volume = states('input_number.speaker_quiet_volume')|float %}
-      {% endif %}
-      {# test/set balanced volume #}
-      {% set vol_factor = 1 if is_state('input_boolean.volume_balancing','off')
-          else (states(default_volume_entity)|float('unknown')/0.5) ** states('input_number.volume_log_factor')|float %}
-      {{ '%0.2f'|format(quiet_volume * vol_factor) }}
-    limit_volume: >
-      {{ is_state('binary_sensor.volume_override','off')
+    media_type: >
+      {% set type = namespace(value='') %}
+      {% set media_types = state_attr('binary_sensor.media_on','media_types') %}
+      {% for media_type in media_types %}
+        {% if trigger.entity_id == states('sensor.' ~ media_type ~ '_media_player') %}
+          {% set type.value = media_type %}
+        {% endif %}
+      {% endfor %}
+      {{ type.value }}
+    volume: >
+      {% set player_volume = ('%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float(-1) * 100))|int(-1) %}
+      {% set quiet_volume = states('input_number.media_quiet_volume')|int(-1) %}
+
+      {% if is_state('binary_sensor.volume_override','off')
           and is_state('binary_sensor.quiet_time','on')
-          and (player_volume > quiet_volume) }}
-    new_volume: '{{ quiet_volume if limit_volume else player_volume }}'
-    is_tv: "{{ trigger.entity_id in states.media_player|selectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list }}"
+          and (player_volume > quiet_volume) %}{% set volume = quiet_volume %}
+      {% else %}{% set volume = player_volume %}
+      {% endif %}
+
+      {# reverse media type adjustment #}
+      {% set media_type = 'spotify' if 'spotify' in media_type else media_type %}
+      {% set volume = (volume / (1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(0)))|int %}
+      {{ 100 if volume > 100 else 0 if volume < 0 else volume }}
   trigger:
     - platform: state
-      entity_id: !include /config/include/entities/media_player_entities_single.yaml
-      attribute: volume_level #TV_VOL - roku tv doesn't report volume_level in media player
+      entity_id: !include /config/include/entities/media_player_entities.yaml
+      attribute: volume_level
+      to: ~
   condition:
+    # alarm announcements are full volume
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+
     - condition: state
       entity_id:
-        - input_boolean.alarm_triggered
         - script.media_play
+        - script.media_players_set_volumes
       state: 'off'
 
     - condition: template
-      alias: 'Volume not changed by media player turning off or unavailable (sets volume to 0)'
+      alias: 'Trigger entity is a media type player'
+      value_template: "{{ media_type != '' }}"
+
+    - condition: template
+      alias: 'Volume not changed by media player turning off or becoming unavailable (sets volume to 0)'
       value_template: "{{ states(trigger.entity_id)|lower not in ['off','unknown','unavailable','none'] }}"
 
     - condition: template
@@ -74,29 +88,8 @@
           {% endif %}
         {% endif %}
   action:
-    - choose: # quiet time enforcement on volume change - single players only, no tvs
-        - conditions: '{{ limit_volume and not is_tv }}'
-          sequence:
-            - service: automation.turn_off
-              target:
-                entity_id: '{{ this.entity_id }}'
-              data:
-                stop_actions: false
-
-            - service: media_player.volume_set
-              target:
-                entity_id: '{{ trigger.entity_id }}'
-              data:
-                volume_level: '{{ new_volume/100 }}'
-
-            - service: automation.turn_on
-              target:
-                entity_id: '{{ this.entity_id }}'
-
-            - delay: 1 # allow media player volume to change
-
     - service: input_number.set_value
       target:
-        entity_id: 'input_number.{{ player_name }}_current_volume'
+        entity_id: 'input_number.{{ media_type }}_volume'
       data:
-        value: '{{ new_volume/100 }}'
+        value: '{{ volume }}'

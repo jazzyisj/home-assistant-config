@@ -7,7 +7,7 @@
   mode: restart
   trigger:
     - platform: state
-      entity_id: sensor.today_shift
+      entity_id: sensor.work_shift_today
       from: # template reload - unavailable
         - days
         - afternoons
@@ -19,28 +19,37 @@
         - input_boolean.schedule_automation
         - input_boolean.schedule_alerts
       state: 'on'
-    - '{{ trigger.to_state.state != trigger.from_state.state }}'
+
+    - condition: template
+      alias: 'To state and from state are same value' # selection change back to original value
+      value_template: '{{ trigger.to_state.state != trigger.from_state.state }}'
   action:
     - service: notify.jason
       data:
-        title: 'Work Shift Change'
-        message: "Shift: {{ states('sensor.today_shift') }}"
+        title: 'Shift Change'
+        message: "Current Shift: {{ states('sensor.work_shift_today') }}"
         data:
           tag: shift_change
           group: General
-          channel: General
+          channel: Alert
           importance: max
           ttl: 0
           priority: high
-          color: !secret NOTIFY_COLOR
+          notification_icon: mdi:factory
           icon_url: !secret WORK_ICON
+          ledColor: !secret MINOR_COLOR
+          color: !secret MINOR_COLOR
+          vibrationPattern: !secret ALERT_VIBRATION
+          clickAction: /lovelace-mobile/presence
           actions:
-            - action: work_schedule_off
-              title: 'Work Schedule Off'
+            - title: "Work {{ 'Off' if is_state('input_boolean.work_schedule','on') else 'On' }}"
+              action: work_schedule_toggle
 
-            - action: URI
-              title: 'Open Schedule'
-              uri: /lovelace/schedule
+            - title: 'Days'
+              action: set_day_shift
+
+            - title: 'Afts'
+              action: set_aft_shift
 
 ###############################################################################
 ## Schedule - Work Shift Auto Select
@@ -54,7 +63,13 @@
       entity_id:
         - binary_sensor.google_calendar_connected
         - input_boolean.work_schedule
-        - input_select.work_shift_selection
+        - input_select.current_work_shift
+      to:
+        - 'on'
+        - 'off'
+      from:
+        - 'on'
+        - 'off'
 
     - platform: state
       id: calendar
@@ -63,7 +78,7 @@
         - calendar.afternoons
       to: 'on'
       for:
-        hours: 4 #VERIFY #MIDNIGHT delay shift change 4 hours
+        hours: 4 #MIDNIGHT delay shift change 4 hours
 
     - platform: state
       entity_id: input_boolean.work_shift_override
@@ -89,11 +104,11 @@
   action:
     - service: input_select.select_option
       target:
-        entity_id: input_select.work_shift_selection
+        entity_id: input_select.current_work_shift
       data:
         option: >
           {% if is_state('input_boolean.work_schedule','off') %} Off
           {% elif is_state('calendar.afternoons','on') %} Afternoons
           {% elif is_state('calendar.days','on') %} Days
-          {% else %} {{ states('input_select.work_shift_selection') }}
+          {% else %} {{ states('input_select.current_work_shift') }}
           {% endif %}

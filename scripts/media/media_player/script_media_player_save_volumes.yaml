@@ -1,9 +1,9 @@
-#######################################################################################################################
-## Save Media Player Volumes
-## #NOTE this does not save speaker group volumes, group volumes are determined by individual media players
-#######################################################################################################################
-save_media_player_volumes:
-  alias: 'Save Media Player Volumes'
+###############################################################################
+## Media Player Save Volumes
+## #NOTE single players only, group volumes are determined by individual media players
+###############################################################################
+media_players_save_volumes:
+  alias: 'Media Players Save Volumes'
   description: 'Save media player volumes.'
   icon: mdi:play-box-multiple-outline
   mode: queued
@@ -12,65 +12,81 @@ save_media_player_volumes:
     source:
       description: 'Source calling this script.'
       example: 'tts'
+    media_type: # only used for reset
+      description: 'Media type if applicable.'
+      example: 'spotify'
     media_players:
-      description: 'List of media players.' # MUST be a list
-      example: '[media_player.dining_room_display, media_player.bedroom_display]'
+      description: 'List of media players.'
+      example: 'media_player.dining_room_hub, media_player.bedroom_hub'
+    volume:
+      description: 'Volume to save'
+      example: '0.5'
   variables:
-    players: "{{ state_attr('sensor.media_players','single') if media_players == '' else  media_players }}"
-    player: null
-    name: null
-    new_volume: null
+    volume: '{{ volume|default(-1) }}'
+    media_players: >
+      {% set media_players = media_players|default(state_attr('sensor.media_players','single')) %}
+      {% if not (media_players is iterable and (media_players is not string and media_players is not mapping)) %}
+        {% set media_players = [media_players] %}
+      {% endif %}
+      {{ media_players }}
+    media_type: '{{ media_type|default(none) }}'
+    media_types: "{{ state_attr('sensor.media_types','media_types') }}"
   sequence:
+    - condition: template
+      value_template: '{{ media_players|count > 0 }}'
+
     - repeat:
-        while: '{{ repeat.index <= players|count }}'
+        while: '{{ repeat.index <= media_players|count }}'
         sequence:
           - variables:
-              player: '{{ players[repeat.index-1] }}'
-              name: "{{ player.split('.')[1] }}"
-              new_volume:
-                > # if system is muted save default volume as current volume
-                {% if is_number(state_attr(player,'volume_level')) %}
-                  {% set default = states('input_number.' ~ name ~ '_default_volume')|int(-1) %}
-                  {% set current = '%0.2f'|format(state_attr(player,'volume_level')|float(-1))|float %}
-                  {% if is_state('input_boolean.mute_all','on') %}
-                    {% set current = default  %}
-                  {% endif %}
-                  {% if source == 'reset' %}
-                    {% if is_state_attr(player,'device_class','speaker') %}
-                      {% set quiet = states('input_number.speaker_quiet_volume')|int(-1)/100 %}
-                    {% elif is_state_attr(player,'device_class','tv') %}
-                      {% set quiet = states('input_number.tv_quiet_volume')|int(-1)/100 %}
-                    {% else %} -1
-                    {% endif %}
-                    {% if is_state('binary_sensor.quiet_time','on') and is_state('binary_sensor.volume_override','off') %}
-                      {{ quiet if current > quiet else current if current > 0 else quiet }}
-                    {% else %}
-                      {{ default }}
-                    {% endif %}
-                  {% else %}
-                    {{ current }}
-                  {% endif %}
+              #IDEA for tts we would have to determine media_type for each player?
+              player: '{{ media_players[repeat.index-1] }}'
+              player_name: "{{ player.split('.')[1] }}"
+              volume_entity: >
+                {% if source == 'reset' and is_state('binary_sensor.mobile_phone_in_use','on') %}
+                  input_number.{{ player_name ~ '_phone' }}
+                {% else %}
+                  input_number.{{ player_name ~ '_current_volume' if source in ['reset'] else player_name ~ '_' ~ source }}
+                {% endif %}
+              current_volume: >
+                {% if volume >= 0 %} {{ volume }}
+                {% elif is_number(state_attr(player,'volume_level')) %}
+                  {{ '%0.2f'|format(state_attr(player,'volume_level')|float(-1)) }}
                 {% else %} -1
                 {% endif %}
+              default_volume: "{{ states('input_number.' ~ player_name ~ '_default_volume')|int(-1) }}"
+              quiet_volume: >
+                {{ states('input_number.tv_quiet_volume')|int(-1)/100
+                    if state_attr(player,'device_class') == 'tv'
+                      else states('input_number.speaker_quiet_volume')|int(-1)/100 }}
+              media_adjustment: >
+                {% if source == 'reset' and media_type in media_types %}
+                  {% set media_type =  ('spotify' if 'spotify' in media_type else media_type) %}
+                  {{ 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(-1) }}
+                {% else %} 1 {# no adjustment #}
+                {% endif %}
+              volume_factor: >
+                {% if source == reset and is_state('input_boolean.volume_balancing','on') %}
+                  {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor')|float }}
+                {% else %} 1 {# no adjustment #}
+                {% endif %}
+              save_volume: >
+                {% if source == 'reset' %}
+                  {% if is_state('binary_sensor.quiet_time','on') and is_state('binary_sensor.volume_override','off') %}
+                    {% set volume = quiet_volume if current_volume > quiet_volume
+                        else current_volume if current_volume > -1 else quiet_volume %}
+                  {% else %} {% set volume = default_volume %}
+                  {% endif %}
+                  {% set volume = volume * media_adjustment * volume_factor %}
+                  {{ 1.00 if volume > 1 else 0 if volume < 0 else '%0.2f'|format(volume) }}
+                {% else %} {{ current_volume }}
+                {% endif %}
+
           - choose:
-              - conditions: '{{ new_volume > 0 }}'
+              - conditions: '{{ save_volume >= 0 }}'
                 sequence:
-                  - choose:
-                      - conditions: # phone is on, store radio/spotify volumes to restore when phone turns off
-                          - "{{ source == 'reset' }}"
-
-                          - condition: state
-                            entity_id: binary_sensor.mobile_phone_in_use
-                            state: 'on'
-                        sequence:
-                          - service: input_number.set_value
-                            target:
-                              entity_id: "input_number.{{ name ~ '_phone' }}"
-                            data:
-                              value: "{{ '%0.2f'|format(new_volume|float/100)|float }}"
-
                   - service: input_number.set_value
                     target:
-                      entity_id: "input_number.{{ name ~ '_current_volume' if source in ['reset'] else name ~ '_' ~ source }}"
+                      entity_id: '{{ volume_entity }}'
                     data:
-                      value: '{{ new_volume }}'
+                      value: '{{ save_volume }}'

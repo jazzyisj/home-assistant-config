@@ -1,0 +1,199 @@
+###############################################################################
+## Light - Bathroom Vanity Light Flux Control
+###############################################################################
+- id: light_bathroom_vanity_light_flux_control #OCC
+  alias: '[Light] Bathroom Vanity Light Flux Control'
+  description: 'Control light flux state.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.bathroom_vanity_rgb_light
+      to: 'off'
+      from: 'on'
+
+    - platform: state
+      entity_id: binary_sensor.bathroom_sensor_motion
+      to:
+        - 'on'
+        - 'off'
+      from:
+        - 'on'
+        - 'off'
+
+    - platform: state
+      entity_id: input_boolean.shower_scene
+      to: ~
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      from:
+        - Night
+        - Away
+        - Vacation
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_vanity_light
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: timer.bathroom_vanity_light
+      state: 'idle'
+  action:
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Night
+
+                - condition: state
+                  entity_id: input_boolean.shower_scene
+                  state: 'on'
+          sequence:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.light_flux_bathroom
+      default:
+        - service: switch.turn_on
+          target:
+            entity_id: switch.light_flux_bathroom
+
+###############################################################################
+## Light - Bathroom Vanity Light Auto On
+###############################################################################
+- id: light_bathroom_vanity_light_auto_on
+  alias: '[Light] Bathroom Vanity Light Auto On'
+  description: 'Turn on light.'
+  mode: restart
+  trigger:
+    - platform: state
+      id: motion
+      entity_id: binary_sensor.bathroom_sensor_motion
+      to: 'on'
+      from: 'off'
+
+    - platform: state
+      id: shower
+      entity_id: input_boolean.shower_scene
+      to: 'on'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.nighttime_auto_light
+          state: 'on'
+
+        - condition: numeric_state
+          entity_id: sensor.bathroom_sensor_illuminance
+          below: input_number.bathroom_illuminance_threshold
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+
+            - condition: state
+              entity_id: timer.bathroom_vanity_light
+              state: idle
+          sequence:
+            - service: light.turn_on
+              target:
+                entity_id: light.bathroom_vanity_rgb_light
+              data:
+                profile: red_dim
+      default:
+        - service: light.turn_on
+          target:
+            entity_id: light.bathroom_vanity_rgb_light
+          data:
+            brightness: 125
+
+###############################################################################
+## Light - Bathroom Vanity Light Auto Off
+## - no shower mode off, turns off with motion off
+###############################################################################
+- id: light_bathroom_vanity_light_auto_off #OCC
+  alias: '[Light] Bathroom Vanity Light Auto Off'
+  description: 'Turn off light.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      id: motion
+      entity_id: binary_sensor.bathroom_sensor_motion
+      to: 'off' # unknown at startup
+      from: 'on'
+      for:
+        minutes: 5
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for: 30 # occupant to leave
+
+    # req if motion/timer expire during restart
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_vanity_light
+  condition:
+    - condition: state
+      entity_id:
+        - light.bathroom_vanity_rgb_light
+        - input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id == 'occupancy' else true }}
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - binary_sensor.bathroom_sensor_motion
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.bathroom_vanity_light
+      state: idle
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+          sequence:
+            - service: light.turn_on # turn on the light back to night mode setting
+              target:
+                entity_id: light.bathroom_vanity_rgb_light
+              data:
+                profile: red_min
+                transition: 2
+      default:
+        - service: light.turn_off
+          target:
+            entity_id: light.bathroom_vanity_rgb_light
+          data:
+            transition: 1

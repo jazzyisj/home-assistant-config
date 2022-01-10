@@ -2,13 +2,15 @@
 ## Templates - Weather
 ###############################################################################
 - binary_sensor:
-    - unique_id: weather_alert_active
+    - name: 'Weather Alert Active'
+      unique_id: weather_alert_active
       state: >
         {{ is_state('binary_sensor.noaa_weather_alert','on')
             or is_state('binary_sensor.envcan_weather_alert','on')
             and is_state('input_boolean.startup_pending','off') }}
 
-    - unique_id: weather_led_alert
+    - name: 'Weather LED Active'
+      unique_id: weather_led_alert
       state: >
         {{ is_state('binary_sensor.envcan_weather_alert','on')
             or is_state('binary_sensor.noaa_weather_alert','on')
@@ -16,18 +18,26 @@
             or is_state('binary_sensor.outdoor_high_temperature_alert','on')
             or is_state('binary_sensor.storm_approaching_alert','on') }}
 
-    - unique_id: outdoor_high_temperature_alert
+    - name: 'Outdoor High Temperature Alert'
+      unique_id: outdoor_high_temperature_alert
       state: >
-        {{ states('sensor.outdoor_apparent_temperature')|int(0) > states('input_number.outdoor_high_temperature_threshold')|int(0)
-            and is_state('input_boolean.weather_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+        {% if is_number(states('sensor.outdoor_apparent_temperature')) %}
+          {{ states('sensor.outdoor_apparent_temperature')|int
+                > states('input_number.outdoor_high_temperature_threshold')|int
+              and is_state('input_boolean.weather_alerts','on')
+              and is_state('input_boolean.startup_pending','off') }}
+        {% endif %}
       availability: "{{ is_number(states('sensor.outdoor_apparent_temperature')) }}"
 
-    - unique_id: outdoor_low_temperature_alert
+    - name: 'Outdoor Low Temperature Alert'
+      unique_id: outdoor_low_temperature_alert
       state: >
-        {{ states('sensor.outdoor_apparent_temperature')|int(0) < states('input_number.outdoor_low_temperature_threshold')|int(0)
-            and is_state('input_boolean.weather_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+        {% if is_number(states('sensor.outdoor_apparent_temperature')) %}
+          {{ states('sensor.outdoor_apparent_temperature')|int
+                < states('input_number.outdoor_low_temperature_threshold')|int
+              and is_state('input_boolean.weather_alerts','on')
+              and is_state('input_boolean.startup_pending','off') }}
+        {% endif %}
       availability: "{{ is_number(states('sensor.outdoor_apparent_temperature')) }}"
 
     - name: 'Outdoor Temperature Alert'
@@ -46,66 +56,77 @@
           {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} Cold
           {% else %} Off
           {% endif %}
+      availability: >
+        {{ states('binary_sensor.outdoor_high_temperature_alert')|lower not in ['unknown','unavailable','none']
+            and states('binary_sensor.outdoor_low_temperature_alert')|lower not in ['unknown','unavailable','none'] }}
 
-    - unique_id: strong_wind_alert
+    - name: 'Strong Wind Alert'
+      unique_id: strong_wind_alert
       icon: mdi:weather-windy
       state: >
-        {{ (states('sensor.wind_speed')|int(-1) >= 40
-            or states('sensor.wind_gust')|int(-1) >= 50)
+        {{ (states('sensor.wind_speed')|int(-1) >= 40 or states('sensor.wind_gust')|int(-1) >= 50)
             and is_state('input_boolean.weather_alerts','on')
             and is_state('input_boolean.startup_pending','off') }}
-      availability: >
-        {{ (states('sensor.wind_speed'))
-            and is_number(states('sensor.wind_gust')) }}
+      availability: "{{ is_number(states('sensor.wind_speed')) and is_number(states('sensor.wind_gust')) }}"
 
-    - unique_id: storm_approaching_alert #DARKSKY
+    - name: 'Storm Aproaching Alert'
+      unique_id: storm_approaching_alert #DARKSKY
       icon: mdi:weather-lightning-rainy
       state: >
-        {{ states('sensor.precipitation_probability')|int(-1) >= 30
-            and states('sensor.nearest_storm_distance')|int(-1) < 5
-            and is_state('input_boolean.weather_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
-      availability: > #IDEA others like this?
-        {{ not is_state('sensor.nearest_storm_distance',-1)
-            and not is_state('sensor.precipitation_probability',-1) }}
+        {% if is_number(states('sensor.precipitation_probability'))
+            and is_number(states('sensor.nearest_storm_distance')) %}
+          {{ states('sensor.precipitation_probability')|int >= 30
+              and states('sensor.nearest_storm_distance')|int < 5
+              and is_state('input_boolean.weather_alerts','on')
+              and is_state('input_boolean.startup_pending','off') }}
+        {% endif %}
+      availability: >
+        {{ is_number(states('sensor.precipitation_probability'))
+            and is_number(states('sensor.nearest_storm_distance')) }}
 
-    - unique_id: tornado_alert
+    - name: 'Tornado Alert'
+      unique_id: tornado_alert
       icon: mdi:weather-hurricane
       device_class: safety
       state: >
         {{ 'tornado' in states('sensor.windsor_warnings')|lower
             or (is_state_attr('binary_sensor.noaa_weather_alert','condition','tornado')
               and state_attr('binary_sensor.noaa_weather_alert','severity') in ['severe','extreme']) }}
+      availability: >
+        {{ states('sensor.windsor_warnings')|lower not in ['unknown','unavailable','none']
+            or states('binary_sensor.noaa_weather_alert')|lower not in ['unknown','unavailable','none'] }}
 
     - name: 'Rain Today'
       unique_id: rain_today # next 12 hours
       icon: mdi:weather-pouring
       state: >
-        {% set found = namespace(value=0) %}
-        {% set threshold = 25 %}
-        {% if state_attr('weather.windsor_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
-            and state_attr('weather.windsor_hourly','forecast')[0] is defined %}
-          {% set forecast = state_attr('weather.windsor_hourly','forecast') %}
-          {% for item in forecast %}
-            {% if loop.index0 < 12 and item.precipitation_probability|int(0) >= threshold %}
-              {% set found.value = 1 %}
+        {% if is_state('sensor.precipitation_type','rain') %}
+          {% set found = namespace(value=0) %}
+          {% set threshold = 25 %}
+          {% if state_attr('weather.windsor_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
+              and state_attr('weather.windsor_hourly','forecast')[0] is defined %}
+            {% set forecast = state_attr('weather.windsor_hourly','forecast') %}
+            {% for item in forecast %}
+              {% if loop.index0 < 12 and item.precipitation_probability|int(-1) >= threshold %}
+                {% set found.value = 1 %}
+              {% endif %}
+            {% endfor %}
+          {% elif state_attr('weather.kdtw_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
+              and state_attr('weather.kdtw_hourly','forecast')[0] is defined %}
+            {% set forecast = state_attr('weather.kdtw_hourly','forecast') %}
+            {% for item in forecast %}
+              {% if loop.index0 < 12 and item.precipitation_probability|int(-1) >= threshold %}
+                {% set found.value = 1 %}
+              {% endif %}
+            {% endfor %}
+          {% elif state_attr('weather.home','forecast')|lower not in ['', '[]','unknown','unavailable','none']
+              and state_attr('weather.home','forecast')[0] is defined %}
+            {% if state_attr('weather.home','forecast')[0].precipitation_probability|int(-1) >= threshold %}
+                {% set found.value = 1 %}
             {% endif %}
-          {% endfor %}
-        {% elif state_attr('weather.kdtw_hourly','forecast')|lower not in ['', '[]','unknown','unavailable','none']
-            and state_attr('weather.kdtw_hourly','forecast')[0] is defined %}
-          {% set forecast = state_attr('weather.kdtw_hourly','forecast') %}
-          {% for item in forecast %}
-            {% if loop.index0 < 12 and item.precipitation_probability|int(0) >= threshold %}
-              {% set found.value = 1 %}
-            {% endif %}
-          {% endfor %}
-        {% elif state_attr('weather.home','forecast')|lower not in ['', '[]','unknown','unavailable','none']
-            and state_attr('weather.home','forecast')[0] is defined %}
-          {% if state_attr('weather.home','forecast')[0].precipitation_probability|int(0) >= threshold %}
-              {% set found.value = 1 %}
           {% endif %}
+          {{ found.value == 1 }}
         {% endif %}
-        {{ found.value == 1 }}
       availability: >
         {{ (state_attr('weather.windsor_hourly','forecast')|lower not in ['unknown','unavailable','none']
             and state_attr('weather.windsor_hourly','forecast')[0] is defined)
@@ -120,33 +141,34 @@
     - name: 'GDACS Alert Active'
       unique_id: gdacs_alert_active
       icon: mdi:pulse
-      state: "{{ states('sensor.gdacs_alerts')|int(0) > 0 }}"
+      state: "{{ states('sensor.gdacs_alerts')|int(-1) > 0 }}"
       attributes:
         last_alert: > # sensor can be > 0 but no geo_location entities
-          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
+          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(-1) > 0 %}
             {{ states.geo_location|selectattr('attributes.source','eq','gdacs')
                 |sort(reverse=true,attribute='attributes.from_date')
                 |map(attribute='attributes.friendly_name')|first }}
           {% endif %}
         last_alert_desc: >
-          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
+          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(-1) > 0 %}
             {{ states.geo_location|selectattr('attributes.source','eq','gdacs')
                 |sort(reverse=true,attribute='attributes.from_date')
                 |map(attribute='attributes.description')|first }}
           {% endif %}
         last_alert_date: >
-          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
+          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(-1) > 0 %}
             {% set last_date = states.geo_location|selectattr('attributes.source','eq','gdacs')
                 |sort(reverse=true,attribute='attributes.from_date')
                 |map(attribute='attributes.from_date')|first %}
             {{ last_date|as_timestamp|timestamp_custom('%Y-%m-%d',true,none) }}
           {% endif %}
         last_alert_severity: >
-          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(0) > 0 %}
+          {% if states.geo_location|selectattr('attributes.source','eq','gdacs')|list|count|int(-1) > 0 %}
             {{ states.geo_location|selectattr('attributes.source','eq','gdacs')
                 |sort(reverse=true, attribute='attributes.from_date')
                 |map(attribute='attributes.alert_level')|first }}
           {% endif %}
+      availability: "{{ states('sensor.gdacs_alerts')|lower not in ['unknown','unavailable','none'] }}"
 
 - sensor:
     - name: 'Temperature Trend'
@@ -161,6 +183,9 @@
         {% elif is_state('binary_sensor.temperature_falling','on') %} Falling
         {% else %} Steady
         {% endif %}
+      availability: >
+        {{ states('binary_sensor.temperature_rising')|lower not in ['unknown','unavailable','none']
+            and states('binary_sensor.temperature_falling')|lower not in ['unknown','unavailable','none'] }}
 
     - name: 'Pressure Trend'
       unique_id: pressure_trend # for weather card
@@ -174,6 +199,9 @@
         {% elif is_state('binary_sensor.pressure_falling','on') %} Falling
         {% else %} Steady
         {% endif %}
+      availability: >
+        {{ states('binary_sensor.pressure_rising')|lower not in ['unknown','unavailable','none']
+            and states('binary_sensor.pressure_falling')|lower not in ['unknown','unavailable','none'] }}
 
     - name: 'Precipitation Probability: NWS'
       unique_id: nws_precipitation_probability
@@ -182,7 +210,7 @@
       state: >
         {% if state_attr('weather.kdtw_daynight','forecast')|lower not in ['unknown','unavailable','none']
             and state_attr('weather.kdtw_daynight','forecast')[0] is defined %}
-          {{ state_attr('weather.kdtw_daynight','forecast')[0].precipitation_probability|int(0) }}
+          {{ state_attr('weather.kdtw_daynight','forecast')[0].precipitation_probability|int('unknown') }}
         {% endif %}
       availability: >
         {% if state_attr('weather.kdtw_daynight','forecast')|lower not in ['unknown','unavailable','none'] %}
@@ -260,11 +288,11 @@
       unit_of_measurement: °C
       state: >
         {% if is_number(states('sensor.windsor_temperature')) %}
-          {{ states('sensor.windsor_temperature')|float('unknown') }}
+          {{ states('sensor.windsor_temperature')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_temperature')) %}
-          {{ states('sensor.kdtw_temperature')|float('unknown') }}
+          {{ states('sensor.kdtw_temperature')|float(-1) }}
         {% elif is_number(state_attr('weather.home','temperature')) %}
-          {{ state_attr('weather.home','temperature')|float('unknown') }}
+          {{ state_attr('weather.home','temperature')|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -286,19 +314,19 @@
       unit_of_measurement: °C
       state: >
         {% if is_number(states('sensor.home_realfeel_temperature')) %}
-          {{ states('sensor.home_realfeel_temperature')|float('unknown') }}
+          {{ states('sensor.home_realfeel_temperature')|float(-1) }}
         {% elif is_number(states('sensor.home_apparent_temperature')) %}
-          {{ states('sensor.home_apparent_temperature')|float('unknown') }}
+          {{ states('sensor.home_apparent_temperature')|float(-1) }}
         {% elif is_number(states('sensor.windsor_humidex')) %}
-          {{ states('sensor.windsor_humidex')|float('unknown') }}
+          {{ states('sensor.windsor_humidex')|float(-1) }}
         {% elif is_number(states('sensor.windsor_wind_chill')) %}
-          {{ states('sensor.windsor_wind_chill')|float('unknown') }}
+          {{ states('sensor.windsor_wind_chill')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_heat_index')) %}
-          {{ states('sensor.kdtw_heat_index')|float('unknown') }}
+          {{ states('sensor.kdtw_heat_index')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_wind_chill')) %}
-          {{ states('sensor.kdtw_wind_chill')|float('unknown') }}
+          {{ states('sensor.kdtw_wind_chill')|float(-1) }}
         {% else %}
-          {{ states('sensor.outdoor_temperature')|float('unknown') }}
+          {{ states('sensor.outdoor_temperature')|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -326,13 +354,13 @@
       unit_of_measurement: °C
       state: >
         {% if is_number(states('sensor.windsor_high_temperature')) %}
-          {{ states('sensor.windsor_high_temperature')|float('unknown') }}
+          {{ states('sensor.windsor_high_temperature')|float(-1) }}
         {% elif state_attr('weather.kdtw_daynight','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.kdtw_daynight','forecast')[0] is defined %}
-          {{ state_attr('weather.kdtw_daynight','forecast')[0].temperature|float('unknown') }}
+          {{ state_attr('weather.kdtw_daynight','forecast')[0].temperature|float(-1) }}
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
-          {{ state_attr('weather.home','forecast')[0].temperature|float('unknown') }}
+          {{ state_attr('weather.home','forecast')[0].temperature|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -357,10 +385,10 @@
       unit_of_measurement: °C
       state: >
         {% if is_number(states('sensor.windsor_low_temperature')) %}
-          {{ states('sensor.windsor_low_temperature')|float('unknown') }}
+          {{ states('sensor.windsor_low_temperature')|float(-1) }}
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
-          {{ state_attr('weather.home','forecast')[0].templow|float('unknown') }}
+          {{ state_attr('weather.home','forecast')[0].templow|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -373,6 +401,28 @@
           or (state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
                 and state_attr('weather.home','forecast')[0] is defined) }}
 
+    # envcan
+    - name: 'Outdoor High Temperature Differential'
+      unique_id: outdoor_high_temperature_differential
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: "{{ states('sensor.outdoor_high_temperature')|int(-1) - states('sensor.windsor_normal_high_temperature')|int(-1) }}"
+      availability: >
+        {{ is_number(states('sensor.windsor_normal_high_temperature'))
+            and is_number(states('sensor.outdoor_high_temperature')) }}
+
+    # envcan
+    - name: 'Outdoor Low Temperature Differential'
+      unique_id: outdoor_low_temperature_differential
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: "{{ states('sensor.outdoor_low_temperature')|int(-1) - states('sensor.windsor_normal_low_temperature')|int(-1) }}"
+      availability: >
+        {{ is_number(states('sensor.windsor_normal_low_temperature'))
+            and is_number(states('sensor.outdoor_low_temperature')) }}
+
     # envcan, nws, accuweather
     - name: 'Dew Point'
       unique_id: dew_point
@@ -381,11 +431,11 @@
       unit_of_measurement: °C
       state: >
         {% if is_number(states('sensor.windsor_dewpoint')) %}
-          {{ states('sensor.windsor_humidex')|float('unknown') }}
+          {{ states('sensor.windsor_humidex')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_dew_point')) %}
-          {{ states('sensor.kdtw_dew_point')|float('unknown') }}
+          {{ states('sensor.kdtw_dew_point')|float(-1) }}
         {% elif is_number(states('sensor.home_dew_point')) %}
-          {{ states('sensor.home_dew_point')|float('unknown') }}
+          {{ states('sensor.home_dew_point')|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -406,13 +456,13 @@
       unit_of_measurement: '%'
       state: >
         {% if is_number(states('sensor.windsor_humidity')) %}
-          {{ states('sensor.windsor_humidity')|int(0) }}
+          {{ states('sensor.windsor_humidity')|int }}
         {% elif is_number(states('sensor.kdtw_relative_humidity')) %}
-          {{ states('sensor.kdtw_relative_humidity')|int(0) }}
+          {{ states('sensor.kdtw_relative_humidity')|int }}
         {% elif is_number(state_attr('weather.home','humidity')) %}
-          {{ state_attr('weather.home','humidity')|int(0) }}
+          {{ state_attr('weather.home','humidity') }}
         {% elif is_number(states('sensor.dark_sky_humidity')) %}
-          {{ states('sensor.dark_sky_humidity')|int(0) }}
+          {{ states('sensor.dark_sky_humidity') }}
         {% endif %}
       attributes:
         provider: >
@@ -434,7 +484,7 @@
       unit_of_measurement: '%'
       state: >
         {% if is_number(states('sensor.dark_sky_humidity_0d')) %}
-          {{ states('sensor.dark_sky_humidity_0d')|int(0) }}
+          {{ states('sensor.dark_sky_humidity_0d')|int }}
         {% endif %}
       attributes:
         provider: >
@@ -450,15 +500,15 @@
       unit_of_measurement: '%'
       state: >
         {% if is_number(states('sensor.windsor_chance_of_precip')) %}
-          {{ states('sensor.windsor_chance_of_precip')|int(0) }}
+          {{ states('sensor.windsor_chance_of_precip') }}
         {% elif state_attr('weather.kdtw_daynight','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.kdtw_daynight','forecast')[0] is defined %}
-          {{ state_attr('weather.kdtw_daynight','forecast')[0].precipitation_probability|int(0) }}
+          {{ state_attr('weather.kdtw_daynight','forecast')[0].precipitation_probability|int(-1) }}
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
-          {{ state_attr('weather.home','forecast')[0].precipitation_probability|int(0) }}
+          {{ state_attr('weather.home','forecast')[0].precipitation_probability|int(-1) }}
         {% elif is_number(states('sensor.dark_sky_precip_probability')) %}
-          {{ states('sensor.dark_sky_precip_probability')|int(0) }}
+          {{ states('sensor.dark_sky_precip_probability')|int }}
         {% endif %}
       attributes:
         provider: >
@@ -485,15 +535,15 @@
       unit_of_measurement: '%'
       state: >
         {% if state_attr('weather.windsor','forecast')|lower not in ['','[]','unknown','unavailable','none'] %}
-          {{ state_attr('weather.windsor','forecast')[0].precipitation_probability|int(0) }}
+          {{ state_attr('weather.windsor','forecast')[0].precipitation_probability|int(-1) }}
         {% elif is_number(states('sensor.dark_sky_precip_probability_0d')) %}
-          {{ states('sensor.dark_sky_precip_probability_0d')|int(0) }}
+          {{ states('sensor.dark_sky_precip_probability_0d')|int }}
         {% elif state_attr('weather.kdtw_daynight','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.kdtw_daynight','forecast')[0] is defined %}
-          {{ state_attr('weather.kdtw_daynight','forecast')[0].precipitation_probability|int(0) }}
+          {{ state_attr('weather.kdtw_daynight','forecast')[0].precipitation_probability|int(-1) }}
         {% elif state_attr('weather.home','forecast')|lower not in ['','[]','unknown','unavailable','none']
             and state_attr('weather.home','forecast')[0] is defined %}
-          {{ state_attr('weather.home','forecast')[0].precipitation_probability|int(0) }}
+          {{ state_attr('weather.home','forecast')[0].precipitation_probability|int(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -520,7 +570,7 @@
       unit_of_measurement: mm/hr
       state: >
         {% if is_number(states('sensor.dark_sky_precip_intensity')) %}
-          {{ states('sensor.dark_sky_precip_intensity')|float('unknown') }}
+          {{ states('sensor.dark_sky_precip_intensity')|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -537,9 +587,9 @@
       unit_of_measurement: mm
       state: >
         {% if is_number(states('sensor.windsor_precipitation_yesterday')) %}
-          {{ states('sensor.windsor_precipitation_yesterday')|float('unknown') }}
+          {{ states('sensor.windsor_precipitation_yesterday')|float(-1) }}
         {% elif is_number(states('sensor.home_precipitation')) %}
-          {{ states('sensor.home_precipitation')|float('unknown') }}
+          {{ states('sensor.home_precipitation')|float(-1) }}
         {% else %} 0
         {% endif %}
       attributes:
@@ -569,23 +619,26 @@
         {% if states('sensor.dark_sky_precip')|lower not in ['unknown','unavailable','none'] %}
           {{ states('sensor.dark_sky_precip') }}
         {% else %}
-          {{ 'rain' if states('sensor.outdoor_temperature')|int(0) > 0 else 'snow' }}
+          {{ 'rain' if states('sensor.outdoor_temperature')|int(-1) > 0 else 'snow' }}
         {% endif %}
       attributes:
         provider: >
           {% if states('sensor.dark_sky_precip')|lower not in ['unknown','unavailable','none'] %} Dark Sky
           {% else %} Outdoor Temperature
           {% endif %}
+      availability: >
+        {{ states('sensor.dark_sky_precip')|lower not in ['unknown','unavailable','none']
+            or is_number(states('sensor.outdoor_temperature')) }}
 
     # darksky
     - name: 'Nearest Storm Bearing'
       unique_id: nearest_storm_bearing #DARKSKY
-      state: "{{ states('sensor.dark_sky_nearest_storm_bearing')|float('unknown') }}"
+      state: "{{ states('sensor.dark_sky_nearest_storm_bearing')|float(-1) }}"
       state_class: measurement
       unit_of_measurement: '°'
       attributes:
         provider: Dark Sky
-      availability: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+      availability: "{{ is_number(states('sensor.dark_sky_nearest_storm_bearing')) }}"
 
     # darksky
     - name: 'Nearest Storm Distance'
@@ -595,19 +648,20 @@
       state: "{{ '%0.0f'|format(states('sensor.dark_sky_nearest_storm_distance')|float(-1)) }}"
       attributes:
         provider: Dark Sky
-      availability: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+      availability: "{{ is_number(states('sensor.dark_sky_nearest_storm_distance')) }}"
 
-    - unique_id: storm_full_direction
+    - name: 'Storm Full Direction'
+      unique_id: storm_full_direction
       state: >
         {% set directions = ['North','North-Northeast','Northeast','East-Northeast','East','East-Southeast',
             'Southeast','South-Southeast','South','South-Southwest','Southwest','West-Southwest','West',
             'West-Northwest','Northwest','North-Northwest','North'] %}
         {% if is_number(states('sensor.nearest_storm_bearing')) %}
-          {{ directions[((states('sensor.nearest_storm_bearing')|float('unknown')/360)|float*16)|round] }}
+          {{ directions[((states('sensor.nearest_storm_bearing')|float(-1)/360)|float*16)|round] }}
         {% endif %}
       attributes:
         provider: "{{ state_attr('sensor.nearest_storm_bearing','provider') }}"
-      availability: "{{ is_state('binary_sensor.dark_sky_connected','on') }}"
+      availability: "{{ is_number(states('sensor.nearest_storm_bearing')) }}"
 
     # envcan, accuweather, nws
     - name: 'Barometric Pressure'
@@ -617,11 +671,11 @@
       unit_of_measurement: hPa # unit conversion - nws: pa-> hpa, envcan kPa -> hPa
       state: >
         {% if is_number(states('sensor.windsor_pressure')) %}
-          {{ states('sensor.windsor_pressure')|float('unknown') * 10 }}
+          {{ states('sensor.windsor_pressure')|float(-1) * 10 }}
         {% elif is_number(state_attr('weather.home','pressure')) %}
-          {{ state_attr('weather.home','pressure')|float('unknown') }}
+          {{ state_attr('weather.home','pressure')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_barometric_pressure')) %}
-          {{ states('sensor.kdtw_barometric_pressure')|float('unknown')/100 }}
+          {{ states('sensor.kdtw_barometric_pressure')|float(-1)/100 }}
         {% endif %}
       attributes:
         provider: >
@@ -642,11 +696,11 @@
       unit_of_measurement: km/h
       state: >
         {% if is_number(states('sensor.windsor_wind_speed')) %}
-          {{ states('sensor.windsor_wind_speed')|float('unknown') }}
+          {{ states('sensor.windsor_wind_speed')|float(-1) }}
         {% elif is_number(states('sensor.home_wind')) %}
-          {{ states('sensor.home_wind')|float('unknown') }}
+          {{ states('sensor.home_wind')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_wind_speed')) %}
-          {{ states('sensor.kdtw_wind_speed')|float('unknown') }}
+          {{ states('sensor.kdtw_wind_speed')|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -668,10 +722,10 @@
       state: >
         {% if state_attr('weather.kdtw_daynight','forecast')|lower not in ['unknown','unavailable','none']
             and state_attr('weather.kdtw_daynight','forecast')[0] is defined %}
-          {{ state_attr('weather.kdtw_daynight','forecast')[0].wind_speed|int(0) }}
+          {{ state_attr('weather.kdtw_daynight','forecast')[0].wind_speed|int(-1) }}
         {% elif states('sensor.home_wind')|lower not in ['unknown','unavailable','none'] %}
-          {% set day = states('sensor.home_wind_day_0d')|int(0) %}
-          {% set night = states('sensor.home_wind_night_0d')|int(0) %}
+          {% set day = states('sensor.home_wind_day_0d')|int(-1) %}
+          {% set night = states('sensor.home_wind_night_0d')|int(-1) %}
           {{ [day,night]|max }}
         {% endif %}
       attributes:
@@ -695,15 +749,15 @@
       state:
         > # envcan gust = unavailable if gust <= speed -> use envcan wind_speed
         {% if is_number(states('sensor.windsor_wind_gust')) %}
-          {{ states('sensor.windsor_wind_gust')|float('unknown') }}
+          {{ states('sensor.windsor_wind_gust')|float(-1) }}
         {% elif is_number(states('sensor.windsor_wind_speed')) %}
-          {{ states('sensor.windsor_wind_speed')|float('unknown') }}
+          {{ states('sensor.windsor_wind_speed')|float(-1) }}
         {% elif is_number(states('sensor.home_wind_gust')) %}
-          {{ states('sensor.home_wind_gust')|float('unknown') }}
+          {{ states('sensor.home_wind_gust')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_wind_gust')) %}
-          {{ states('sensor.kdtw_wind_gust')|float('unknown') }}
+          {{ states('sensor.kdtw_wind_gust')|float(-1) }}
         {% elif is_number(states('sensor.dark_sky_wind_gust')) %}
-          {{ states('sensor.dark_sky_wind_gust')|float('unknown') }}
+          {{ states('sensor.dark_sky_wind_gust')|float(-1) }}
         {% endif %}
       attributes:
         provider: >
@@ -728,10 +782,10 @@
       unit_of_measurement: km/h
       state: >
         {% if is_number(states('sensor.dark_sky_wind_gust_0d')) %}
-          {{ states('sensor.dark_sky_wind_gust_0d')|int(0) }}
+          {{ states('sensor.dark_sky_wind_gust_0d')|int }}
         {% elif is_number(states('sensor.home_wind')) %}
-          {% set day = states('sensor.home_wind_gust_day_0d')|int(0) %}
-          {% set night = states('sensor.home_wind_gust_night_0d')|int(0) %}
+          {% set day = states('sensor.home_wind_gust_day_0d')|int %}
+          {% set night = states('sensor.home_wind_gust_night_0d')|int %}
           {{ [day,night]|max }}
         {% endif %}
       attributes:
@@ -745,18 +799,29 @@
     # envcan, nws, accuweather
     - name: 'Wind Bearing'
       unique_id: wind_bearing
-      icon: mdi:compass
+      picture: >
+        {% set directions = [0,11,22,33,45,56,67,78,90,101,112,123,135,146,157,168,180,191,
+          202,213,225,236,247,258,270,281,292,303,315,326,337,348,0] %}
+        /local/images/compass/{{ directions[((states('sensor.wind_bearing')|float(-1)/360)|float*32)|round] }}.png
       state_class: measurement
       unit_of_measurement: °
       state: >
         {% if is_number(states('sensor.windsor_wind_bearing')) %}
-          {{ states('sensor.windsor_wind_bearing')|float('unknown') }}
+          {{ states('sensor.windsor_wind_bearing')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_wind_direction')) %}
-          {{ states('sensor.kdtw_wind_direction')|float('unknown') }}
+          {{ states('sensor.kdtw_wind_direction')|float(-1) }}
         {% elif is_number(state_attr('weather.home','wind_bearing')) %}
-          {{ state_attr('weather.home','wind_bearing')|float('unknown') }}
+          {{ state_attr('weather.home','wind_bearing')|float(-1) }}
         {% endif %}
       attributes:
+        cardinal: >
+          {% set directions = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW','N'] %}
+          {{ directions[((states('sensor.wind_bearing')|float(-1)/360)|float*16)|round] }}
+        full_cardinal: >
+          {% set directions = ['North','North-Northeast','Northeast','East-Northeast','East','East-Southeast',
+              'Southeast','South-Southeast','South','South-Southwest','Southwest','West-Southwest','West',
+              'West-Northwest','Northwest','North-Northwest','North'] %}
+          {{ directions[((states('sensor.wind_bearing')|float(-1)/360)|float*16)|round] }}
         provider: >
           {% if is_number(states('sensor.windsor_wind_bearing')) %} Environment Canada
           {% elif is_number(states('sensor.kdtw_wind_direction')) %} National Weather Service
@@ -767,23 +832,14 @@
             or is_number(states('sensor.kdtw_wind_direction'))
             or is_number(state_attr('weather.home','wind_bearing')) }}
 
-    - name: 'Wind Direction'
-      unique_id: wind_direction
-      icon: mdi:compass
-      state: >
-        {% set directions = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW','N'] %}
-        {{ directions[((states('sensor.wind_bearing')|float('unknown')/360)|float*16)|round] }}
-      attributes:
-        provider: "{{ state_attr('sensor.wind_bearing','provider') }}"
-      availability: "{{ is_number(states('sensor.wind_bearing')) }}"
-
-    - unique_id: wind_condition_verbose
+    - name: 'Wind Condition Verbose'
+      unique_id: wind_condition_verbose
       state: >
         {% set directions = ['North','North-Northeast','Northeast','East-Northeast','East','East-Southeast',
             'Southeast','South-Southeast','South','South-Southwest','Southwest','West-Southwest','West',
             'West-Northwest','Northwest','North-Northwest','North'] %}
-        {{ states('sensor.wind_gust')|int(0) }} kilometers per hour from the
-        {{ directions[((states('sensor.wind_bearing')|float('unknown')/360)|float*16)|round] }}
+        {{ states('sensor.wind_gust')|int(-1) }} kilometers per hour from the
+        {{ state_attr('sensor.wind_bearing','full_cardinal') }}
       attributes:
         provider: "{{ state_attr('sensor.wind_bearing','provider') }}"
       availability: >
@@ -798,9 +854,9 @@
       unit_of_measurement: '%'
       state: >
         {% if is_number(states('sensor.home_cloud_cover')) %}
-          {{ states('sensor.home_cloud_cover')|int(0) }}
+          {{ states('sensor.home_cloud_cover')|int }}
         {% elif is_number(states('sensor.dark_sky_cloud_coverage')) %}
-          {{ states('sensor.dark_sky_cloud_coverage')|int(0) }}
+          {{ states('sensor.dark_sky_cloud_coverage')|int }}
         {% endif %}
       attributes:
         provider: >
@@ -818,12 +874,13 @@
       state_class: measurement
       unit_of_measurement: '%'
       state: >
-        {% if is_number(states('sensor.home_cloud_cover_day_0d')) %}
-          {% set day = states('sensor.home_cloud_cover_day_0d')|int(0) %}
-          {% set night = states('sensor.home_cloud_cover_night_0d')|int(0) %}
+        {% if is_number(states('sensor.home_cloud_cover_day_0d'))
+          and is_number(states('sensor.home_cloud_cover_night_0d')) %}
+          {% set day = states('sensor.home_cloud_cover_day_0d')|int %}
+          {% set night = states('sensor.home_cloud_cover_night_0d')|int %}
           {{ [day,night]|max }}
         {% elif is_number(states('sensor.dark_sky_cloud_coverage_0d')) %}
-          {{ states('sensor.dark_sky_cloud_coverage_0d')|int(0) }}
+          {{ states('sensor.dark_sky_cloud_coverage_0d')|int }}
         {% endif %}
       attributes:
         provider: >
@@ -842,11 +899,11 @@
       unit_of_measurement: km
       state: >
         {% if is_number(states('sensor.windsor_visibility')) %}
-          {{ states('sensor.windsor_visibility')|float('unknown') }}
+          {{ states('sensor.windsor_visibility')|float(-1) }}
         {% elif is_number(state_attr('weather.home','visibility')) %}
-          {{ state_attr('weather.home','visibility')|float('unknown') }}
+          {{ state_attr('weather.home','visibility')|float(-1) }}
         {% elif is_number(states('sensor.kdtw_visibility')) %}
-          {{ states('sensor.kdtw_visibility')|float('unknown')/1000 }}
+          {{ states('sensor.kdtw_visibility')|float(-1)/1000 }}
         {% endif %}
       attributes:
         provider: >

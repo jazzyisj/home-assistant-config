@@ -1,39 +1,52 @@
-#######################################################################################################################
+###############################################################################
 ## Mobile - Phone Speakerphone
-#######################################################################################################################
+###############################################################################
 - id: mobile_phone_speakerphone
-  alias: "[Mobile] Phone Speakerphone"
-  description: "Mute media players when a phone speakerphone is turned on."
+  alias: '[Mobile] Phone Speakerphone'
+  description: 'Mute media players when a speakerphone is turned on.'
+  mode: queued
+  variables:
+    players: > #TV_VOL - not bedroom, office TV
+      {{ expand(state_attr('sensor.media_players','single'))|rejectattr('entity_id','in',
+        ['media_player.bedroom_tv','media_player.office_tv'])|map(attribute='entity_id')|list }}
   trigger:
     - platform: state
       entity_id: binary_sensor.mobile_phone_in_use
       attribute: speaker_on
-      to: true
+      to:
+        - 'true'
+        - 'false'
+      from:
+        - 'true'
+        - 'false'
   condition:
     - condition: state
       entity_id: input_boolean.media_player_automation
       state: 'on'
-  action:
-    - service: media_player.volume_mute
-      target:
-        entity_id: > #TV_VOL
-          {{ states.media_player|rejectattr('entity_id','in',['media_player.bedroom_tv'])
-              |map(attribute='entity_id')|list }}
-      data:
-        is_volume_muted: true
 
-    - wait_template: "{{ is_state_attr('binary_sensor.mobile_phone_in_use','speaker_on',false) }}"
-      timeout:
-        minutes: 60
-
-    - condition: state # don't unmute media players if system mute is on
-      entity_id: input_boolean.mute_all
+    - condition: state
+      entity_id: input_boolean.startup_pending
       state: 'off'
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.mobile_phone_in_use
+              attribute: speaker_on
+              state: true
+          sequence:
+            - service: media_player.volume_mute
+              target:
+                entity_id: '{{ players }}'
+              data:
+                is_volume_muted: true
+      default:
+        - condition: state # don't unmute media players if system mute is on
+          entity_id: switch.system_mute
+          state: 'off'
 
-    - service: media_player.volume_mute
-      target:
-        entity_id: > #TV_VOL
-          {{ states.media_player|rejectattr('entity_id','in',['media_player.bedroom_tv'])
-              |map(attribute='entity_id')|list }}
-      data:
-        is_volume_muted: false
+        - service: media_player.volume_mute
+          target:
+            entity_id: '{{ players }}'
+          data:
+            is_volume_muted: false

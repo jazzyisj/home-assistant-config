@@ -48,7 +48,7 @@
 ###############################################################################
 - id: schedule_bedtime_clear_notification
   alias: '[Schedule] Bedtime Clear Notification'
-  description: 'Clear bedtime notification.'
+  description: 'Clear notification.'
   mode: restart
   trigger:
     - platform: state
@@ -77,6 +77,7 @@
 - id: schedule_turn_on_bedtime_delay
   alias: '[Schedule] Turn On Bedtime Delay'
   description: 'Turn on bedtime delayed boolean.'
+  max_exceeded: silent
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
@@ -96,7 +97,6 @@
   mode: restart
   variables:
     delay: "{{ states('input_number.stay_awake_delay')|int }}"
-    delayed_bedtime: "{{ state_attr('sensor.next_bedtime','delayed_bedtime') }}"
   trigger:
     - platform: state
       entity_id: input_boolean.bedtime_delayed
@@ -124,16 +124,12 @@
                 message: "Bedtime delay has been turned off. The house is in {{ states('input_select.occupancy_mode') }} mode."
                 duration: 30000
       default:
-        - delay: 5 # allow bedtime_active to turn on
-
         - choose:
             - conditions:
                 - condition: state
                   entity_id: binary_sensor.bedtime_active
                   state: 'on'
               sequence:
-                - service: script.bedtime_notification
-
                 - service: timer.start
                   target:
                     entity_id: timer.bedtime_delay
@@ -141,12 +137,9 @@
                     duration:
                       minutes: '{{ delay }}'
 
-                - wait_template: "{{ state_attr('timer.bedtime_delay','finishes_at')|lower != none }}"
-                  timeout: 30
+                - wait_template: "{{ states('timer.bedtime_delay') == 'active' }}"
+                  timeout: 15
                   continue_on_timeout: false
-
-                - variables:
-                    delayed_bedtime: "{{ state_attr('sensor.next_bedtime','delayed_bedtime') }}"
 
                 - service: script.turn_on
                   target:
@@ -155,11 +148,14 @@
                     variables:
                       message: >
                         Your bedtime has been delayed by {{ delay }} minutes.
-                        I'll check with you again at {{ delayed_bedtime }}.
+                        I'll check with you again at {{ state_attr('sensor.next_bedtime','delayed_bedtime') }}.
                       quiet_play: true
                       min_volume: 35
+
+                - service: script.bedtime_notification
+
           default:
-            - service: script.bedtime_notification
+            - delay: 1 # let delayed bedtime calculate
 
             - service: script.turn_on
               target:
@@ -169,9 +165,11 @@
                   message: |
                     You've elected to stay up past your bedtime today.
                     I've delayed your bedtime by {{ delay }} minutes.
-                    I'll check up on you at {{ delayed_bedtime }} to see if you've come to your senses yet.
+                    I'll check up on you at {{ state_attr('sensor.next_bedtime','delayed_bedtime') }} to see if you've come to your senses yet.
                   quiet_play: true
                   min_volume: 35
+
+            - service: script.bedtime_notification
 
 ###############################################################################
 ## Schedule - Bedtime Delay Turned Off
@@ -179,7 +177,6 @@
 - id: schedule_bedtime_delay_turned_off
   alias: '[Schedule] Bedtime Delay Turned Off'
   description: 'Delay bedtime or run bedtime script.'
-  initial_state: true
   mode: restart
   trigger:
     - platform: state
@@ -187,6 +184,7 @@
         - input_boolean.bedtime_delayed
         - binary_sensor.bedtime_active
       to: 'off'
+      from: 'on'
 
     - platform: event
       id: timer_finished
@@ -212,7 +210,7 @@
 
             - service: browser_mod.toast
               data:
-                message: 'Bedtime delay cannot be turned off in movie/company mode.'
+                message: 'Bedtime delay cannot be turned off in movie/company scene.'
                 duration: 30000
       default:
         - service: automation.turn_off

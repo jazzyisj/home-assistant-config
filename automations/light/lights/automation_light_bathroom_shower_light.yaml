@@ -1,0 +1,132 @@
+###############################################################################
+## Light - Bathroom Shower Lights Auto On
+###############################################################################
+- id: light_bathroom_shower_light_auto_on
+  alias: '[Light] Bathroom Shower Lights Auto On'
+  description: 'Turn on light.'
+  mode: restart
+  variables:
+    current: "{{ state_attr('light.bathroom_shower_light','brightness')|int(0) }}"
+    brightness: >
+      {% if is_state('input_boolean.shower_scene','on') %} 255
+      {% elif is_state('binary_sensor.quiet_time','on') %}
+        {{ 40 if current > 40 or current == 0 else current }}
+      {% else %} {{ 125 if current < 125 else current }}
+      {% endif %}
+  trigger:
+    - platform: state
+      id: motion
+      entity_id: binary_sensor.bathroom_sensor_motion
+      to: 'on'
+      from: 'off'
+
+    - platform: state
+      id: shower
+      entity_id: input_boolean.shower_scene
+      to: 'on'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: binary_sensor.nighttime_auto_light
+          state: 'on'
+
+        - condition: numeric_state
+          entity_id: sensor.bathroom_sensor_illuminance
+          below: input_number.bathroom_illuminance_threshold
+  action:
+    - choose:
+        - conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.quiet_time
+                  state: 'off'
+
+                - condition: state
+                  entity_id: input_boolean.shower_scene
+                  state: 'on'
+          sequence:
+            - service: light.turn_on
+              target:
+                entity_id: light.bathroom_shower_light
+              data:
+                brightness: '{{ brightness }}'
+                transition: 2
+
+###############################################################################
+## Light - Bathroom Shower Light Auto Off
+###############################################################################
+- id: light_bathroom_shower_light_auto_off #OCC
+  alias: '[Light] Bathroom Shower Light Auto Off'
+  description: 'Turn off light.'
+  max_exceeded: silent
+  trigger:
+    - platform: state # specify from state, unknown at startup
+      id: motion
+      entity_id: binary_sensor.bathroom_sensor_motion
+      to: 'off'
+      from: 'on'
+      for:
+        minutes: 5
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 2 # allow timer to cancel, occupant to leave
+
+    - platform: state
+      id: shower
+      entity_id: input_boolean.shower_scene
+      to: 'off'
+
+    - platform: state # req in case motion/timer expire during restart
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+
+    - platform: event
+      id: timer
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_shower_light
+  condition:
+    - condition: state
+      entity_id:
+        - light.bathroom_shower_light
+        - input_boolean.light_automation
+      state: 'on'
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+            if trigger.id == 'occupancy' else true }}
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - binary_sensor.bathroom_sensor_motion
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.bathroom_shower_light
+      state: idle
+
+    - condition: state
+      entity_id: input_boolean.shower_scene
+      state: 'off'
+  action:
+    - service: light.turn_off
+      target:
+        entity_id: light.bathroom_shower_light
+      data:
+        transition: 2
