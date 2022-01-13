@@ -25,15 +25,16 @@
       state: 'off'
 
     - condition: template
-      alias: Workday/weekend/guest routine enabled, defaults to house waketime if next_waketime is none
+      alias: 'Workday/weekend/guest routine enabled, defaults to house waketime if next_waketime is none'
       value_template: >
         {% if is_state('binary_sensor.owner_home','off') %}
           {{ is_state('input_boolean.guest_night','on') }}
         {% elif (now() > today_at(states('input_datetime.house_waketime'))
             if states('sensor.next_waketime')|lower in ['unknown','unavailable','none']
               else now() > states('sensor.next_waketime')|as_datetime) %}
-            {{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_tomorrow','on')
-                else is_state('input_boolean.weekend_night','on') }}
+            {{ is_state('input_boolean.workday_night','on')
+                if is_state('binary_sensor.work_tomorrow','on')
+                  else is_state('input_boolean.weekend_night','on') }}
         {% else %}
           {{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_today','on')
               else is_state('input_boolean.weekend_night','on') }}
@@ -42,6 +43,9 @@
     - service: script.turn_on
       target:
         entity_id: script.bedtime
+      data:
+        variables:
+          warning: true
 
 ###############################################################################
 ## Schedule - Bedtime Clear Notification
@@ -62,46 +66,40 @@
         action: bedtime_delay_off
   condition:
     - condition: template
-      alias: 'Someone home if trigger is night mode.' # always trigger if notification action
-      value_template: "{{ is_state('binary_sensor.owner_home','on') if trigger.id == 'occ' else true }}"
+      alias: 'Someone home if trigger is night mode.'
+      value_template: >
+        {{ is_state('binary_sensor.owner_home','on')
+            if trigger.id == 'occ' else true }}
   action:
-    - service: "{{ states('sensor.notify_service_home') }}"
+    - service: >
+        {{ states('sensor.notify_service_home')
+            if trigger.id == 'occ' else 'notify.mobile' }}
       data:
         message: clear_notification
         data:
           tag: bedtime_alert
 
 ###############################################################################
-## Schedule - Turn On Bedtime Delay
+## Schedule - Bedtime Delay On
 ###############################################################################
-- id: schedule_turn_on_bedtime_delay
-  alias: '[Schedule] Turn On Bedtime Delay'
-  description: 'Turn on bedtime delayed boolean.'
-  max_exceeded: silent
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: bedtime_delayed
-  action:
-    - service: input_boolean.turn_on
-      target:
-        entity_id: input_boolean.bedtime_delayed
-
-###############################################################################
-## Schedule - Bedtime Delayed On
-###############################################################################
-- id: schedule_bedtime_delayed_on
-  alias: '[Schedule] Bedtime Delayed On'
+- id: schedule_bedtime_delay_on
+  alias: '[Schedule] Bedtime Delay On'
   description: 'Bedtime delay turned on.'
   mode: restart
   variables:
-    delay: "{{ states('input_number.stay_awake_delay')|int }}"
+    bedtime_delay: "{{ states('input_number.bedtime_delay')|int }}"
   trigger:
     - platform: state
       entity_id: input_boolean.bedtime_delayed
       to: 'on'
+      for: 5 # allow next_bedtime calac/turn back off without triggering
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: bedtime_delayed
   condition:
+    # no timers/notifications of turned on by scene
     - condition: state
       entity_id: binary_sensor.scene_active
       state: 'off'
@@ -121,24 +119,29 @@
 
             - service: browser_mod.toast
               data:
-                message: "Bedtime delay has been turned off. The house is in {{ states('input_select.occupancy_mode') }} mode."
+                message: >
+                  Bedtime delay has been turned off.
+                  The house is in {{ states('input_select.occupancy_mode') }} mode.
                 duration: 30000
       default:
         - choose:
             - conditions:
-                - condition: state
-                  entity_id: binary_sensor.bedtime_active
-                  state: 'on'
+                - condition: not
+                  conditions:
+                    - condition: state
+                      entity_id: binary_sensor.bedtime_active
+                      state: 'off'
+                      for: 30 # detect if script.bedtime was running before scheduled bedtime
               sequence:
                 - service: timer.start
                   target:
                     entity_id: timer.bedtime_delay
                   data:
                     duration:
-                      minutes: '{{ delay }}'
+                      minutes: '{{ bedtime_delay }}'
 
                 - wait_template: "{{ states('timer.bedtime_delay') == 'active' }}"
-                  timeout: 15
+                  timeout: 5
                   continue_on_timeout: false
 
                 - service: script.turn_on
@@ -147,16 +150,13 @@
                   data:
                     variables:
                       message: >
-                        Your bedtime has been delayed by {{ delay }} minutes.
-                        I'll check with you again at {{ state_attr('sensor.next_bedtime','delayed_bedtime') }}.
+                        Your bedtime has been delayed by {{ bedtime_delay }} minutes.
+                        I'll check on you again at {{ state_attr('sensor.next_bedtime','delayed_bedtime') }}.
                       quiet_play: true
                       min_volume: 35
 
                 - service: script.bedtime_notification
-
           default:
-            - delay: 1 # let delayed bedtime calculate
-
             - service: script.turn_on
               target:
                 entity_id: script.tts_play
@@ -164,7 +164,7 @@
                 variables:
                   message: |
                     You've elected to stay up past your bedtime today.
-                    I've delayed your bedtime by {{ delay }} minutes.
+                    I've delayed your bedtime by {{ bedtime_delay }} minutes.
                     I'll check up on you at {{ state_attr('sensor.next_bedtime','delayed_bedtime') }} to see if you've come to your senses yet.
                   quiet_play: true
                   min_volume: 35
@@ -174,28 +174,34 @@
 ###############################################################################
 ## Schedule - Bedtime Delay Turned Off
 ###############################################################################
-- id: schedule_bedtime_delay_turned_off
-  alias: '[Schedule] Bedtime Delay Turned Off'
+- id: schedule_bedtime_delay_off
+  alias: '[Schedule] Bedtime Delay Off'
   description: 'Delay bedtime or run bedtime script.'
   mode: restart
   trigger:
     - platform: state
-      entity_id:
-        - input_boolean.bedtime_delayed
-        - binary_sensor.bedtime_active
+      id: delay_off
+      entity_id: input_boolean.bedtime_delayed
       to: 'off'
-      from: 'on'
+      for: 5 # allow script.bedtime to turn off
 
     - platform: event
-      id: timer_finished
+      id: delay_off
+      event_type: mobile_app_notification_action
+      event_data:
+        action: bedtime_delay_off
+
+    - platform: event
+      id: delay_finished
       event_type: timer.finished
       event_data:
         entity_id: timer.bedtime_delay
 
     - platform: event
-      event_type: mobile_app_notification_action
+      id: delay_cancelled
+      event_type: timer.cancelled
       event_data:
-        action: bedtime_delay_off
+        entity_id: timer.bedtime_delay
   action:
     - choose:
         - conditions:
@@ -210,7 +216,7 @@
 
             - service: browser_mod.toast
               data:
-                message: 'Bedtime delay cannot be turned off in movie/company scene.'
+                message: 'Bedtime delay cannot be turned off when a scene is active.'
                 duration: 30000
       default:
         - service: automation.turn_off
@@ -232,36 +238,35 @@
             entity_id: '{{ this.entity_id }}'
 
         - choose:
-            - conditions:
-                - condition: state # time is after bedtime but not night mode
-                  entity_id: binary_sensor.bedtime_active
-                  state: 'on'
-
-                - condition: state
-                  entity_id: script.bedtime
-                  state: 'off'
+            - conditions: "{{ trigger.id == 'timer_finished' }}"
               sequence:
-                - choose:
-                    - conditions: "{{ trigger.id == 'timer_finished' }}"
-                      sequence:
-                        - service: script.turn_on
-                          target:
-                            entity_id: script.tts_play
-                          data:
-                            variables:
-                              message: |
-                                Are you still awake? I'm going to turn the lights off soon!
-                                Let me know if you'd like to stay up a while longer.
-                              quiet_play: true
-                              min_volume: 35
-
-                        - delay:
-                            minutes: "{{ states('input_number.night_mode_delay')|int }}"
-
-                        - condition: state
-                          entity_id: input_boolean.bedtime_delayed
-                          state: 'off'
-
                 - service: script.turn_on
                   target:
-                    entity_id: script.bedtime
+                    entity_id: script.tts_play
+                  data:
+                    variables:
+                      message: |
+                        Are you still awake? I'm going to turn the lights off soon!
+                        Let me know if you'd like to stay up a while longer.
+                      quiet_play: true
+                      min_volume: 35
+
+                - delay:
+                    minutes: "{{ states('input_number.bedtime_warning_delay')|int }}"
+
+                - condition: state
+                  entity_id: input_boolean.bedtime_delayed
+                  state: 'off'
+
+        # if bedtime_active hasn't been of for at least 30 seconds
+        # it was on was on before scheduled bedtime - run bedtime script
+        - condition: not
+          conditions:
+            - condition: state
+              entity_id: binary_sensor.bedtime_active
+              state: 'off'
+              for: 30
+
+        - service: script.turn_on
+          target:
+            entity_id: script.bedtime
