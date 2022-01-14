@@ -53,8 +53,13 @@
 - id: schedule_bedtime_clear_notification
   alias: '[Schedule] Bedtime Clear Notification'
   description: 'Clear notification.'
-  mode: restart
+  max_exceeded: silent
   trigger:
+    - platform: state
+      id: delay
+      entity_id: input_boolean.bedtime_delayed
+      to: 'off'
+
     - platform: state
       id: occ
       entity_id: input_select.occupancy_mode
@@ -64,16 +69,8 @@
       event_type: mobile_app_notification_action
       event_data:
         action: bedtime_delay_off
-  condition:
-    - condition: template
-      alias: 'Someone home if trigger is night mode.'
-      value_template: >
-        {{ is_state('binary_sensor.owner_home','on')
-            if trigger.id == 'occ' else true }}
   action:
-    - service: >
-        {{ states('sensor.notify_service_home')
-            if trigger.id == 'occ' else 'notify.mobile' }}
+    - service: "{{ states('sensor.notify_service_home') }}"
       data:
         message: clear_notification
         data:
@@ -85,7 +82,7 @@
 - id: schedule_bedtime_delay_on
   alias: '[Schedule] Bedtime Delay On'
   description: 'Bedtime delay turned on.'
-  mode: restart
+  max_exceeded: silent
   variables:
     bedtime_delay: "{{ states('input_number.bedtime_delay')|int }}"
   trigger:
@@ -168,6 +165,15 @@
                     I'll check up on you at {{ state_attr('sensor.next_bedtime','delayed_bedtime') }} to see if you've come to your senses yet.
                   quiet_play: true
                   min_volume: 35
+
+            - condition: template
+              alias: After bedtime
+              value_template: >
+                {% set next = states('sensor.next_bedtime')|as_datetime %}
+                {% set today = states('sensor.bedtime_today')|as_datetime %}
+                {% set bedtime = next if now() > today else today %}
+                {{ bedtime - now() < timedelta(hours=2) if bedtime|lower
+                    not in ['unknown','unavailable','none'] else false }}
 
             - service: script.bedtime_notification
 
