@@ -7,6 +7,9 @@
   mode: queued
   variables:
     type: "{{ states('sensor.alarm_type') }}"
+    time: "{{ states.alarm_control_panel.master.last_changed.strftime('%-I:%M %p') }}"
+    text: "{{ states('input_text.current_alarm') }}"
+    delay: "{{ state_attr('alarm_control_panel.master','delay')|int(60) }}"
   trigger:
     - platform: state
       id: pending
@@ -25,7 +28,6 @@
         - input_boolean.alarm_pending
         - input_boolean.alarm_triggered
       to: 'off'
-
   action:
     - choose:
         - conditions: "{{ trigger.id == 'pending' }}"
@@ -35,18 +37,18 @@
                 sequence:
                   - service: notify.alarm # not an alert entity becasuse of icon/image template
                     data:
-                      title: 'Alarm Pending'
-                      message: "{{ states('input_text.current_alarm') }}"
+                      title: 'Alarm Pending' #VERIFY
+                      message: '{{ text }}'
                       data:
                         tag: alarm_pending
                         group: Alarm
                         channel: Alert
                         importance: max
                         ttl: 0
-                        timeout: "{{ state_attr('alarm_control_panel.master','delay')|int(60) }}"
+                        timeout: '{{ delay }}'
                         priority: high
                         chronometer: true
-                        when: "{{ now().timestamp() + state_attr('alarm_control_panel.master','delay')|int(60) }}"
+                        when: '{{ (now().timestamp() + delay)|int }}'
                         notification_icon: '{{ states.input_boolean.alarm_pending.attributes.icon }}'
                         icon_url: !secret ALARM_ICON
                         image: !secret ALARM_IMAGE
@@ -73,35 +75,26 @@
 
         - conditions: "{{ trigger.id == 'triggered' }}"
           sequence:
+            - variables:
+                title: "{{ 'Tornado Alert!' if type == 'tornado' else 'Burglar Alarm!' }}"
+                message: |
+                  {{ 'Take Cover!' if type == 'tornado' else text }}
+                  Triggered at: {{ time }}
+
             - service: persistent_notification.create
               data:
-                title: >
-                  {% if type == 'tornado' %} Tornado Alert!
-                  {% elif type == 'burglar' %} Burglar Alarm!
-                  {% endif %}
-                message: >
-                  {% if type == 'tornado' %} Tornado Alert - Take Cover!
-                  {% elif type == 'burglar' %} Trigger: {{ states('input_text.current_alarm') }}
-                  {% endif %}
-                  {{ now().strftime('%H:%M  %Y-%m-%d') }}
+                title: '{{ title }}'
+                message: '{{ message }}'
                 notification_id: alarm_triggered
 
             - repeat:
                 sequence:
                   - service: notify.alarm # not an alert entity becasuse of icon/image template
                     data:
-                      title: >
-                        {% set type = states('sensor.alarm_type') %}
-                        {% if type == 'tornado' %} Tornado Alert!
-                        {% elif type == 'burglar' %} Burglar Alarm!
-                        {% endif %}
-                      message: >
-                        {%- set type = states('sensor.alarm_type') -%}
-                        {%- if type == 'tornado'-%} Tornado Alert - Take Cover!
-                        {%- elif type == 'burglar' -%} {{ states('input_text.current_alarm') }}
-                        {%- endif -%}
+                      title: '{{ title }}'
+                      message: '{{ message }}'
                       data:
-                        tag: 'alarm_triggered{{ repeat.index }}'
+                        tag: 'alarm_triggered{{ repeat.index }}' #VERIFY
                         group: Alarm
                         channel: alarm_stream
                         importance: max
@@ -109,7 +102,7 @@
                         priority: high
                         persistent: true
                         notification_icon: '{{ states.input_boolean.alarm_triggered.attributes.icon }}'
-                        icon_url: !secret ALARM_ICON
+                        icon_url: !secret ALARM_ICON #IDEA tornado vs burglar
                         image: !secret ALARM_IMAGE
                         ledColor: !secret CRITICAL_COLOR
                         color: !secret CRITICAL_COLOR

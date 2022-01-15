@@ -1,7 +1,7 @@
 ###############################################################################
 ## Presence - Occupancy Mode
 ###############################################################################
-- id: presence_occupancy_mode #OCC
+- id: presence_occupancy_mode
   alias: '[Presence] Occupancy Mode'
   description: 'Set occupancy mode options, validate occupancy mode change.'
   mode: restart
@@ -34,11 +34,9 @@
                       entity_id: binary_sensor.owner_home
                       state: 'off'
                   sequence:
-                    - service: automation.turn_off
+                    - service: input_boolean.turn_on
                       target:
-                        entity_id: group.occupancy_bypass_automations
-                      data:
-                        stop_actions: false
+                        entity_id: input_boolean.occupancy_override
 
                     # select guest if guest home or previous occupancy mode if not
                     - service: input_select.select_option
@@ -47,8 +45,9 @@
                       data:
                         option: "{{ 'Guest' if is_state('input_boolean.guest_home','on') else prev_mode }}"
 
-                    - service: automation.turn_on
-                      entity_id: group.occupancy_bypass_automations
+                    - service: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.occupancy_override
               default:
                 - service: input_boolean.turn_off
                   entity_id: input_boolean.guest_home
@@ -64,11 +63,9 @@
                       entity_id: binary_sensor.someone_home
                       state: 'off'
                   sequence:
-                    - service: automation.turn_off
+                    - service: input_boolean.turn_on
                       target:
-                        entity_id: group.occupancy_bypass_automations
-                      data:
-                        stop_actions: false
+                        entity_id: input_boolean.occupancy_override
 
                     - service: input_select.select_option # back to previous mode
                       target:
@@ -76,12 +73,15 @@
                       data:
                         option: '{{ prev_mode }}'
 
-                    - service: automation.turn_on
-                      entity_id: group.occupancy_bypass_automations
+                    - service: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.occupancy_override
               default:
                 - service: timer.cancel # light timers cancelled here so lights can turn off
                   target:
-                    entity_id: "{{ states.timer|selectattr('attributes.type','eq','light')|map(attribute='entity_id')|list }}"
+                    entity_id: >
+                      {{ states.timer|selectattr('attributes.type','eq','light')
+                          |map(attribute='entity_id')|list }}
 
                 - service: homeassistant.turn_off
                   target:
@@ -134,11 +134,9 @@
                       entity_id: binary_sensor.owner_home
                       state: 'on'
                   sequence:
-                    - service: automation.turn_off
+                    - service: input_boolean.turn_on
                       target:
-                        entity_id: group.occupancy_bypass_automations
-                      data:
-                        stop_actions: false
+                        entity_id: input_boolean.occupancy_override
 
                     - service: input_boolean.turn_on
                       target:
@@ -150,9 +148,9 @@
                       data:
                         option: "{{ prev_mode if prev_mode == 'Night' else 'Home' }}"
 
-                    - service: automation.turn_on
+                    - service: input_boolean.turn_off
                       target:
-                        entity_id: group.occupancy_bypass_automations
+                        entity_id: input_boolean.occupancy_override
               default:
                 - service: input_boolean.turn_on
                   target:
@@ -229,173 +227,3 @@
           {% else %}
             {{ 'Guest' if is_state('input_boolean.guest_home','on') and is_state('binary_sensor.owner_home','off') else 'Home' }}
           {% endif %}
-
-###############################################################################
-## Presence - Occupancy Notification
-###############################################################################
-- id: presence_occupancy_notification #OCC
-  alias: '[Presence] Occupancy Notification'
-  description: 'Send notification when occupancy mode or alarm state has changed.'
-  mode: restart
-  variables:
-    run_delay: 15
-    occupancy_changed: >
-      {{ is_state('input_boolean.occupancy_announcements','on')
-          and now() - states.input_select.occupancy_mode.last_changed
-            < timedelta(seconds=run_delay) }}
-    alarm_changed: >
-      {{ is_state('input_boolean.alarm_announcements','on')
-          and now() - states.alarm_control_panel.master.last_changed
-            < timedelta(seconds=run_delay) }}
-  trigger:
-    - platform: state
-      id: occupancy
-      entity_id: input_select.occupancy_mode
-      to:
-        - Home
-        - Guest
-        - Night
-        - Away
-        - Vacation
-
-    - platform: state
-      id: armed
-      entity_id: alarm_control_panel.master
-      to:
-        - armed_home
-        - armed_night
-        - armed_away
-
-    - platform: state
-      id: disarmed
-      entity_id: alarm_control_panel.master
-      to: disarmed
-      from:
-        - armed_home
-        - armed_night
-        - armed_away
-        - triggered
-  condition:
-    - condition: template
-      alias: 'Temp disarm override is not on'
-      value_template: >
-        {{ is_state('input_boolean.alarm_temp_override','off')
-            if trigger.id == 'disarmed' else true }}
-
-    - condition: template
-      alias: 'Alarm automation is enabled if alarm trigger'
-      value_template: >
-        {{ is_state('input_boolean.alarm_automation','on')
-            if trigger.id in ['armed','disarmed'] else true }}
-
-    - condition: not
-      conditions:
-        - condition: state
-          entity_id: alarm_control_panel.master
-          state:
-            - triggered
-            - pending
-  action:
-    # allow alarm to enter arming state
-    # allow corresponding occupancy/alarm mode state to set, prevents double tts
-    - delay: '{{ run_delay }}'
-
-    - variables:
-        arm_delay: "{{ state_attr('alarm_control_panel.master','delay')|int(0) }}"
-
-    - wait_template: >
-        {{ not is_state('alarm.control_panel.master','arming')
-             and is_state('script.arm_alarm','off') }}
-      timeout: '{{ arm_delay if arm_delay > 60 else 60 }}'
-
-    - variables:
-        occupancy_mode: "{{ states('input_select.occupancy_mode') }}"
-        alarm_mode: "{{  states('sensor.alarm_status') }}"
-
-    - choose:
-        - conditions:
-            - "{{ is_state('input_boolean.occupancy_announcements','on')
-              if trigger.id == 'occupancy' else true }}"
-            - "{{ is_state('input_boolean.alarm_announcements','on')
-              if trigger.id in ['armed','disarmed'] else true }}"
-          sequence:
-            - service: script.turn_on
-              target:
-                entity_id: script.tts_play
-              data:
-                variables:
-                  message: |
-                    {%- if occupancy_changed -%}
-                    The house is now in {{ occupancy_mode }} mode
-                    {%- endif %}
-                    {%- if occupancy_changed and alarm_changed %}, and the{% elif occupancy_changed %}.{% elif alarm_changed %} The{% endif %}
-                    {%- if alarm_changed %} house alarm is {{ alarm_mode }}.{% endif %}
-                    {{ 'Personalized occupant automations are disabled in Guest mode.' if occupancy_mode == 'Guest' }}
-                  ignore_away: true
-                  min_volume: "{{ 20 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 30 }}"
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: input_boolean.occupancy_notifications
-              state: 'on'
-          sequence:
-            - service: notify.mobile
-              data:
-                title: 'Occupancy Mode'
-                message: >-
-                  <b>Mode: {{ occupancy_mode }} | {{ alarm_mode }}.</b>
-                  {%- if is_state('input_boolean.alarm_triggered','on') -%}
-                    Alarm Trigger: {{ states('input_text.current_alarm') -}}
-                    <br/>Disarmed By: {{ states('input_text.alarm_disarmed_by') -}}
-                  {%- else -%}
-                  {%- endif -%}
-                  {%- if is_state('binary_sensor.jason_home','on') -%}<br/> Jason is home. {%- endif -%}
-                  {%- if is_state('binary_sensor.sheri_home','on') -%}<br/> Sheri is home. {%- endif -%}
-                  {%- if is_state('input_boolean.guest_home','on') -%}<br/> A guest is home. {%- endif -%}
-                data:
-                  subject: 'Mode: {{ occupancy_mode }} | Alarm: {{ alarm_mode }}.'
-                  tag: occupancy_notification
-                  group: General
-                  channel: General
-                  importance: max
-                  ttl: 0
-                  priority: high
-                  notification_icon: '{{ states.input_select.occupancy_mode.attributes.icon }}'
-                  icon_url: !secret OCCUPANCY_ICON_TEMPLATE
-                  ledColor: !secret NOTIFY_COLOR
-                  color: !secret NOTIFY_COLOR
-                  vibrationPattern: !secret GENERAL_VIBRATION
-                  clickAction: /lovelace-mobile/presence
-                  actions:
-                    - title: 'Home'
-                      action: set_home_mode
-
-                    - title: 'Away'
-                      action: set_away_mode
-
-                    - title: 'Alarm'
-                      action: URI
-                      uri: app://com.thanksmister.iot.mqtt.alarmpanel
-
-###############################################################################
-## Presence - Turn Off Occupancy Notifications
-###############################################################################
-- id: presence_turn_off_occupancy_notifications
-  alias: '[Presence] Turn Off Occupancy Notifications'
-  description: 'Turn off occupancy notifications boolean.'
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: turn_off_occupancy_notifications
-  action:
-    - service: input_boolean.turn_off
-      target:
-        entity_id: input_boolean.occupancy_notifications
-
-    - service: notify.jason
-      data:
-        message: clear_notification
-        data:
-          tag: occupancy_notification
