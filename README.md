@@ -47,7 +47,7 @@ Zone: 4
 
 #TODO - to be completed
 #VERIFY - to be verifed
-#TEST - test value
+#TEST - test code
 #TEMP - temporary option/code
 #OPTION - optional parameter/code
 #IDEA - idea for future option/function

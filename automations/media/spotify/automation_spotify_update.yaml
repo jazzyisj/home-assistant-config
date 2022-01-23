@@ -1,34 +1,20 @@
 ###############################################################################
 ## Spotify - Spotify Hassio Update
 ###############################################################################
-- id: spotify_spotify_hassio_update #VERIFY
+- id: spotify_spotify_hassio_update
   alias: '[Spotify] Spotify Hassio Update'
   description: 'Update Spotify Hassio media player.'
   mode: restart
   trigger:
     - platform: state
       entity_id: sensor.spotify_media_player
-      to: playing
-  condition:
-    - condition: state
-      entity_id: binary_sensor.wan_connected
-      state: 'on'
-
-    - condition: state
-      entity_id: input_boolean.startup_pending
-      state: 'off'
+      attribute: player_state
+      to: ~
   action:
-    - repeat:
-        while:
-          - condition: state
-            entity_id: sensor.spotify_media_player
-            state: playing
-        sequence:
-          - service: homeassistant.update_entity
-            target:
-              entity_id: media_player.spotify_hassio
-
-          - delay: 5
+    # make sure we update at least once if spotify is off
+    - service: homeassistant.update_entity
+      target:
+        entity_id: media_player.spotify_hassio
 
 ###############################################################################
 ## Spotify - Playlist Update
@@ -36,11 +22,11 @@
 - id: spotify_playlist_update
   alias: '[Spotify] Playlist Update'
   description: 'Update spotify playlist select options, restore previous selection on startup.'
-  mode: single
-  max_exceeded: silent
+  mode: restart
   variables:
     selected_playlists: "{{ state_attr('group.spotify_selected_playlists','entity_id') }}"
     stored_playlists: "{{ state_attr('group.spotify_stored_playlists','entity_id') }}"
+    playlists: "{{ state_attr('sensor.playlists_sensor','playlists') }}"
   trigger:
     - platform: homeassistant
       id: startup
@@ -52,15 +38,16 @@
       attribute: playlists
   condition:
     - condition: template
-      value_template: >
-        {{ state_attr('sensor.playlists_sensor','playlists') != none
-            if trigger.id == 'playlists' else true }}
+      alias: 'Playlist is populated if trigger is not startup'
+      value_template: "{{ playlists != none and playlists|count > 0 if trigger.id != 'startup' else true }}"
   action:
     # wait for sensor to populate (startup)
-    - wait_template: "{{ state_attr('sensor.playlists_sensor','playlists') != none }}"
+    - wait_template: '{{ playlists != none and playlists|count > 0 }}'
       timeout:
         minutes: 10
       continue_on_timeout: false
+
+    - delay: 1 # allow sensor to populate
 
     - service: automation.turn_off
       target:
@@ -89,8 +76,8 @@
       data:
         options: >
           {% set options = namespace(value=[]) %}
-          {% for item in state_attr('sensor.playlists_sensor','playlists') -%}
-            {% set options.value = options.value + [item.name ] %}
+          {% for item in playlists -%}
+            {% set options.value = options.value + [item.name] %}
           {% endfor %}
           {{ options.value }}
 
@@ -148,9 +135,7 @@
         - input_select.media_preset_spotify_sheri
   condition:
     - condition: state
-      entity_id:
-        - binary_sensor.spotify_connected
-        - binary_sensor.wan_connected
+      entity_id: binary_sensor.spotify_connected
       state: 'on'
 
     - "{{ states(trigger.entity_id)|lower not in ['unknown','unavailable','none'] }}"

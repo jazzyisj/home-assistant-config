@@ -4,11 +4,11 @@
 - id: radio_playlist_update
   alias: '[Radio] Playlist Update'
   description: 'Update radio station select options, restore previous selection on startup.'
-  mode: single
-  max_exceeded: silent
+  mode: restart
   variables:
     selected_playlists: "{{ state_attr('group.radio_selected_playlists','entity_id') }}"
     stored_playlists: "{{ state_attr('group.radio_stored_playlists','entity_id') }}"
+    playlists: "{{ state_attr('sensor.streaming_radio_stations','stations') }}"
   trigger:
     - platform: homeassistant
       id: startup
@@ -20,15 +20,16 @@
       attribute: stations
   condition:
     - condition: template
-      value_template: >
-        {{ state_attr('sensor.streaming_radio_stations','stations') != none
-            if trigger.id == 'stations' else true }}
+      alias: 'Playlist is populated if trigger is not startup'
+      value_template: "{{ playlists != none and playlists|count > 0 if trigger.id != 'startup' else true }}"
   action:
     # wait for sensor to populate (startup)
-    - wait_template: "{{ state_attr('sensor.streaming_radio_stations','stations') != none }}"
+    - wait_template: '{{ playlists != none and playlists|count > 0 }}'
       timeout:
         minutes: 10
       continue_on_timeout: false
+
+    - delay: 1 # allow sensor to populate
 
     - service: automation.turn_off
       target:
@@ -57,7 +58,7 @@
       data:
         options: >
           {% set options = namespace(value=[]) %}
-          {% for item in state_attr('sensor.streaming_radio_stations','stations') -%}
+          {% for item in playlists -%}
             {% set options.value = options.value + [item.name ] %}
           {% endfor %}
           {{ options.value }}

@@ -8,7 +8,7 @@
   variables:
     select_entity: input_select.spotify_sheri_playlist
     stored_value: '{{ states(select_entity) }}'
-    playlist_sensor: sensor.playlists_sensor_sheri
+    playlists: "{{ state_attr('sensor.playlists_sensor_sheri','playlists') }}"
   trigger:
     - platform: homeassistant
       id: startup
@@ -20,14 +20,13 @@
       to: ~
   condition:
     - condition: template
-      value_template: >
-        {{ state_attr(playlist_sensor,'playlists')|lower
-            not in ['','[]','unknown','unavailable','none'] if trigger.id != 'startup' else true }}
+      alias: 'Playlist is populated if trigger is not startup'
+      value_template: "{{ playlists != none and playlists|count > 0 if trigger.id != 'startup' else true }}"
   action:
     # wait for sensor to populate (startup)
     - wait_template: >
-        {{ state_attr(playlist_sensor,'playlists')|lower
-            not in ['','[]','unknown','unavailable','none'] }}
+        {{ playlists != none
+            and playlists|count > 0 }}
       timeout:
         minutes: 10
       continue_on_timeout: false
@@ -40,13 +39,18 @@
       data:
         stop_actions: false
 
+    - delay: 1 # allow sensor to populate
+
     - service: input_select.set_options
       target:
         entity_id: '{{ select_entity }}'
       data:
         options: >
-          [{% for item in state_attr(playlist_sensor,'playlists') -%}
-            "{{- item.name }}"{{ ',' if not loop.last -}}{% endfor %}]
+          {% set options = namespace(value=[]) %}
+          {% for item in playlists -%}
+            {% set options.value = options.value + [item.name] %}
+          {% endfor %}
+          {{ options.value }}
 
     - choose: #NOTE only req on startup, now automatic
         - conditions: "{{ trigger.id == 'startup' and stored_value in state_attr(select_entity,'options') }}"

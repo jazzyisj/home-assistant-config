@@ -7,6 +7,19 @@
   mode: queued
   variables:
     arm_mode: "{{ states('alarm_control_panel.master') }}"
+    occupancy_mode: "{{ states('input_select.occupancy_mode') }}"
+    new_occupancy_mode: >
+      {% if arm_mode == 'disarmed' %}
+        {{ 'Night' if occupancy_mode == 'Night' else 'Home'
+            if is_state('binary_sensor.owner_home','on') else 'Guest' }}
+      {% elif arm_mode == 'armed_home' %}
+        {{ 'Away' if is_state('binary_sensor.someon_home','off')
+            else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
+      {% elif arm_mode == 'armed_night' %}
+        {{ 'Night' if is_state('binary_sensor.someone_home','on') else 'Away' }}
+      {% elif arm_mode == 'armed_away' %}
+        Away
+      {% endif %}
   trigger:
     - platform: state
       entity_id: alarm_control_panel.master
@@ -34,22 +47,27 @@
       entity_id: input_boolean.alarm_temp_override
       state: 'off'
 
-    - "{{ not is_state('input_select.occupancy_mode','Vacation') if is_state('alarm_control_panel.master','armed_away') else true }}" # dont' reset to away mode
-    - "{{ not is_state('binary_sensor.someone_home','off') if is_state('alarm_control_panel.master','disarmed') else true }}" # nobody home, don't change mode
+    - condition: template
+      alias: 'New occupancy mode not equal to current occupancy mode'
+      value_template: '{{ occupancy_mode != new_occupancy_mode }}'
+
+    - condition: template
+      alias: 'Arm mode is not armed_away if current occupancy mode is Vacation'
+      value_template: "{{ arm_mode != 'armed_away' if occupancy_mode == 'Vacation' else true }}"
+
+    - condition: template
+      alias: 'Someone is home if arm mode is disarmed'
+      value_template: "{{ not is_state('binary_sensor.someone_home','off') if arm_mode == 'disarmed' else true }}"
   action:
-    - service: input_boolean.turn_on # turn on override to bypass auto arm, alarm has just been armed
+    # turn on override to bypass auto arm, alarm has just been armed
+    - service: input_boolean.turn_on
       entity_id: input_boolean.alarm_temp_override
 
     - service: input_select.select_option
       target:
         entity_id: input_select.occupancy_mode
       data:
-        option: >
-          {% if arm_mode == 'disarmed' %}{{ 'Night' if is_state('input_select.occupancy_mode','Night') else 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
-          {% elif arm_mode == 'armed_home' %}{{ 'Away' if is_state('binary_sensor.someon_home','off') else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
-          {% elif arm_mode == 'armed_night' %}{{ 'Night' if is_state('binary_sensor.someone_home','on') else 'Away' }}
-          {% elif arm_mode == 'armed_away' %} Away
-          {% endif %}
+        option: '{{ new_occupancy_mode }}'
 
     - service: input_boolean.turn_off
       entity_id: input_boolean.alarm_temp_override
