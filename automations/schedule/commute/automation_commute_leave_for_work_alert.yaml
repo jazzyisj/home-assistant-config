@@ -1,0 +1,69 @@
+###############################################################################
+## Commute - Leave For Work Alert
+###############################################################################
+- id: commute_leave_for_work_alert
+  alias: '[Commute] Leave For Work Alert'
+  description: 'Play announcement when alert turns on.'
+  mode: parallel
+  variables:
+    person: '{{ trigger.entity_id[21:] }}'
+  trigger:
+    - platform: state
+      entity_id:
+        - alert.leave_for_work_jason
+        - alert.leave_for_work_sheri
+      to: 'on'
+      for: 15 # allow both alerts to turn on to avoid duplicate
+  condition:
+    - condition: template
+      alias: 'Jason not home if trigger is Sheri'
+      value_template: >
+        {{ is_state('binary_sensor.jason_home','off')
+          if trigger.entity_id == 'alert.leave_for_work_sheri' else true }}
+  action:
+    - repeat:
+        sequence:
+          - service: script.turn_on
+            target:
+              entity_id: script.tts_play
+            data:
+              variables:
+                message: |
+                  {% set traffic_time = state_attr('sensor.' ~ person ~ '_time_to_work','duration_in_traffic') %}
+                  Attention! {{ person|title }}! It is now {{ now().strftime('%-I:%M %p') }}!
+                  You should have already left for work!  Your current commute time to work is
+                  {{ traffic_time if traffic_time != none else 'not currently available'}}.
+                media_player: media_player.inside_speakers
+                quiet_play: true
+                min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 70 }}"
+
+          - wait_template: "{{ not is_state(trigger.entity_id,'on') }}"
+            timeout: # wait for alert to turned off/dismissed
+              minutes: 5
+        until:
+          - condition: template
+            value_template: "{{ not is_state(trigger.entity_id,'on') }}"
+
+###############################################################################
+## Commute - Pause Leave For Work Alert
+###############################################################################
+- id: commute_pause_leave_for_work_alert
+  alias: '[Commute] Pause Leave For Work Alert'
+  description: 'Pause alert.'
+  mode: parallel
+  variables:
+    person: "{{ trigger.event.data['action'][21:] }}"
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_leave_for_work_jason
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_leave_for_work_sheri
+  action:
+    - service: alert.turn_off
+      target:
+        entity_id: 'alert.leave_for_work_{{ person }}'

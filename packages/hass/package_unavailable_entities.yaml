@@ -5,6 +5,7 @@
 ## https://github.com/jazzyisj/unavailable-entities-sensor/blob/main/README.md
 ###################################################################################################
 
+# NOTE: Home Assistant v2021.12 required.  For older versions please see README
 # REQUIRED - This is the template sensor
 template:
   - sensor:
@@ -13,26 +14,37 @@ template:
         icon: "{{ 'mdi:alert-circle' if states('sensor.unavailable_entities')|int(0) > 0 else 'mdi:check-circle' }}"
         unit_of_measurement: entities
         state: >
-          {% if state_attr('sensor.unavailable_entities','entities') != none %}
-            {{ state_attr('sensor.unavailable_entities','entities')|count }}
+          {% if state_attr('sensor.unavailable_entities','entity_id') != none %}
+            {{ state_attr('sensor.unavailable_entities','entity_id')|count }}
           {% endif %}
         attributes:
-          entities: >
+          entity_id: >
             {% if state_attr('group.ignored_unavailable_entities','entity_id') != none %}
               {% set ignore_seconds = 60 %}
               {% set ignore_ts = (now().timestamp() - ignore_seconds)|as_datetime %}
-              {{ states
-                |rejectattr('domain','eq','group')
+              {% set entities = states|rejectattr('domain','in',['group','button'])
+                  |rejectattr('entity_id','search','_next_alarm')
+                  |rejectattr('entity_id','search','_timers')
+                  |rejectattr('entity_id','search','_alarms')
+                  |rejectattr('entity_id','search','_memory_percent')
+                  |rejectattr('entity_id','search','_cpu_percent')
+                  |rejectattr('entity_id','search','browser_')
+                  |selectattr('state','in',['unavailable','unknown'])|list %}
+              {% set buttons = states.button|selectattr('state','eq','unavailable')|list %}
+              {{ (entities + buttons)
                 |rejectattr('entity_id','in',state_attr('group.ignored_unavailable_entities','entity_id'))
                 |rejectattr('last_changed','ge',ignore_ts)
-                |selectattr('state','in',['unavailable','unknown','none'])|map(attribute='entity_id')|list }}
+                |map(attribute='entity_id')|list }}
             {% endif %}
 
 # REQUIRED - Add any entities you do not wish to monitor in this group.
 # IMPORTANT - This group MUST exist even if empty for sensor template to render.
-group:
-  ignored_unavailable_entities:
-    entities: !include /config/include/ignored_entities.yaml
+# group:
+#   ignored_unavailable_entities:
+#     entities:
+#       - sensor.unavailable_entities # prevent template loop warnings?
+#       - binary_sensor.updater # always unknown after restart
+
 # OPTIONAL - filter template loop warnings from the Home Assistant log.
 # logger:
 #   filters:
@@ -40,35 +52,35 @@ group:
 #       - 'Template loop detected while processing event'
 
 # OPTIONAL Example automation to demonstrate how you can utilize this sensor
-# automation:
-#   - id: unavailable_entities_notification
-#     alias: 'Unavailable Entities Notification'
-#     description: 'Create persistent notification if there are unavailable entities, dismiss if none.'
-#     mode: restart
-#     trigger:
-#       - platform: state
-#         entity_id: sensor.unavailable_entities
-#         to: ~
-#     condition:
-#       - condition: template
-#         value_template: >
-#           {{ is_number(trigger.from_state.state)
-#               and is_number(trigger.to_state.state) }}
-#     action:
-#       - choose:
-#           conditions:
-#             - condition: numeric_state
-#               entity_id: sensor.unavailable_entities
-#               below: 1
-#           sequence:
-#             - service: persistent_notification.dismiss
-#               data:
-#                 notification_id: unavailable_entities
-#         default:
-#           - service: persistent_notification.create
-#             data:
-#               title: 'Unavailable Entities'
-#               message: >
-#                 - {{ expand(state_attr('sensor.unavailable_entities','entities'))
-#                       |map(attribute='entity_id')|join('\n- ') }}
-#               notification_id: unavailable_entities
+automation:
+  - id: unavailable_entities_notification
+    alias: 'Unavailable Entities Notification'
+    description: 'Create persistent notification if there are unavailable entities, dismiss if none.'
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id: sensor.unavailable_entities
+        to: ~
+    condition:
+      - condition: template
+        value_template: >
+          {{ is_number(trigger.from_state.state)
+              and is_number(trigger.to_state.state) }}
+    action:
+      - choose:
+          conditions:
+            - condition: numeric_state
+              entity_id: sensor.unavailable_entities
+              below: 1
+          sequence:
+            - service: persistent_notification.dismiss
+              data:
+                notification_id: unavailable_entities
+        default:
+          - service: persistent_notification.create
+            data:
+              title: 'Unavailable Entities'
+              message: >
+                - {{ expand(state_attr('sensor.unavailable_entities','entities'))
+                      |map(attribute='entity_id')|join('\n- ') }}
+              notification_id: unavailable_entities

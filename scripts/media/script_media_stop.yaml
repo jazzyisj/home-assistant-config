@@ -13,15 +13,17 @@ media_stop:
     media_type: "{{ media_type|default('all') }}"
     media_types: "{{ state_attr('sensor.media_types','media_types')|default([]) }}"
     alarm_players: "{{ state_attr('sensor.alarm_clock_media_player','entity_id')|default([]) }}"
-    media_players: >
+    media_players: > #TV_VOL #TEMP
       {% if media_type in media_types %}
         {% set media_player = states('sensor.' ~ media_type ~ '_media_player') %}
-        {% if media_player|lower not in ['off','','unknown','unavailable','none'] %}
-          {% set media_players = expand(state_attr('sensor.radio_media_player','entity_id'))
+        {% if media_player|lower not in ['','unknown','unavailable'] %}
+          {% set media_players = expand(state_attr(media_player,'entity_id'))
               |rejectattr('entity_id','in',alarm_players)|map(attribute='entity_id')|list %}
         {% endif %}
+      {% else %}
+        {{ media_players|default(expand(state_attr('group.single_media_players','entity_id')))
+            |rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list }}
       {% endif %}
-      {{ media_players|default(state_attr('group.single_media_players','entity_id')) }}
   sequence:
     - choose: # failed booleans not turned off unless turning off all media
         - conditions: "{{ media_type == 'all' }}"
@@ -83,16 +85,10 @@ media_stop:
     - choose:
         - conditions: '{{ media_players|count > 0 }}'
           sequence:
-            - service: script.turn_on
-              target:
-                entity_id: script.media_players_set_volumes
+            - service: script.media_players_set_volumes
               data:
-                variables:
-                  media_players: '{{ media_players }}'
-                  source: >
-                    {% if media_type == 'all' %} reset
-                    {% else %} {{ media_type }}_off
-                    {% endif %}
+                media_players: '{{ media_players }}'
+                source: "{{ 'reset' if media_type == 'all' else media_type }}"
 
     #NOTE browser, vlc stay idle
     - wait_template: "{{ expand(media_players)|selectattr('state','in',['idle','playing','paused'])|list|count == 0 }}"
