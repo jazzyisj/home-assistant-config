@@ -1,0 +1,88 @@
+###############################################################################
+## Commute - Late For Work Alert
+###############################################################################
+- id: commute_late_for_work_alert
+  alias: '[Commute] Late For Work Alert'
+  description: 'Play announcement when alert turns on.'
+  mode: parallel
+  variables:
+    person: '{{ trigger.entity_id[20:] }}'
+  trigger:
+    - platform: state
+      entity_id:
+        - alert.late_for_work_jason
+        - alert.late_for_work_sheri
+      to: 'on'
+      for: 5 # allow both alerts to turn on to avoid duplicate
+  condition:
+    - condition: state
+      entity_id:
+        - input_boolean.schedule_automation
+        - input_boolean.commute_alerts
+        - binary_sensor.owner_home
+      state: 'on'
+
+    - condition: template
+      alias: 'Jason not home if trigger is Sheri'
+      value_template: >
+        {{ is_state('binary_sensor.jason_home','off')
+          if trigger.entity_id == 'alert.late_for_work_sheri' else true }}
+  action:
+    - repeat:
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    alias: 'First repeat or dining room light timer is idle'
+                    value_template: "{{ repeat.index == 1 or is_state('timer.dining_room_light','idle') }}"
+                sequence:
+                  - service: light.turn_on
+                    target:
+                      entity_id: light.dining_room_rgb_light
+                    data:
+                      profile: late_work_alert
+
+          - service: script.turn_on
+            target:
+              entity_id: script.tts_play
+            data:
+              variables:
+                message: |
+                  {% set traffic_time = state_attr('sensor.' ~ person ~ '_time_to_work','duration_in_traffic') %}
+                  Attention! {{ person|title }}! It is now {{ now().strftime('%-I:%M %p') }}!
+                  You should have already left for work!  Your current commute time to work is
+                  {{ traffic_time if traffic_time != none else 'not currently available'}}.
+                media_player: media_player.inside_speakers
+                quiet_play: true
+                min_volume: "{{ 50 if is_state_attr(states('sensor.tts_media_player'),'type','group') else 70 }}"
+
+          - wait_template: "{{ not is_state(trigger.entity_id,'on') }}"
+            timeout: # wait for alert to turned off/dismissed
+              minutes: 5
+        until:
+          - condition: template
+            value_template: "{{ not is_state(trigger.entity_id,'on') }}" # auto off after 15 min
+
+###############################################################################
+## Commute - Pause Late For Work Alert
+###############################################################################
+- id: commute_pause_late_for_work_alert
+  alias: '[Commute] Pause Late For Work Alert'
+  description: 'Pause alert.'
+  mode: parallel
+  variables:
+    person: "{{ trigger.event.data['action'][21:] }}"
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_late_for_work_jason
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_late_for_work_sheri
+  action:
+    - service: alert.turn_off
+      target:
+        entity_id: 'alert.leave_for_work_{{ person }}'

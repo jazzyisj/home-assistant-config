@@ -1,6 +1,6 @@
 # Home Assistant Configuration
 
-Home Assistant (Hassio) configuration, updated to v2021.12.9
+Home Assistant (Hassio) configuration, updated to v2022.2.6
 
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_v2.png)
 

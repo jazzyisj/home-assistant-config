@@ -3,50 +3,210 @@
 ###############################################################################
 - id: alarm_notifications
   alias: '[Alarm] Notifications'
-  description: 'Send alarm notifications.'
-  mode: queued
+  description: 'Create alarm snapshots, send alarm notifications.'
+  mode: restart
   variables:
-    type: "{{ states('sensor.alarm_type') }}"
-    time: "{{ states.alarm_control_panel.master.last_changed.strftime('%-I:%M %p') }}"
-    text: "{{ states('input_text.current_alarm') }}"
-    delay: "{{ state_attr('alarm_control_panel.master','delay')|int(60) }}"
+    trigger_entity: "{{ expand(state_attr('alarm_control_panel.master','open_sensors'))|map(attribute='entity_id')|join('') }}"
+    delay: "{{ state_attr('alarm_control_panel.master','delay')|int(0) }}"
+    message: >
+      {{ states('input_text.current_alarm') }}
+      <br>Triggered at: {{ as_local(states.alarm_control_panel.master.last_changed).strftime('%-I:%M %p')  }}
   trigger:
     - platform: state
-      id: pending
       entity_id: alarm_control_panel.master
-      to: pending
-      for: 10 # allow alarm_type, current_alarm, snapshots to set
-
-    - platform: state
-      id: triggered
-      entity_id: alarm_control_panel.master
-      to: triggered
-      for: 10 # allow alarm_type, current_alarm, snapshots to set
-
-    - platform: state
-      entity_id:
-        - input_boolean.alarm_pending
-        - input_boolean.alarm_triggered
-      to: 'off'
+      to:
+        - pending
+        - triggered
+      for: 2 # allow current_alarm to populate
+  condition:
+    - condition: template
+      alias: 'Tornado alert off' # tornado alert has own notifcations
+      value_template: "{{ is_state('binary_sensor.tornado_alert','off') }}"
   action:
     - choose:
-        - conditions: "{{ trigger.id == 'pending' }}"
+        - conditions:
+            - condition: state
+              entity_id: alarm_control_panel.master
+              state: triggered
           sequence:
-            - repeat: # must have a repeat.index for image/icon templates
-                count: 1
+            - service: persistent_notification.create
+              data:
+                title: Alarm Triggered!
+                message: '{{ message }}'
+                notification_id: alarm_triggered
+
+    - repeat:
+        sequence:
+          # create and store security camera snapshot filenames
+          - service: input_text.set_value
+            target:
+              entity_id: "input_text.{{ 'cam1_snapshot' ~ repeat.index }}"
+            data:
+              value: '/alarm_snapshots/cam1_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg'
+
+          - service: input_text.set_value
+            target:
+              entity_id: "input_text.{{ 'cam2_snapshot' ~ repeat.index }}"
+            data:
+              value: '/alarm_snapshots/cam2_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg'
+
+          - service: input_text.set_value
+            target:
+              entity_id: "input_text.{{ 'cam3_snapshot' ~ repeat.index }}"
+            data:
+              value: '/alarm_snapshots/cam3_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg'
+
+          - service: input_text.set_value
+            target:
+              entity_id: "input_text.{{ 'cam4_snapshot' ~ repeat.index }}"
+            data:
+              value: '/alarm_snapshots/cam4_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg'
+
+          # create camera snapshots
+          - service: camera.snapshot
+            target:
+              entity_id: >
+                {% if trigger_entity in ['binary_sensor.kitchen_window_open_alert','binary_sensor.family_room_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel1_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_open','binary_sensor.side_door_lock_intrusion',
+                  'binary_sensor.side_door_lock_keypad_disabled','binary_sensor.side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel2_substream1
+                {% elif trigger_entity in ['binary_sensor.front_door_lock_intrusion','binary_sensor.front_door_lock_keypad_disabled',
+                  'binary_sensor.living_room_window_1_open_alert','binary_sensor.living_room_window_2_open_alert',
+                  'binary_sensor.living_room_window_3_open_alert','binary_sensor.living_room_window_4_open_alert',
+                  'binary_sensor.front_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel4_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_front_window_open_alert','binary_sensor.office_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel5_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_side_window_open_alert','binary_sensor.master_bedroom_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel6_substream1
+                {% elif trigger_entity in ['binary_sensor.laundry_room_window_open_alert','binary_sensor.master_bathroom_window_open_alert']  %}
+                  camera.lorex_nvr_mediaprofile_channel7_substream1
+                {% elif  trigger_entity in ['binary_sensor.back_door_lock_intrusion','binary_sensor.back_door_lock_keypad_disabled',
+                  'binary_sensor.back_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel9_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
+                  'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel11_substream1
+                {% elif trigger_entity == 'binary_sensor.garage_sensor_motion' %}
+                  camera.lorex_nvr_mediaprofile_channel12_substream1
+                {% endif %}
+            data:
+              filename: "/config/www{{ states('input_text.cam1_snapshot' ~ repeat.index) }}"
+
+          - service: camera.snapshot
+            target:
+              entity_id: >
+                {% if trigger_entity in ['binary_sensor.kitchen_window_open_alert','binary_sensor.family_room_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel2_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_open','binary_sensor.side_door_lock_intrusion',
+                  'binary_sensor.side_door_lock_keypad_disabled','binary_sensor.side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel1_substream1
+                {% elif trigger_entity in ['binary_sensor.front_door_lock_intrusion','binary_sensor.front_door_lock_keypad_disabled',
+                  'binary_sensor.living_room_window_1_open_alert','binary_sensor.living_room_window_2_open_alert',
+                  'binary_sensor.living_room_window_3_open_alert','binary_sensor.living_room_window_4_open_alert',
+                  'binary_sensor.front_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel5_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_front_window_open_alert','binary_sensor.office_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel4_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_side_window_open_alert','binary_sensor.master_bedroom_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel7_substream1
+                {% elif trigger_entity in ['binary_sensor.laundry_room_window_open_alert','binary_sensor.master_bathroom_window_open_alert']  %}
+                  camera.lorex_nvr_mediaprofile_channel6_substream1
+                {% elif  trigger_entity in ['binary_sensor.back_door_lock_intrusion','binary_sensor.back_door_lock_keypad_disabled',
+                  'binary_sensor.back_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel10_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
+                  'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel9_substream1
+                {% elif trigger_entity == 'binary_sensor.garage_sensor_motion' %}
+                  camera.lorex_nvr_mediaprofile_channel2_substream1
+                {% endif %}
+            data:
+              filename: "/config/www{{ states('input_text.cam2_snapshot' ~ repeat.index) }}"
+
+          - service: camera.snapshot
+            target:
+              entity_id: >
+                {% if trigger_entity in ['binary_sensor.kitchen_window_open_alert','binary_sensor.family_room_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel5_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_open','binary_sensor.side_door_lock_intrusion',
+                  'binary_sensor.side_door_lock_keypad_disabled','binary_sensor.side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel11_substream1
+                {% elif trigger_entity in ['binary_sensor.front_door_lock_intrusion','binary_sensor.front_door_lock_keypad_disabled',
+                  'binary_sensor.living_room_window_1_open_alert','binary_sensor.living_room_window_2_open_alert',
+                  'binary_sensor.living_room_window_3_open_alert','binary_sensor.living_room_window_4_open_alert',
+                  'binary_sensor.front_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel1_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_front_window_open_alert','binary_sensor.office_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel1_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_side_window_open_alert','binary_sensor.master_bedroom_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel4_substream1
+                {% elif trigger_entity in ['binary_sensor.laundry_room_window_open_alert','binary_sensor.master_bathroom_window_open_alert']  %}
+                  camera.lorex_nvr_mediaprofile_channel10_substream1
+                {% elif  trigger_entity in ['binary_sensor.back_door_lock_intrusion','binary_sensor.back_door_lock_keypad_disabled',
+                  'binary_sensor.back_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel11_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
+                  'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel2_substream1
+                {% elif trigger_entity == 'binary_sensor.garage_sensor_motion' %}
+                  camera.lorex_nvr_mediaprofile_channel11_substream1
+                {% endif %}
+            data:
+              filename: "/config/www{{ states('input_text.cam3_snapshot' ~ repeat.index) }}"
+
+          - service: camera.snapshot
+            target:
+              entity_id: >
+                {% if trigger_entity in ['binary_sensor.kitchen_window_open_alert','binary_sensor.family_room_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel11_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_open','binary_sensor.side_door_lock_intrusion',
+                  'binary_sensor.side_door_lock_keypad_disabled','binary_sensor.side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel3_substream1
+                {% elif trigger_entity in ['binary_sensor.front_door_lock_intrusion','binary_sensor.front_door_lock_keypad_disabled',
+                  'binary_sensor.living_room_window_1_open_alert','binary_sensor.living_room_window_2_open_alert',
+                  'binary_sensor.living_room_window_3_open_alert','binary_sensor.living_room_window_4_open_alert',
+                  'binary_sensor.front_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel3_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_front_window_open_alert','binary_sensor.office_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel6_substream1
+                {% elif trigger_entity in ['binary_sensor.bedroom_side_window_open_alert','binary_sensor.master_bedroom_window_open_alert'] %}
+                  camera.lorex_nvr_mediaprofile_channel1_substream1
+                {% elif trigger_entity in ['binary_sensor.laundry_room_window_open_alert','binary_sensor.master_bathroom_window_open_alert']  %}
+                  camera.lorex_nvr_mediaprofile_channel9_substream1
+                {% elif  trigger_entity in ['binary_sensor.back_door_lock_intrusion','binary_sensor.back_door_lock_keypad_disabled',
+                  'binary_sensor.back_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel7_substream1
+                {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
+                  'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
+                    camera.lorex_nvr_mediaprofile_channel2_substream1
+                {% elif trigger_entity == 'binary_sensor.garage_sensor_motion' %}
+                  camera.lorex_nvr_mediaprofile_channel1_substream1
+                {% endif %}
+            data:
+              filename: "/config/www{{ states('input_text.cam4_snapshot' ~ repeat.index) }}"
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: alarm_control_panel.master
+                    state: pending
                 sequence:
-                  - service: notify.alarm # not an alert entity becasuse of icon/image template
+                  #VERIFY (MainThread) [homeassistant.components.webostv.notify] Icon  not found
+                  - service: notify.mobile
                     data:
-                      title: 'Alarm Pending'
-                      message: '{{ text }}'
+                      title: Alarm Pending
+                      message: '{{ message }}'
                       data:
                         tag: alarm_pending
                         group: Alarm
                         channel: Alert
                         importance: max
                         ttl: 0
-                        timeout: '{{ delay }}'
                         priority: high
+                        persistent: true
+                        sticky: true
                         chronometer: true
                         when: '{{ (now().timestamp() + delay)|int }}'
                         notification_icon: '{{ states.input_boolean.alarm_pending.attributes.icon }}'
@@ -65,33 +225,20 @@
                             action: URI
                             uri: app://com.flir.consumer.flir.lorexcloud
 
-        - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_pending' }}"
-          sequence:
-            - service: notify.mobile # do not send clear_notifications to TVs
-              data:
-                message: clear_notification
-                data:
-                  tag: alarm_pending
-
-        - conditions: "{{ trigger.id == 'triggered' }}"
-          sequence:
-            - variables:
-                title: "{{ 'Tornado Alert!' if type == 'tornado' else 'Burglar Alarm!' }}"
-                message: |
-                  {{ 'Take Cover!' if type == 'tornado' else text }}
-                  Triggered at: {{ time }}
-
-            - service: persistent_notification.create
-              data:
-                title: '{{ title }}'
-                message: '{{ message }}'
-                notification_id: alarm_triggered
-
-            - repeat:
-                sequence:
-                  - service: notify.alarm # not an alert entity becasuse of icon/image template
+                  - service: notify.tv #VERIFY
                     data:
-                      title: '{{ title }}'
+                      title: Alarm Pending
+                      message: '{{ message }}'
+
+              - conditions:
+                  - condition: state
+                    entity_id: alarm_control_panel.master
+                    state: triggered
+                sequence:
+                  #VERIFY (MainThread) [homeassistant.components.webostv.notify] Icon  not found
+                  - service: notify.mobile
+                    data:
+                      title: Alarm Triggered
                       message: '{{ message }}'
                       data:
                         tag: 'alarm_triggered{{ repeat.index }}'
@@ -101,6 +248,7 @@
                         ttl: 0
                         priority: high
                         persistent: true
+                        sticky: true
                         notification_icon: '{{ states.input_boolean.alarm_triggered.attributes.icon }}'
                         icon_url: !secret ALARM_ICON #IMAGE tornado vs burglar
                         image: !secret ALARM_IMAGE
@@ -117,18 +265,118 @@
                             action: URI
                             uri: app://com.flir.consumer.flir.lorexcloud
 
-                  - wait_template: "{{ not is_state('alarm_control_panel.master','triggered') }}"
-                    timeout: 60 # delay between notifications
-                until: "{{ not is_state('alarm_control_panel.master','triggered') or repeat.index == 3 }}"
+                  - service: notify.tv #VERIFY
+                    data:
+                      title: Alarm Triggered
+                      message: '{{ message }}'
+
+                  - choose:
+                      - conditions:
+                          - condition: state
+                            entity_id: input_boolean.alarm_emails
+                            state: 'on'
+                        sequence: # send email notification, send to work also if at work
+                          - service: "{{ 'notify.jason_email_work' if is_state('person.jason','Work') else 'notify.jason_email' }}"
+                            data:
+                              title: 'House Alarm Alert!'
+                              message: |
+                                The house alarm was triggered by the {{ state_attr(trigger_entity,'friendly_name') }} at {{ now().strftime('%-I:%M %p') }}.
+
+                                Jason is {{ 'home' if is_state('binary_sensor.jason_home','on')
+                                    else ('Away' if is_state('person.jason','not_home') else 'at ' ~ states('person.jason')|title) }}.
+                                Sheri is {{ 'home' if is_state('binary_sensor.sheri_home','on')
+                                    else ('Away' if is_state('person.sheri','not_home') else 'at ' ~ states('person.sheri')|title) }}.
+                                {% if is_state('input_boolean.guest_home','on') %} There is a guest at home. {% endif %}
+                              data:
+                                images:
+                                  - "/config/www{{ states('input_text.cam1_snapshot' ~ repeat.index) }}"
+                                  - "/config/www{{ states('input_text.cam2_snapshot' ~ repeat.index) }}"
+                                  - "/config/www{{ states('input_text.cam3_snapshot' ~ repeat.index) }}"
+                                  - "/config/www{{ states('input_text.cam4_snapshot' ~ repeat.index) }}"
+
+                  - service: persistent_notification.create
+                    data:
+                      title: 'Alarm Snapshots!'
+                      notification_id: 'alarm_snapshots{{ repeat.index }}'
+                      message: |
+                        Snapshot Time: {{ now().strftime('%a %-I:%M %p') }}
+
+                        ![image](/local{{ states('input_text.cam1_snapshot' ~ repeat.index) }})
+
+                        ![image](/local{{ states('input_text.cam2_snapshot' ~ repeat.index) }})
+
+                        ![image](/local{{ states('input_text.cam3_snapshot' ~ repeat.index) }})
+
+                        ![image](/local{{ states('input_text.cam4_snapshot' ~ repeat.index) }})
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: alarm_control_panel.master
+                    state: triggered
+                sequence:
+                  - delay: 60 # seconds between alerts
+        until:
+          - condition: template
+            value_template: "{{ not is_state('alarm_control_panel.master','triggered') or repeat.index == 3 }}"
+
+###############################################################################
+## Alarm - Clear Notifications
+###############################################################################
+- id: alarm_clear_notifications
+  alias: '[Alarm] Clear Notifications'
+  description: 'Clear alarm notifications.'
+  mode: queued
+  trigger:
+    - platform: state
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      to: 'off'
+      from: 'on'
+  action:
+    - choose:
+        - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_pending' }}"
+          sequence:
+            - service: notify.mobile
+              data:
+                message: clear_notification
+                data:
+                  tag: alarm_pending
 
         - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_triggered' }}"
           sequence:
             - repeat:
                 count: 3
                 sequence:
-                  - delay: 1 # throttle notifications
-                  - service: notify.mobile # do not send clear_notifications to TVs
-                    data:
-                      message: clear_notification
-                      data:
-                        tag: 'alarm_triggered{{ repeat.index }}'
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            alias: 'Snapshot was created (so notification was also sent)'
+                            value_template: "{{ not is_state('input_text.cam1_snapshot' ~ repeat.index,'cleared') }}"
+                        sequence:
+                          - delay: 1 # throttle notifications
+
+                          - service: notify.mobile
+                            data:
+                              message: clear_notification
+                              data:
+                                tag: 'alarm_triggered{{ repeat.index }}'
+
+    - service: input_text.set_value
+      target:
+        entity_id:
+          - input_text.cam1_snapshot1
+          - input_text.cam1_snapshot2
+          - input_text.cam1_snapshot3
+          - input_text.cam2_snapshot1
+          - input_text.cam2_snapshot2
+          - input_text.cam2_snapshot3
+          - input_text.cam3_snapshot1
+          - input_text.cam3_snapshot2
+          - input_text.cam3_snapshot3
+          - input_text.cam4_snapshot1
+          - input_text.cam4_snapshot2
+          - input_text.cam4_snapshot3
+      data:
+        value: cleared

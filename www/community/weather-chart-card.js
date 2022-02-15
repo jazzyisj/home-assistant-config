@@ -15045,6 +15045,24 @@
           <div class="chart-container">
             <canvas id="forecastChart"></canvas>
           </div>
+          <div
+            class="conditions"
+            @click="${(e) => this.showMoreInfo(config.entity)}"
+          >
+            ${forecast.map((item) => p`
+              ${config.icons ?
+                p`
+                  <img class="icon"
+                    src="${this.getWeatherIcon(item.condition)}"
+                    alt=""
+                  >
+                `:
+                p`
+                  <ha-icon icon="${this.getWeatherIcon(item.condition)}"></ha-icon>
+                `
+              }
+            `)}
+          </div>
         </div>
       </ha-card>
     `;

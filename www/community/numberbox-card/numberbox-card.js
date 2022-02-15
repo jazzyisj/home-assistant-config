@@ -1,6 +1,6 @@
 ((LitElement) => {
 
-console.info('NUMBERBOX_CARD 3.3');
+console.info('NUMBERBOX_CARD 3.5');
 const html = LitElement.prototype.html;
 const css = LitElement.prototype.css;
 class NumberBox extends LitElement {
@@ -33,6 +33,9 @@ render() {
 	if(this.config.max === undefined){ this.config.max=this.stateObj.attributes.max;}
 	if(this.config.step === undefined){ this.config.step=this.stateObj.attributes.step;}
 	if(!this.config.service){this.config.service="set_value";}
+	if(this.config.service.split('.').length < 2){
+		this.config.service=this.config.entity.split('.')[0]+'.'+this.config.service;
+	}
 	if(!this.config.param){this.config.param="value";}
 	if(!this.config.speed){ this.config.speed=0;}
 
@@ -121,11 +124,10 @@ setNumb(c){
 }
 
 publishNum(dhis){
-	const v=dhis.pending;
+	const s=dhis.config.service.split('.');
+	const v={entity_id: dhis.config.entity, [dhis.config.param]: dhis.pending};
 	dhis.pending=false;
-	let d={entity_id: dhis.stateObj.entity_id};
-	d[dhis.config.param]=v;
-	dhis._hass.callService(dhis.stateObj.entity_id.split('.')[0], dhis.config.service, d);
+	dhis._hass.callService(s[0], s[1], v);
 }
 
 niceNum(){
@@ -138,8 +140,8 @@ niceNum(){
 			v=Number(this.config.initial);
 		}
 	}	
-	const stp=Number(this.config.step) || 1;
-	if( Math.round(stp) != stp ){ fix=stp.toString().split(".")[1].length || 1;}
+	let stp=Number(this.config.step) || 1;
+	if( Math.round(stp) != stp ){ fix=stp.toString().split(".")[1].length || 1; stp=fix;}
 	fix = v.toFixed(fix);
 	const u=this.config.unit;
 	if( u=="time" ){
@@ -151,6 +153,10 @@ niceNum(){
 			(fix%60).toString().padStart(2,'0')
 			}`
 	}
+	fix = new Intl.NumberFormat(
+			this._hass.language,
+			{maximumFractionDigits: stp}
+		).format(Number(fix));
 	return u===false ? fix: html`${fix}<span class="cur-unit" >${u}</span>`;
 }
 
@@ -453,4 +459,3 @@ window.customCards.push({
 	preview: false,
 	description: 'Replace number/input_number sliders with plus and minus buttons'
 });
-

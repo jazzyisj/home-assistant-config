@@ -1,0 +1,79 @@
+###############################################################################
+## Alarm - Doorbell #TODO
+#IDEA doorbell frenks smart doorbell https://frenck.dev/diy-smart-doorbell-for-just-2-dollar/
+# https://community.home-assistant.io/t/doorbell-button-shelly-uni-config/384499
+# https://ktekcanada.ca/products/shelly-uni?_pos=1&_sid=8952e3f10&_ss=r
+# https://community.home-assistant.io/t/contact-sensor-for-doorbell/341167/14
+###############################################################################
+- id: alarm_doorbell
+  alias: '[Alarm] Doorbell'
+  description: 'Cast front porch camera, announcement.'
+  mode: queued
+  trigger:
+    - platform: state
+      entity_id: input_button.doorbell
+  condition: '{{ now() - this.attributes.last_triggered > timedelta(seconds=30) }}'
+  action:
+    - service: script.tts_play
+      data:
+        message: 'Some ugly fucker is ringing the doorbell!'
+        media_player: media_player.living_room_speaker
+
+    - service: cast.show_lovelace_view
+      data:
+        dashboard_path: lovelace-cast
+        entity_id: media_player.dining_room_hub
+        view_path: front_door
+
+    - service: browser_mod.popup
+      data:
+        deviceID: browser_kiosk_internal
+        large: true
+        title: 'Front Door'
+        hide_header: true
+        card: !include /config/lovelace/card/camera/front_door_frigate.yaml
+
+    - service: input_text.set_value
+      target:
+        entity_id: input_text.cam4_snapshot1
+      data:
+        value: '/alarm_snapshots/cam4_{{ now ().year }}_{{ now ().month }}_{{ now ().day }}_{{ now ().hour }}_{{ now ().minute }}.jpg'
+
+    - service: camera.snapshot
+      target:
+        entity_id: camera.lorex_nvr_mediaprofile_channel4_substream1
+      data:
+        filename: "/config/www{{ states('input_text.cam4_snapshot1') }}"
+
+    - service: notify.jason #TEMP
+      data:
+        message: Front Doorbell
+        data:
+          tag: alarm_pending
+          group: Alarm
+          channel: Alert
+          importance: max
+          ttl: 0
+          priority: high
+          notification_icon: mdi:doorbell
+          icon_url: !secret ALARM_ICON #IMAGE
+          image: "/local{{ states('input_text.cam4_snapshot1') }}"
+          ledColor: !secret NOTIFY_COLOR
+          color: !secret NOTIFY_COLOR
+          vibrationPattern: !secret ALERT_VIBRATION
+          clickAction: /lovelace-mobile/alarm
+          actions:
+            - title: 'Alarm'
+              action: URI
+              uri: app://com.thanksmister.iot.mqtt.alarmpanel
+
+            - title: 'Cameras'
+              action: URI
+              uri: app://com.flir.consumer.flir.lorexcloud
+
+            - title: 'Unlock'
+              action: unlock_front_door
+
+    - delay: 120
+
+    - service: browser_mod.close_popup

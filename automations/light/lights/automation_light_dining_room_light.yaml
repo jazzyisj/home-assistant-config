@@ -1,8 +1,50 @@
 ###############################################################################
-## Light - Dining Room Light Flux Control
+## Light - Dining Room Light Flux Off
 ###############################################################################
-- id: light_dining_room_light_flux_control
-  alias: '[Light] Dining Room Light Flux Control'
+- id: light_dining_room_light_flux_off
+  alias: '[Light] Dining Room Light Flux Off'
+  description: 'Turn light flux off.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id:
+        - alert.work_commute_jason
+        - alert.work_commute_sheri
+        - alert.late_for_work_jason
+        - alert.late_for_work_sheri
+      to: 'on'
+
+    - platform: state
+      entity_id: binary_sensor.work_commute_active
+      to: 'on'
+      from: 'off'
+
+    - platform: state
+      id: switch
+      entity_id: input_boolean.media_color_light_sync
+      to: 'on'
+      from: 'off'
+
+    - platform: state
+      entity_id:
+        - input_boolean.chill_scene
+        - input_boolean.company_scene
+      to: 'on'
+      from: 'off'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.light_flux_dining_room
+
+###############################################################################
+## Light - Dining Room Light Flux On
+###############################################################################
+- id: light_dining_room_light_flux_on
+  alias: '[Light] Dining Room Light Flux On'
   description: 'Control light flux state.'
   mode: restart
   trigger:
@@ -66,6 +108,7 @@
 - id: light_dining_room_light_nobody_home
   alias: '[Light] Dining Room Light Nobody Home'
   description: 'Turn light on when nobody is home.'
+  max_exceeded: silent
   variables:
     current: "{{ state_attr('light.dining_room_rgb_light','brightness')|int(0) }}"
     brightness: >
@@ -73,6 +116,14 @@
         {{ 30 if current > 30 or current == 0 else current }}
       {% else %}
         {{ 90 if current < 90 else current }}
+      {% endif %}
+    rgb_color: >
+      {% if is_state('input_select.occupancy_mode','Night') %}
+        {{ state_attr('sensor.flux_color_dining_room','rgb_color')
+            if states.sensor.flux_color_dining_room.attributes.rgb_color != none else [255, 101, 0] }}
+      {% else %}
+        {{ state_attr('sensor.flux_color_dining_room','rgb_color')
+            if states.sensor.flux_color_dining_room.attributes.rgb_color != none else [255, 180, 60] }}
       {% endif %}
   trigger:
     - platform: state
@@ -132,49 +183,7 @@
         entity_id: light.dining_room_rgb_light
       data:
         brightness: '{{ brightness }}'
-        transition: 5
-
-###############################################################################
-## Light - Dining Room Night Light
-###############################################################################
-- id: light_dining_room_night_light
-  alias: '[Light] Dining Room Night Light'
-  description: 'Turn on light when night mode turns on.'
-  variables:
-    current: "{{ state_attr('light.dining_room_rgb_light','brightness')|int(0) }}"
-    brightness: '{{ 50 if 50 < current or current == 0 else current }}'
-  trigger:
-    - platform: state
-      id: occupancy
-      entity_id: input_select.occupancy_mode
-      to: Night
-  condition:
-    - condition: state
-      entity_id:
-        - input_boolean.light_automation
-        - input_boolean.presence_automation
-        - binary_sensor.nighttime_illuminance_lights
-      state: 'on'
-
-    - condition: state
-      entity_id:
-        - input_boolean.alarm_triggered
-        - binary_sensor.light_scene_active
-      state: 'off'
-
-    - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
-      value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
-            if trigger.id in ['away','night'] else true }}
-  action:
-    - service: light.turn_on
-      target:
-        entity_id: light.dining_room_rgb_light
-      data:
-        brightness: '{{ brightness }}'
-        transition: 5
+        rgb_color: '{{ rgb_color }}'
 
 ###############################################################################
 ## Light - Dining Room Light Auto On
@@ -186,10 +195,17 @@
   variables:
     current: "{{ state_attr('light.dining_room_rgb_light','brightness')|int(0) }}"
     brightness: >
-      {% if is_state('binary_sensor.quiet_time','on') %}
-        {{ 175 if current > 175 else current }}
+      {% if is_state('input_select.occupancy_mode','Night') %} 50
+      {% elif is_state('binary_sensor.quiet_time','on') %} {{ 100 if current > 100 else current }}
+      {% else %} {{ 150 }}
+      {% endif %}
+    rgb_color: >
+      {% if is_state('input_select.occupancy_mode','Night') %}
+        {{ state_attr('sensor.flux_color_dining_room','rgb_color')
+            if states.sensor.flux_color_dining_room.attributes.rgb_color != none else [255, 101, 0] }}
       {% else %}
-        {{ 255 }}
+        {{ state_attr('sensor.flux_color_dining_room','rgb_color')
+            if states.sensor.flux_color_dining_room.attributes.rgb_color != none else [255, 180, 60] }}
       {% endif %}
   trigger:
     - platform: state
@@ -216,6 +232,7 @@
       to:
         - Home
         - Guest
+        - Night
       from:
         - Night
         - Away
@@ -283,7 +300,7 @@
         entity_id: light.dining_room_rgb_light
       data:
         brightness: '{{ brightness }}'
-        transition: 5
+        rgb_color: '{{ rgb_color }}'
 
 ###############################################################################
 ## Light - Dining Room Light Auto Off
@@ -368,5 +385,3 @@
     - service: light.turn_off
       target:
         entity_id: light.dining_room_rgb_light
-      data:
-        transition: 5
