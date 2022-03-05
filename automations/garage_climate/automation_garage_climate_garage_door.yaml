@@ -1,12 +1,9 @@
 ###############################################################################
 ## Garage Climate - Door Opened Heat On
-## - delay to allow door open scripts to run and allow delay
-## - don't run if door closed after delay
 ###############################################################################
-- id: garage_climate_door_opened_heat_on
-  alias: '[Garage Climate] Door Opened Heat On'
+- id: garage_climate_garage_door_opened_heat_on
+  alias: '[Garage Climate] Garage Door Opened Heat On'
   description: 'Turn heat back off until garage door closed.'
-  initial_state: false #GARAGE_HVAC
   trigger:
     - platform: state
       entity_id: binary_sensor.garage_door_open
@@ -19,63 +16,44 @@
       entity_id: input_boolean.garage_climate_automation
       state: 'on'
 
-    - condition: or
-      conditions:
-        - condition: state
-          entity_id: input_boolean.garage_heat
-          state: 'on'
-
-        - condition: state
-          entity_id: input_boolean.garage_freeze_protection
-          state: 'on'
+    - condition: state
+      entity_id: switch.garage_heat
+      state: 'on'
   action:
-    # turn off garage heat, do not turn off boolean switch here or heat won't turn back on when door closes
-    - service: script.garage_climate_off
+    - service: switch.turn_off
+      target:
+        entity_id: switch.garage_heat
 
     - service: script.tts_play
       data:
-        message: 'The garage heat has been turned off because the door has opened.'
+        message: 'The garage heat has been turned off because the garage door has been opened.'
 
-    # wait 15 min, if door doesn't close quit - heat stays off
     - wait_template: "{{ is_state('binary_sensor.garage_door_open','off') }}"
       timeout:
         minutes: 15
       continue_on_timeout: false
 
-    - service: script.garage_climate_on
-
-    # allow temperature change to register
-    # heat may have been turned off/adjusted in hassio while door was open
-    - wait_template: >
-        {% if is_state('climate.garage_thermostat','heat') %}
-          {% if is_state('input_boolean.garage_heat','on') %}
-            {{ true if '%0.1f'|format(state_attr('climate.garage_thermostat','temperature')|float('unknown')) ==  '%0.1f'|format(states('input_number.garage_heat_temperature')|float) }}
-          {% else %}{
-            {{ true if '%0.1f'|format(state_attr('climate.garage_thermostat','temperature')|float('unknown')) ==  '%0.1f'|format(states('input_number.garage_freeze_temperature')|float) }}
-          {% endif %}
-        {% else %} true
-        {% endif %}
-      timeout:
-        minutes: 5
-      continue_on_timeout: false
+    - service: switch.turn_on
+      target:
+        entity_id: switch.garage_heat
 
     - service: script.tts_play
       data:
         message: |
           The garage heat has been turned back on.
-          The thermostat is set to {{ state_attr('climate.garage_thermostat','temperature') }} degrees.
-          The current garage temperature is {{ state_attr('climate.garage_thermostat','current_temperature') }} degrees.
+          The thermostat is set to {{ states('input_number.garage_heat_temperature') }} degrees.
+          The current garage temperature is {{ states('sensor.garage_sensor_air_temperature') }} degrees.
 
 ###############################################################################
 ## Garage Climate - Heat On Door Open
 ###############################################################################
-- id: garage_climate_heat_on_door_open
-  alias: '[Garage Climate] Heat On Door Open'
+- id: garage_climate_heat_on_garage_door_open
+  alias: '[Garage Climate] Heat On Garage Door Open'
   description: 'Turn garage heat back off until garage door closed.'
   trigger:
-    - entity_id: climate.garage_thermostat
+    - entity_id: switch.garage_heat
       platform: state
-      to: heat
+      to: 'on'
   condition:
     - condition: state
       entity_id:
@@ -83,17 +61,19 @@
         - binary_sensor.garage_door_open
       state: 'on'
   action:
-    # turn off garage heat, do not turn off boolean switch here or heat won't turn on when door closes
-    - service: script.garage_climate_off
+    - service: switch.turn_off
+      target:
+        entity_id: switch.garage_heat
 
     - service: script.tts_play
       data:
-        message: 'The heat will turn on when the garage door closes.'
+        message: 'The garage heat has been turned off. The garage heat will turn back on when the garage door closes.'
 
-    # wait 15 min for door to close to try again, if door still isn't closed cancel
     - wait_template: "{{ is_state('binary_sensor.garage_door_open','off') }}"
       timeout:
         minutes: 15
       continue_on_timeout: false
 
-    - service: script.garage_climate_on
+    - service: switch.turn_on
+      target:
+        entity_id: switch.garage_heat

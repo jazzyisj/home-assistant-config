@@ -10,24 +10,23 @@ media_stop:
       description: 'Media type to stop.'
       example: 'radio'
   variables:
-    mtype: "{{ media_type|default('all') }}"
     media_types: "{{ state_attr('sensor.media_types','media_types')|default([]) }}"
-    alarm_players: "{{ state_attr('sensor.alarm_clock_media_player','entity_id')|default([]) }}"
-    media_players: > #TV_VOL
-      {% if mtype in media_types %}
-        {% set media_player = states('sensor.' ~ mtype ~ '_media_player') %}
+    media_type: "{{ media_type|default('all') }}"
+    media_player: "{{ states('sensor.' ~ media_type ~ '_media_player') }}"
+    media_players: > #TV
+      {% if media_type in media_types %}
+        {% set media_player = states('sensor.' ~ media_type ~ '_media_player') %}
         {% set active_players = namespace(entity_id=[]) %}
         {% for type in media_types if type != media_type %}
           {% if is_state('binary_sensor.' ~ type,'on') %}
             {% set active_players.entity_id = active_players.entity_id + state_attr('sensor.' ~ type ~ '_media_player','entity_id') %}
           {% endif %}
         {% endfor %}
-
         {% if media_player|lower not in ['','unknown','unavailable'] %}
           {% if active_players.entity_id == [media_player] %} []
           {% else %}
             {{ expand(state_attr('sensor.' ~ media_player.split('.')[1],'entity_id'))
-                |rejectattr('entity_id','in',alarm_players)
+                |rejectattr('entity_id','in',state_attr('sensor.alarm_clock_media_player','entity_id')|default([]))
                 |rejectattr('entity_id','in',active_players.entity_id)
                 |rejectattr('attributes.device_class','eq','tv')
                 |map(attribute='entity_id')|list
@@ -43,7 +42,7 @@ media_stop:
       {% endif %}
   sequence:
     - choose: # if all media turn off failed booleans
-        - conditions: "{{ mtype == 'all' }}"
+        - conditions: "{{ media_type == 'all' }}"
           sequence:
             - service: input_boolean.turn_off
               entity_id: group.media_failed
@@ -52,11 +51,11 @@ media_stop:
       target:
         entity_id: >
           {% set items = namespace(value=[]) %}
-          {% if mtype == 'all' %}
+          {% if media_type == 'all' %}
             {% for item in media_types %}
               {% set items.value = items.value + ['input_boolean.resume_' ~ media_types[loop.index0]] %}
             {% endfor %}
-          {% else %} {% set items.value = 'input_boolean.resume_' ~ mtype %}
+          {% else %} {% set items.value = 'input_boolean.resume_' ~ media_type %}
           {% endif %}
           {{ items.value }}
 
@@ -64,15 +63,47 @@ media_stop:
       target:
         entity_id: >
           {% set items = namespace(value=[]) %}
-          {% if mtype == 'all' %}
+          {% if media_type == 'all' %}
             {% for item in media_types %}
               {% set items.value = items.value + ['input_text.active_' ~ media_types[loop.index0] ~ '_media_player'] %}
             {% endfor %}
-          {% else %} {% set items.value = 'input_text.active_' ~ mtype ~ '_media_player' %}
+          {% else %} {% set items.value = 'input_text.active_' ~ media_type ~ '_media_player' %}
           {% endif %}
           {{ items.value }}
       data:
         value: 'off'
+
+    - choose:
+        - conditions:
+            - condition: template
+              alias: 'Target media players are an active tts clock media player'
+              value_template: >
+                {% set speaker_groups = state_attr('group.group_media_players','entity_id') %}
+                {% if is_state('binary_sensor.tts','on') %}
+                  {% set tts_player = states('sensor.tts_media_player') %}
+                  {% set tts_players = state_attr('sensor.tts_media_player','entity_id') %}
+                  {% set found = namespace(value=0) %}
+                  {% if media_player in speaker_groups %}
+                    {% for pitem in media_players %}
+                      {% if tts_player in speaker_groups %}
+                        {% for item in tts_players %}{% if item == pitem %}{% set found.value = 1 %}{% endif %}{% endfor %}
+                      {% elif pitem == tts_player %}
+                        {% set found.value = 1 %}
+                      {% endif %}
+                    {% endfor %}
+                  {% else %}
+                    {% if tts_player in speaker_groups %}
+                      {% for item in tts_players %}{% if item == pitem %}{% set found.value = 1 %}{% endif %}{% endfor %}
+                    {% elif item == media_player %}
+                      {% set found.value = 1 %}
+                    {% endif %}
+                  {% endif %}
+                  {{ found.value == 0 }}
+                {% else %} false
+                {% endif %}
+          sequence:
+            - wait_template: "{{ is_state('binary_sensor.tts','off') }}"
+              timeout: 120
 
     - choose:
         - conditions: '{{ media_players|count > 0 }}'
@@ -82,7 +113,7 @@ media_stop:
                 media_players: '{{ media_players }}'
 
     - choose: #RADIO until streaming radio media player
-        - conditions: "{{ mtype == 'radio' or mtype == 'all' }}"
+        - conditions: "{{ media_type == 'radio' or media_type == 'all' }}"
           sequence:
             - service: input_boolean.turn_off
               target:
@@ -90,7 +121,7 @@ media_stop:
 
     - choose: #YOUTUBE ytube media player not always turning off
         - conditions: >
-            {{ (mtype == 'youtube' or mtype == 'all')
+            {{ (media_type == 'youtube' or media_type == 'all')
                   and not is_state('media_player.ytube_music_player','off') }}
           sequence:
             - service: media_player.turn_off
@@ -105,7 +136,7 @@ media_stop:
             - service: script.media_players_set_volumes
               data:
                 media_players: '{{ media_players }}'
-                source: "{{ 'reset' if mtype == 'all' else mtype }}"
+                source: "{{ 'reset' if media_type == 'all' else media_type }}"
 
     #NOTE browser, vlc stay idle
     - wait_template: "{{ expand(media_players)|selectattr('state','in',['idle','playing','paused'])|list|count == 0 }}"

@@ -16,6 +16,9 @@ spotify_play:
     playlist:
       description: 'Spotify playlist to play.'
       example: 'Mega Hit Mix'
+    search:
+      description: 'Spotify search to play.'
+      example: 'Billy Joel'
     repeat:
       description: 'Repeat playlist.'
       example: 'false'
@@ -30,30 +33,45 @@ spotify_play:
       example: 'playlist'
   variables:
     account: "{{ account|default('hassio') }}"
+    search: '{{ search|default(none) }}'
     repeat: "{{ repeat|default(is_state('input_boolean.spotify_repeat','on')) }}"
     random: "{{ random|default(is_state('input_boolean.spotify_random','on')) }}"
     shuffle: "{{ shuffle|default(is_state('input_boolean.spotify_shuffle','on')) }}"
     resume: '{{ resume|default(false) }}'
-    spaccount: > #{{ account|default('hassio') }}
+    spaccount: >
       {% if account == 'jason' %} jazzyisj
       {% elif account == 'sheri' %} sherigagnon
       {% else %} hassio
       {% endif %}
     device: "{{ device|default(states('input_select.spotify_' ~ account ~ '_media_player')) }}"
-    plist: >
-      {% if account == 'hassio' %}{% set plist = states('input_select.spotify_hassio_playlist') %}
-      {% else %}{% set plist = states('input_select.spotify_' ~ account ~ '_playlist') %}
-      {% endif %}
-      {{ playlist|default(plist) }}
-    uri: >
-      {% set plist_sensor = 'sensor.playlists_sensor' if account == 'hassio'
-          else 'sensor.playlists_sensor_' ~ account %}
-      {% for item in state_attr((plist_sensor),'playlists') -%}
-        {% if item.name == plist %}
-          {{ item.uri }}
-        {% endif %}
-      {% endfor %}
   sequence:
+    - variables: #VAR variables in sequence to override field
+        playlist:
+          "{{ playlist|default(states('input_select.spotify_' ~ account ~ '_playlist')) }}"
+          # {% set playlist = playlist|default(states('input_select.spotify_' ~ account ~ '_playlist')) %}
+          # {% if playlist in state_attr('sensor.spotify_categories','category_names') %} category
+          # {% else %} {{ playlist }}
+          # {% endif %}
+        category: >
+          {% set category = namespace(value=none) %}
+          {% set categories = state_attr('sensor.spotify_categories','categories') %}
+          {% for item in categories %}
+            {% if item.name == states('input_select.spotify_' ~ account ~ '_playlist') %}
+              {% set category.value = item.category %}
+            {% endif %}
+          {% endfor %}
+          {{ category.value }}
+        uri: >
+          {% if category == none %}
+            {% set playlists = state_attr('sensor.playlists_sensor' if account == 'hassio'
+                else 'sensor.playlists_sensor_' ~ account,'playlists') %}
+            {% for item in playlists %}
+              {% if item.name == playlist %}
+                {{ item.uri }}
+              {% endif %}
+            {% endfor %}
+          {% else %} {{ none }}
+          {% endif %}
     - choose:
         # playlist change, alarm clock may have changed playlist
         - conditions: "{{ resume in ['playlist','alarm_clock'] }}"
@@ -62,7 +80,7 @@ spotify_play:
               data:
                 account: '{{ spaccount }}'
                 device_name: '{{ device }}'
-                uri: '{{ uri }}'
+                "{{ iif(category != none,'category','uri') }}": '{{ iif(category != none,category,uri) }}'
                 random_song: '{{ random }}'
                 shuffle: '{{ shuffle }}'
                 ignore_fully_played: true
@@ -77,6 +95,26 @@ spotify_play:
                 shuffle: '{{ shuffle }}'
                 ignore_fully_played: true
                 force_playback: true
+
+        - conditions: '{{ category != none }}'
+          sequence:
+            - service: spotcast.start
+              data:
+                account: '{{ spaccount }}'
+                device_name: '{{ device }}'
+                category: '{{ category }}'
+                limit: 50
+
+        - conditions: '{{ search != none }}'
+          sequence:
+            - service: spotcast.start
+              data:
+                account: '{{ spaccount }}'
+                device_name: '{{ device }}'
+                search: '{{ search }}'
+                shuffle: '{{ shuffle }}'
+                ignore_fully_played: true
+                force_playback: true
       default:
         - service: spotcast.start
           data:
@@ -84,7 +122,7 @@ spotify_play:
             device_name: '{{ device }}'
             uri: '{{ uri }}'
             random_song: '{{ random }}'
-            # repeat: '{{ repeat }}' #ISSUE - 'Invalid state' #WARNING (SyncWorker_29) [spotipy.client] Invalid state
+            repeat: "{{ 'context' if repeat else 'off' }}" # (track, context, off)
             shuffle: '{{ shuffle }}'
-            ignore_fully_played: true
+            ignore_fully_played: true # podcast playlists
             force_playback: true

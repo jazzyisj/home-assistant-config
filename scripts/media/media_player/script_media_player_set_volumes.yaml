@@ -28,15 +28,17 @@ media_players_set_volumes:
       example: '[media_player.dining_room_hub, media_player.bedroom_hub]'
   variables:
     source: "{{ source|default('reset') }}"
-    media_tts: "{{ source[-4:] == '_tts' }}"
-    source_off: "{{ media_tts or source in ['alarm_clock_off','phone_off','tts_off'] }}"
     media_type: '{{ media_type|default(none) }}'
     media_types: "{{ state_attr('sensor.media_types','media_types') }}"
-    players: > #TV_VOL - reject tvs - no volume_level attribute
-      {% set media_players = media_players|default(state_attr('group.single_media_players','entity_id')) %}
-      {% set media_players = expand(media_players)|rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list %}
-      {{ media_players }}
+    media_tts: "{{ source[-4:] == '_tts' }}"
+    source_off: "{{ media_tts or source in ['alarm_clock_off','phone_off','tts_off'] }}"
   sequence:
+    - variables: #VAR variables in sequence to override field
+        media_players: > #TV - reject tvs - no volume_level attribute
+          {% set media_players = media_players|default(state_attr('group.single_media_players','entity_id')) %}
+          {% set media_players = expand(media_players)|rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list %}
+          {{ media_players }}
+
     - condition: state # do not run if system is muted (kills mute)
       entity_id: switch.system_mute
       state: 'off'
@@ -52,27 +54,39 @@ media_players_set_volumes:
             - service: script.media_players_save_volumes
               data:
                 source: phone
-                media_players: '{{ players }}'
+                media_players: '{{ media_players }}'
+
+        #TODO if tts is on and source not tts save "source" tts?
+
+        # - conditions: "{{ source == 'phone_all' and is_state('binary_sensor.tts','on') }}"
+        #   sequence:
+        #     - service: script.media_players_save_volumes
+        #       data:
+        #         source: phone_tts
+        #         media_players: '{{ media_players }}'
 
         - conditions: "{{ source in ['phone_all','tts_all'] }}"
           sequence:
             - service: script.media_players_save_volumes
               data:
                 source: '{{ source[0:-4] }}' # strip '_all'
-                media_players: '{{ players }}'
+                media_players: '{{ media_players }}'
 
     - repeat:
         while:
           - condition: template
-            value_template: '{{ repeat.index <= players|count }}'
+            value_template: '{{ repeat.index <= media_players|count }}'
         sequence:
           - variables:
-              player: '{{ players[repeat.index-1] }}'
+              player: '{{ media_players[repeat.index-1] }}'
               player_name: "{{ player.split('.')[1] }}"
               source_volume: >
-                {% if media_tts %}{{ states('input_number.' ~ player_name ~ '_tts')|float(-1) }}
-                {% elif source_off %}{{ states('input_number.' ~ player_name ~ '_' ~ source[0:-4])|float(-1) }}
-                {% else %} -1
+                {% if media_tts %}
+                  {{ states('input_number.' ~ player_name ~ '_tts')|float(-1) }}
+                {% elif source_off %}
+                  {{ states('input_number.' ~ player_name ~ '_' ~ source[0:-4])|float(-1) }}
+                {% else %}
+                  -1
                 {% endif %}
           - choose:
               - conditions:

@@ -34,7 +34,7 @@ class CustomFanPercentRow extends Polymer.Element {
 						<div class='horizontal justified layout' on-click="stopPropagation">
 							<button
 								class='percentage'
-								style='[[_leftColor]];min-width:[[_width]];max-width:[[_width]];height:[[_height]]'
+								style='[[_leftColor]];min-width:[[_width]];max-width:[[_width]];height:[[_height]];[[_hideLeft]]'
 								toggles name="[[_leftName]]"
 								on-click='setPercentage'
 								disabled='[[_leftState]]'>[[_leftText]]</button>
@@ -52,7 +52,7 @@ class CustomFanPercentRow extends Polymer.Element {
 								disabled='[[_midRightState]]'>[[_midRightText]]</button>
 							<button
 								class='percentage'
-								style='[[_rightColor]];min-width:[[_width]];max-width:[[_width]];height:[[_height]]'
+								style='[[_rightColor]];min-width:[[_width]];max-width:[[_width]];height:[[_height]];[[_hideRight]]'
 								toggles name="[[_rightName]]"
 								on-click='setPercentage'
 								disabled='[[_rightState]]'>[[_rightText]]</button>
@@ -87,8 +87,10 @@ class CustomFanPercentRow extends Polymer.Element {
 				_midLeftName: String,
 				_midRightName: String,
 				_rightName: String,
+				_hideLeft: String,
 				_hideMidLeft: String,
 				_hideMidRight: String,
+				_hideRight: String,
 				_leftState: Boolean,
 				_midLeftState: Boolean,
 				_midRightState: Boolean,
@@ -105,6 +107,7 @@ class CustomFanPercentRow extends Polymer.Element {
 			customSetpoints: false,
 			reverseButtons: false,
 			isTwoSpeedFan: false,
+			hideOff: false,
 			sendStateWithSpeed: false,
 			allowDisablingButtons: true,
 			offPercentage: 0,
@@ -134,6 +137,7 @@ class CustomFanPercentRow extends Polymer.Element {
 		const custSetpoint = config.customSetpoints;
 		const revButtons = config.reverseButtons;
 		const twoSpdFan = config.isTwoSpeedFan;
+		const hide_Off = config.hideOff;
 		const sendStateWithSpeed = config.sendStateWithSpeed;
 		const allowDisable = config.allowDisablingButtons;
 		const buttonWidth = config.width;
@@ -266,6 +270,7 @@ class CustomFanPercentRow extends Polymer.Element {
 		let medname = 'medium'
 		let hiname = 'high'
 		
+		let hideoff = 'display:block';
 		let hidemedium = 'display:block';
 		let nohide = 'display:block';
 		
@@ -273,6 +278,12 @@ class CustomFanPercentRow extends Polymer.Element {
 			hidemedium = 'display:none';
 		} else {
 			hidemedium = 'display:block';
+		}
+		
+		if (hide_Off) {
+			hideoff = 'display:none';
+		} else {
+			hideoff = 'display:block';
 		}
 		
 		if (revButtons) {
@@ -300,8 +311,10 @@ class CustomFanPercentRow extends Polymer.Element {
 				_midLeftName: lowname,
 				_midRightName: medname,
 				_rightName: hiname,
+				_hideLeft: hideoff,
 				_hideMidLeft: nohide,
 				_hideMidRight: hidemedium,
+				_hideRight: nohide,
 			});
 		} else {
 			this.setProperties({
@@ -328,8 +341,10 @@ class CustomFanPercentRow extends Polymer.Element {
 				_midLeftName: medname,
 				_midRightName: lowname,
 				_rightName: offname,
+				_hideRight: hideoff,
 				_hideMidRight: nohide,
 				_hideMidLeft: hidemedium,
+				_hideLeft: nohide
 			});
 		}
 	}
@@ -347,22 +362,22 @@ class CustomFanPercentRow extends Polymer.Element {
 			this.hass.callService('fan', 'set_percentage', param);
 		} else if (level == 'low') {
 			if(this._config.sendStateWithSpeed){
-			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity});
-			}
+			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity, percentage: this._lowSP});
+			} else {
 			param.percentage = this._lowSP;
-			this.hass.callService('fan', 'set_percentage', param);
+			this.hass.callService('fan', 'set_percentage', param); }
 		} else if (level == 'medium') {
 			if(this._config.sendStateWithSpeed){
-			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity});
-			}
+			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity, percentage: this._medSP});
+			} else {
 			param.percentage = this._medSP;
-			this.hass.callService('fan', 'set_percentage', param);
+			this.hass.callService('fan', 'set_percentage', param);}
 		} else if (level == 'high') {
 			if(this._config.sendStateWithSpeed){
-			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity});
-			}
+			this.hass.callService('fan', 'turn_on', {entity_id: this._config.entity, percentage: this._highSP});
+			} else {
 			param.percentage = this._highSP;
-			this.hass.callService('fan', 'set_percentage', param);
+			this.hass.callService('fan', 'set_percentage', param); }
 		}
 	}
 }

@@ -14,7 +14,7 @@
     # make sure we update at least once if spotify is off
     - service: homeassistant.update_entity
       target:
-        entity_id: media_player.spotify_hassio_master
+        entity_id: media_player.spotify_hassio_main
 
 ###############################################################################
 ## Spotify - Playlist Update
@@ -27,22 +27,31 @@
     selected_playlists: "{{ state_attr('group.spotify_selected_playlists','entity_id') }}"
     stored_playlists: "{{ state_attr('group.spotify_stored_playlists','entity_id') }}"
     playlists: "{{ state_attr('sensor.playlists_sensor','playlists') }}"
+    category_names: "{{ state_attr('sensor.spotify_categories','category_names') }}"
   trigger:
     - platform: homeassistant
       id: startup
       event: start
 
     - platform: state
-      id: playlists
-      entity_id: sensor.playlists_sensor
+      id: sensor
+      entity_id: sensor.playlists_sensor #RELOAD triggers on template reload
       attribute: playlists
   condition:
     - condition: template
       alias: 'Playlist is populated if trigger is not startup'
       value_template: "{{ playlists != none and playlists|count > 0 if trigger.id != 'startup' else true }}"
+
+    - condition: template
+      alias: 'To/from state not unknown/unavailable' # prevent trigger on template reload
+      value_template: >
+        {{ trigger.to_state.state not in ['unknown','unavailable']
+            and trigger.from_state.state not in ['unknown','unavailable'] if trigger.id == 'sensor' else true }}
   action:
     # wait for sensor to populate (startup)
-    - wait_template: '{{ playlists != none and playlists|count > 0 }}'
+    - wait_template: >
+        {% set plist = state_attr('sensor.playlists_sensor','playlists') %}
+        {{ plist != none and plist|count > 0 }}
       timeout:
         minutes: 10
       continue_on_timeout: false
@@ -56,6 +65,18 @@
           - automation.media_auto_resume # triggered by input_select.spotify_hassio_playlist
       data:
         stop_actions: false
+
+    - variables:
+        options: >
+          {% set options = namespace(value=[]) %}
+          {% for item in playlists -%}
+            {% set options.value = options.value + [item.name] %}
+          {% endfor %}
+
+          {% for name in category_names %}
+            {% set options.value = options.value + [name] %}
+          {% endfor %}
+          {{ options.value }}
 
     - service: input_select.set_options
       target:
@@ -74,12 +95,7 @@
           - input_select.alarm_clock_spotify_hassio_manual
           - input_select.alarm_clock_spotify_hassio_nap
       data:
-        options: >
-          {% set options = namespace(value=[]) %}
-          {% for item in playlists -%}
-            {% set options.value = options.value + [item.name] %}
-          {% endfor %}
-          {{ options.value }}
+        options: '{{ options }}'
 
     - choose:
         - conditions: "{{ trigger.id == 'startup' }}" #NOTE only req on startup, now automatic
@@ -137,6 +153,7 @@
     - condition: state
       entity_id: binary_sensor.spotify_connected
       state: 'on'
+    #TODO trigger not if category
 
     - "{{ states(trigger.entity_id)|lower not in ['unknown','unavailable','none'] }}"
   action:

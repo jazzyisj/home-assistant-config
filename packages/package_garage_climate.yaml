@@ -3,6 +3,9 @@
 ###############################################################################
 homeassistant:
   customize:
+    alert.garage_temperature_throttle:
+      icon: mdi:thermostat
+      category: garage_climate
     alert.garage_extended_heat:
       icon: mdi:fire
       category: garage_climate
@@ -13,41 +16,157 @@ homeassistant:
       icon: mdi:snowflake-alert
       category: garage_climate
 
-    sensor.garage_sensor_humidity:
-      device_class: humidity
+    switch.garage_heat:
+      assumed_state: false
+    switch.garage_freeze_protection:
+      assumed_state: false
 
 input_boolean:
   garage_climate_automation:
     name: 'Garage Climate Automation'
     icon: mdi:sync-alert
 
-  garage_freeze_protection:
-    name: 'Garage Freeze Protection'
-    icon: mdi:snowflake
+  garage_climate_alerts:
+    name: 'Garage Climate Alerts'
+    icon: mdi:garage-alert
 
-  garage_heat:
-    name: 'Garage Heat'
-    icon: mdi:fire
-    initial: false # failsafe
+climate: #https://www.home-assistant.io/integrations/generic_thermostat/
+  - platform: generic_thermostat
+    unique_id: garage_thermostat
+    name: Garage Thermostat
+    heater: switch.garage_furnace
+    target_sensor: sensor.garage_sensor_air_temperature
+    min_temp: 0
+    max_temp: 21
+    ac_mode: false
+    target_temp: 15
+    cold_tolerance: 0.5
+    hot_tolerance: 0.5
+    min_cycle_duration:
+      minutes: 5
+    keep_alive: 300
+    away_temp: 1.0 # freeze protection mode
+    precision: 0.1
 
-input_number:
-  garage_heat_temperature:
-    name: 'Garage Heat Temperature'
-    icon: mdi:thermostat
-    min: 0
-    max: 22
-    step: 0.5
-    unit_of_measurement: '°'
+switch:
+  - platform: template
+    switches:
+      garage_heat:
+        friendly_name: Garage Heat
+        turn_on:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: climate.garage_thermostat
+                    state: 'off'
+                sequence:
+                  - service: climate.turn_on
+                    target:
+                      entity_id: climate.garage_thermostat
 
-  garage_freeze_temperature:
-    name: 'Garage Freeze Temperature'
-    icon: mdi:thermostat
-    min: -5
-    max: 5
-    step: 0.5
-    unit_of_measurement: '°'
+          - service: climate.set_preset_mode
+            target:
+              entity_id: climate.garage_thermostat
+            data:
+              preset_mode: none
+        turn_off:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: switch.garage_freeze_protection
+                    state: 'on'
+                sequence:
+                  - service: climate.turn_on
+                    target:
+                      entity_id: climate.garage_thermostat
+
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: climate.garage_thermostat
+                    data:
+                      preset_mode: away # away is freeze protection
+            default:
+              - condition: state
+                entity_id: climate.garage_thermostat
+                state: heat
+
+              - service: climate.turn_off
+                target:
+                  entity_id: climate.garage_thermostat
+
+      garage_freeze_protection:
+        friendly_name: Garage Freeze Protection
+        turn_on:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: switch.garage_heat
+                    state: 'off'
+                sequence:
+                  - service: climate.turn_on
+                    target:
+                      entity_id: climate.garage_thermostat
+
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: climate.garage_thermostat
+                    data:
+                      preset_mode: away # away is freeze protection
+        turn_off:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: switch.garage_heat
+                    state: 'off'
+                sequence:
+                  - service: climate.set_preset_mode
+                    target:
+                      entity_id: climate.garage_thermostat
+                    data:
+                      preset_mode: none
+
+                  - service: climate.turn_off
+                    target:
+                      entity_id: climate.garage_thermostat
+
+sensor:
+  - platform: history_stats
+    name: 'Garage Heat Daily Runtime'
+    entity_id: binary_sensor.garage_furnace
+    state: 'on'
+    type: time
+    start: '{{ now().replace(hour=0, minute=0, second=0) }}'
+    duration:
+      hours: 24
 
 alert:
+  garage_temperature_throttle:
+    name: 'Garage Temperature Throttle'
+    title: 'Garage Temp Throttle'
+    message: "Garage Temperature: {{ states('sensor.garage_sensor_air_temperature') }}°"
+    done_message: clear_notification
+    entity_id: binary_sensor.garage_temperature_throttle_alert
+    state: 'on'
+    repeat: 15
+    notifiers: jason
+    data:
+      tag: garage_temperature_throttle
+      group: General
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      notification_icon: mdi:thermometer-lines
+      icon_url: !secret HIGH_TEMP_ICON
+      image: !secret HIGH_TEMP_IMAGE
+      ledColor: !secret WARNING_COLOR
+      color: !secret WARNING_COLOR
+      vibrationPattern: !secret ALERT_VIBRATION
+      clickAction: /lovelace-mobile/garage
+      actions:
+        - action: pause_garage_temperature_throttle
+          title: 'Pause Alert'
+
   garage_extended_heat:
     name: 'Garage Extended Heat'
     title: 'Garage Extended Heat'
@@ -102,7 +221,7 @@ alert:
         - action: pause_garage_high_temperature
           title: 'Pause Alert'
 
-  garage_climate_garage_low_temperature:
+  garage_low_temperature:
     name: 'Garage Low Temperature'
     title: 'Garage Low Temperature'
     message: "Garage Temperature: {{ states('sensor.garage_sensor_air_temperature') }}°"
@@ -128,4 +247,3 @@ alert:
       actions:
         - title: 'Pause Alert'
           action: pause_garage_low_temperature
-

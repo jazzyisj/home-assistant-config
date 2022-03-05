@@ -1,6 +1,6 @@
 ((LitElement) => {
 
-console.info('NUMBERBOX_CARD 3.5');
+console.info('NUMBERBOX_CARD 3.9');
 const html = LitElement.prototype.html;
 const css = LitElement.prototype.css;
 class NumberBox extends LitElement {
@@ -11,6 +11,7 @@ constructor() {
 	this.pending = false;
 	this.rolling = false;
 	this.state = 0;
+	this.old = {state: undefined, t:{}, h:''}
 }
 
 render() {
@@ -27,8 +28,6 @@ render() {
 	if(!this.config.icon_plus){this.config.icon_plus='mdi:plus';}
 	if(!this.config.icon_minus){this.config.icon_minus='mdi:minus';}
 	if( this.config.delay === undefined ){ this.config.delay=1000;}
-	this.state=this.stateObj.state;
-	if(this.config.state){this.state=this.stateObj.attributes[this.config.state];}
 	if(this.config.min === undefined){ this.config.min=this.stateObj.attributes.min;}
 	if(this.config.max === undefined){ this.config.max=this.stateObj.attributes.max;}
 	if(this.config.step === undefined){ this.config.step=this.stateObj.attributes.step;}
@@ -58,15 +57,49 @@ render() {
 `;
 }
 
+updated(x) {
+	if(this.old.h !=''){
+		const a=this.renderRoot.querySelector('.secondary');
+		if(a){a.innerHTML=this.old.h;}
+	}
+}
+
+
 secondaryInfo(){
 	const s=this.config.secondary_info;
 	if(!s){return;}
-	const v=s.replace('-','_');
-	return html`<div class="secondary"> ${(this.stateObj[v])? 
-	html`<ha-relative-time
-		.datetime=${new Date(this.stateObj[v])}
-		.hass=${this._hass}
-	></ha-relative-time>`:s}</div>`;
+	let r=s;
+	let h=s;
+	if(s.indexOf('%')> -1){
+		const j=s.split(' ');
+		for (let i in j) {
+			if(j[i][0]=='%'){
+				j[i]=j[i].substring(1).split(':');
+				let b=this._hass.states;
+				for (let d=0; d<j[i].length; d++){
+					if(b.hasOwnProperty(j[i][d])){
+						b=b[ j[i][d] ];
+						if(!d){
+							this.old.t[ j[i][d] ]=b.last_updated;
+						}
+					}
+				}
+				if( b !== Object(b) ){ j[i]=b;}
+			}
+		}
+		r = j.join(' ');
+		
+	}else{
+		const v=s.replace('-','_');
+		if(this.stateObj[v]){
+			h='';
+			r=html`<ha-relative-time .datetime=${new Date(this.stateObj[v])}
+						.hass=${this._hass} ></ha-relative-time>`;
+		}
+	}
+	if(h){h=r; r='';}
+	this.old.h=h;
+	return html`<div class="secondary">${r}</div>`;
 }
 
 renderNum(){
@@ -107,9 +140,22 @@ Press(v) {
 	}
 }
 
+timeNum(x,s,m){
+	x=x.toString();
+	if(x.indexOf(':')>0){
+		x = x.split(':');s = 0; m = 1;
+		while (x.length > 0) {
+			s += m * parseInt(x.pop(), 10);
+			m *= 60;
+		}
+		x=s;
+	}
+	return Number(x);
+}
+
 setNumb(c){
 	let v=this.pending;
-	if( v===false ){ v=Number(this.state); v=isNaN(v)?this.config.min:v;}
+	if( v===false ){ v=this.timeNum(this.state); v=isNaN(v)?this.config.min:v;}
 	let adval=c?(v + Number(this.config.step)):(v - Number(this.config.step));
 	adval=Math.round(adval*1000)/1000
 	if( adval <=  Number(this.config.max) && adval >= Number(this.config.min)){
@@ -127,6 +173,7 @@ publishNum(dhis){
 	const s=dhis.config.service.split('.');
 	const v={entity_id: dhis.config.entity, [dhis.config.param]: dhis.pending};
 	dhis.pending=false;
+	dhis.old.state=dhis.state;
 	dhis._hass.callService(s[0], s[1], v);
 }
 
@@ -135,27 +182,25 @@ niceNum(){
 	if( v === false ){
 		v=this.state;
 		if(v=='unavailable' || ( v=='unknown' && this.config.initial === undefined ) ){return '?';}
-		v=Number(v);
+		v=this.timeNum(v);
 		if(isNaN(v) && this.config.initial !== undefined){
 			v=Number(this.config.initial);
 		}
 	}	
 	let stp=Number(this.config.step) || 1;
-	if( Math.round(stp) != stp ){ fix=stp.toString().split(".")[1].length || 1; stp=fix;}
+	if( Math.round(stp) != stp ){
+		fix=stp.toString().split(".")[1].length || 1; stp=fix;
+	}else{ stp=fix; }
 	fix = v.toFixed(fix);
 	const u=this.config.unit;
 	if( u=="time" ){
-		return html`${
-			Math.floor(fix/3600).toString().padStart(2,'0')
-			}:${
-			(Math.floor(fix/60)-Math.floor(fix/3600)*60).toString().padStart(2,'0')
-			}:${
-			(fix%60).toString().padStart(2,'0')
-			}`
+		let t = fix>=3600? Math.floor(fix/3600).toString().padStart(2,'0') + ':' : '';
+		t += (Math.floor(fix/60)-Math.floor(fix/3600)*60).toString().padStart(2,'0') + ':' + (fix%60).toString().padStart(2,'0')
+		return html`${t}`;
 	}
 	fix = new Intl.NumberFormat(
 			this._hass.language,
-			{maximumFractionDigits: stp}
+			{maximumFractionDigits: stp, minimumFractionDigits: stp}
 		).format(Number(fix));
 	return u===false ? fix: html`${fix}<span class="cur-unit" >${u}</span>`;
 }
@@ -182,6 +227,7 @@ static get properties() {
 		rolling: {},
 		pending: {},
 		state: {},
+		old: {},
 	}
 }
 
@@ -280,10 +326,18 @@ set hass(hass) {
 		this.stateObj = this.config.entity in hass.states ? hass.states[this.config.entity] : null;
 	}
 	this._hass = hass;
+	if(this.stateObj){
+		this.state=this.stateObj.state;
+		if(this.config.state){this.state=this.stateObj.attributes[this.config.state];}
+	}
 }
 
 shouldUpdate(changedProps) {
-	if( changedProps.has('config') || changedProps.has('stateObj') || changedProps.has('pending') ){return true;}
+	const o = this.old.t;
+	for(const p in o){if(p in this._hass.states && this._hass.states[p].last_updated != o[p]){ return true; }}
+	if( changedProps.has('config') || changedProps.has('stateObj') || changedProps.has('pending') ){
+		if(this.old.state != this.state){ return true; }
+	}
 }
 
 static getConfigElement() {

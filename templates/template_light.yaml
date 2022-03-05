@@ -1,3 +1,6 @@
+###############################################################################
+## Templates - Lights
+###############################################################################
 - binary_sensor:
     - name: 'Lights On'
       unique_id: lights_on
@@ -16,9 +19,7 @@
           {{ state_attr('binary_sensor.lights_on','entities')|count > 0 }}
         {% endif %}
       attributes:
-        entities: >
-          {{ expand('group.lights')|selectattr('state','eq','on')
-              |map(attribute='entity_id')|list }}
+        entities: "{{ expand('group.lights')|selectattr('state','eq','on')|map(attribute='entity_id')|list }}"
 
     - name: 'Light In Use'
       unique_id: light_in_use
@@ -30,15 +31,27 @@
       attributes:
         entities: "{{ expand('group.light_timers')|selectattr('state','ne','idle')|map(attribute='entity_id')|list }}"
 
+    - name: 'Daytime Illuminance Lights'
+      unique_id: daytime_illuminance_lights
+      icon: mdi:brightness-7
+      # keep on at least 15 minutes
+      delay_off: "{{ 0 if is_state('binary_sensor.daytime_illuminance_lights','unknown') else 900 }}"
+      state: >
+        {% if is_number(states('sensor.outdoor_illuminance')) %}
+          {{ is_state('input_boolean.day_lights_enabled','on')
+              and is_state('binary_sensor.nighttime_illuminance_lights','off')
+              and states('sensor.outdoor_illuminance')|int(0)
+                <= states('input_number.day_illuminance_threshold')|int(0) }}
+        {% endif %}
+
     - name: 'Nighttime Illuminance Lights'
       unique_id: nighttime_illuminance_lights
       icon: mdi:brightness-4
-      #WF sensor.weatherflow_brightness
       state: >
         {% if is_state('input_boolean.night_lights_override','on') %} true
         {% elif is_state('input_boolean.night_lights_enabled','on') %}
-          {% if is_number(states('sensor.tempest_st_00057689_illuminance')) %}
-            {{ states('sensor.tempest_st_00057689_illuminance')|int
+          {% if is_number(states('sensor.outdoor_illuminance')) %}
+            {{ states('sensor.outdoor_illuminance')|int
                 < states('input_number.night_illuminance_threshold')|int }}
           {% else %}
             {% set time = states('sensor.time') %}
@@ -50,22 +63,9 @@
           {% endif %}
         {% endif %}
 
-    - name: 'Daytime Illuminance Lights'
-      unique_id: daytime_illuminance_lights
-      icon: mdi:brightness-5
-      # keep on at least 15 minutes
-      delay_off: "{{ 0 if is_state('binary_sensor.daytime_illuminance_lights','unknown') else 900 }}"
-      state: >
-        {% if is_number(states('sensor.tempest_st_00057689_illuminance')) %}
-          {{ is_state('input_boolean.day_lights_enabled','on')
-              and is_state('binary_sensor.nighttime_illuminance_lights','off')
-              and states('sensor.tempest_st_00057689_illuminance')|int(0)
-                <= states('input_number.day_illuminance_threshold')|int(0) }}
-        {% endif %}
-
     - name: 'Bathroom Illuminance Light'
       unique_id: bathroom_illuminance_light
-      icon: mdi:brightness-5
+      icon: mdi:brightness-4
       state: >
         {% if is_state('binary_sensor.nighttime_illuminance_lights','on')
             or is_state('binary_sensor.daytime_illuminance_lights','on') %} true
@@ -84,6 +84,27 @@
             or is_state('binary_sensor.scene_active','on') }}
 
 - sensor:
+    - name: 'Outdoor Illuminance'
+      unique_id: outdoor_illuminance
+      icon: mdi:brightness-7
+      device_class: illuminance
+      state_class: measurement
+      unit_of_measurement: lx
+      state: >
+        {% if is_number(states('sensor.weatherflow_brightness')) %}
+          {{ states('sensor.weatherflow_brightness')|float }}
+        {% elif is_number(states('sensor.tempest_st_00057689_illuminance')) %}
+          {{ states('sensor.tempest_st_00057689_illuminance')|float }}
+        {% endif %}
+      attributes:
+        provider: >
+          {% if is_number(states('sensor.weatherflow_visibility')) %} Weatherflow Cloud
+          {% elif is_number(states('sensor.tempest_st_00057689_illuminance')) %} Weatherflow
+          {% endif %}
+      availability: >
+        {{ is_number(states('sensor.weatherflow_brightness'))
+            or is_number(states('sensor.tempest_st_00057689_illuminance')) }}
+
     - name: 'Flux Color General'
       unique_id: flux_color_general
       icon: mdi:google-nearby # used for flux setting template entity in UI
@@ -125,73 +146,3 @@
       unique_id: day_night
       icon: "{{ 'mdi:weather-sunny' if is_state('sun.sun','above_horizon') else 'mdi:weather-night' }}"
       state: "{{ 'Day' if is_state('sun.sun','above_horizon') else 'Night' }}"
-
-    - name: 'Sun Rise'
-      unique_id: sunrise
-      icon: mdi:weather-sunset-up
-      state: >
-        {{ states('sensor.windsor_sunrise')|as_timestamp(none)
-            |timestamp_custom('%-I:%M %p',true,'unknown') }}
-
-    - name: 'Sun Set'
-      unique_id: sunset
-      icon: mdi:weather-sunset-down
-      state: >
-        {{ states('sensor.windsor_sunset')|as_timestamp(none)
-            |timestamp_custom('%-I:%M %p',true,'unknown') }}
-
-    #TEST https://community.home-assistant.io/t/outdoor-illuminance-template-sensor/228581
-    - name: 'Outdoor Illuminance'
-      unique_id: outdoor_illuminance
-      device_class: illuminance
-      unit_of_measurement: lx
-      state: |
-        {%- set sun_factor = state_attr('sensor.outdoor_illuminance','sun_factor') %}
-        {%- set condition_factor = state_attr('sensor.outdoor_illuminance','condition_factor') %}
-        {# Take an educated guess #}
-        {%- set illuminance = (sun_factor|float(0) * condition_factor|float(0))|round %}
-        {%- set illuminance = 10 if illuminance < 10 else illuminance %}
-        {{ illuminance }}
-      attributes:
-        current_condition: |
-          {%- set factors = namespace(current_condition='') %}
-          {# Retrieve the current condition and normalize the value #}
-          {%- set weather_sensors = ['sensor.current_condition'] %}
-          {%- for sensor in weather_sensors if states(sensor) != 'unknown' and factors.current_condition == '' %}
-            {%- set factors.current_condition = states(sensor) %}
-          {%- endfor %}
-          {%- set current_condition = factors.current_condition|lower|replace('light rain','rainy')|replace('partly cloudy w/ ','')|replace('mostly cloudy w/ ','')|replace('freezing','')|replace('and','')|replace('-',' ')|replace('_',' ')|replace('(','')|replace(')','')|replace(' ','') %}
-          {{ current_condition }}
-        condition_factor: |
-          {% set factors = namespace(condition='') %}
-          {% set current_condition = state_attr('sensor.outdoor_illuminance','current_condition') %}
-          {%- set condition_factors = {
-            '10000': ('clear','clearnight','sunny','windy','exceptional'),
-            '7500': ('partlycloudy','partlysunny','mostlysunny','mostlyclear','hazy','hazysunshine','intermittentclouds'),
-            '2500': ('cloudy','mostlycloudy'),
-            '1000': ('fog','rainy','showers','pouring','snowy','snowyheavy','snowyrainy','flurries','chanceflurries','chancerain','chancesleet','drearyovercast','sleet'),
-            '200': ('hail','lightning','tstorms')
-          } %}
-          {%- for factor in condition_factors if current_condition in condition_factors[factor] %}
-            {%- set factors.condition = factor %}
-          {%- endfor %}
-          {{ factors.condition }}
-        sun_factor: |
-          {% set factors = namespace(sun='') %}
-          {%- set right_now = now()|as_timestamp %}
-          {%- set sunrise = states('sensor.windsor_sunrise')|as_timestamp %}
-          {%- set sunrise_begin = states('sensor.windsor_dawn')|as_timestamp %}
-          {%- set sunrise_end = sunrise + (40 * 60) %}
-          {%- set sunset = states('sensor.windsor_sunset')|as_timestamp %}
-          {%- set sunset_begin = sunset - (40 * 60) %}
-          {%- set sunset_end = states('sensor.windsor_dusk')|as_timestamp %}
-          {%- if sunrise_end < right_now and right_now < sunset_begin %}
-            {%- set factors.sun = 1 %}
-          {%- elif sunset_end < right_now or right_now < sunrise_begin %}
-            {%- set factors.sun = 0 %}
-          {%- elif right_now <= sunrise_end %}
-            {%- set factors.sun = (right_now - sunrise_begin) / (60*60) %}
-          {%- else %}
-            {%- set factors.sun = (sunset_end - right_now) / (60*60) %}
-          {%- endif %}
-          {{ 1 if factors.sun > 1 else factors.sun }}

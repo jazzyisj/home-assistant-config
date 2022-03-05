@@ -28,72 +28,81 @@ automation:
     description: 'Turn on shower scene.'
     variables:
       shower_volume: "{{ states('input_number.media_preset_volume_shower')|float(-1)/100 }}"
+      media_type: "{{ states('input_select.media_preset_type_shower')|slugify }}"
     trigger:
       - platform: state
         entity_id: input_boolean.shower_scene
         to: 'on'
         from: 'off'
-    condition:
-      - condition: state
-        entity_id: input_select.occupancy_mode
-        state:
-          - Home
-          - Guest
     action:
-      - service: timer.start
-        target:
-          entity_id: timer.shower_scene
-        data:
-          duration:
-            minutes: "{{ states('input_number.shower_scene_duration')|int(0) }}"
-
       - choose:
           - conditions:
               - condition: state
-                entity_id:
-                  - input_boolean.media_player_automation
-                  - input_boolean.media_preset_enabled_shower
-                state: 'on'
+                entity_id: input_select.occupancy_mode
+                state:
+                  - Home
+                  - Guest
             sequence:
+              - service: timer.start
+                target:
+                  entity_id: timer.shower_scene
+                data:
+                  duration:
+                    minutes: "{{ states('input_number.shower_scene_duration')|int(0) }}"
+
               - choose:
                   - conditions:
                       - condition: state
-                        entity_id: binary_sensor.tts
+                        entity_id: input_boolean.media_preset_enabled_shower
                         state: 'on'
                     sequence:
-                      - service: input_number.set_value
-                        target:
-                          entity_id: input_number.bathroom_speaker_pre_shower_volume
-                        data:
-                          # volume of bathroom speaker before tts
-                          value: "{{ states('input_number.bathroom_speaker_tts')|float }}"
+                      - choose:
+                          - conditions:
+                              - condition: state
+                                entity_id: binary_sensor.tts
+                                state: 'on'
+                            sequence:
+                              - service: input_number.set_value
+                                target:
+                                  entity_id: input_number.bathroom_speaker_tts
+                                data:
+                                  value: '{{ shower_volume }}'
 
-                      - service: input_number.set_value
-                        target:
-                          entity_id: input_number.bathroom_speaker_tts
-                        data:
-                          # volume to restore when tts is done
-                          value: '{{ shower_volume }}'
+                              - wait_template: "{{ is_state('binary_sensor.tts','off') }}"
+                                timeout: 120
+                                continue_on_timeout: false
 
-                      - wait_template: "{{ is_state('binary_sensor.tts','off') }}"
-                        timeout: 120
-                        continue_on_timeout: false
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                alias: 'Bathroom speaker already playing something'
+                                value_template: >
+                                  {{ (is_state('binary_sensor.' ~ media_type,'on')
+                                      and 'media_player.bathroom_speaker' in state_attr('sensor.' ~ media_type ~ '_media_player','entity_id'))
+                                      or states('media_player.bathroom_speaker') in ['playing','paused'] }}
+                            sequence:
+                              # wait until media resumes if tts
+                              - wait_template: "{{ is_state('media_player.bathroom_speaker','playing') }}"
+                                timeout: 30
 
-              - choose:
-                  - conditions:
-                      - condition: template
-                        alias: 'Bathroom speaker already playing something'
-                        value_template: "{{ states('media_player.bathroom_speaker') in ['playing','paused'] }}"
-                    sequence:
-                      - service: media_player.volume_set
-                        target:
-                          entity_id: media_player.bathroom_speaker
-                        data:
-                          volume_level: '{{ shower_volume }}'
-                default:
-                  - service: script.media_preset_play
-                    data:
-                      preset: shower
+                              - service: media_player.volume_set
+                                target:
+                                  entity_id: media_player.bathroom_speaker
+                                data:
+                                  volume_level: '{{ shower_volume }}'
+                        default:
+                          - service: script.media_preset_play
+                            data:
+                              preset: shower
+        default:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.shower_scene
+
+          - service: browser_mod.toast
+            data:
+              duration: 30000
+              message: 'Shower mode cannot be run if occupancy mode is not Home or Guest.'
 
   ###############################################################################
   ## Scene - Shower Scene Off
@@ -101,7 +110,9 @@ automation:
   - id: scene_shower_scene_off
     alias: '[Scene] Shower Scene Off'
     description: 'Turn off shower scene.'
-    max_exceeded: silent # recursive call
+    max_exceeded: silent
+    variables:
+      media_type: "{{ states('input_select.media_preset_type_shower')|slugify }}"
     trigger:
       - platform: state
         entity_id: input_boolean.shower_scene
@@ -141,42 +152,36 @@ automation:
       - choose:
           - conditions:
               - condition: template
-                alias: 'Bathroom speaker is not in a playing speaker group.'
+                alias: 'TTS on and bathroom speaker in tts media players'
                 value_template: >
-                  {% set media_type = states('input_select.media_preset_type_shower')|lower %}
-                  {{ is_state('binary_sensor.' ~ media_type,'on') and
-                        states('sensor.' ~ media_type ~ '_media_player') == 'media_player.bathroom_speaker' }}
+                  {{ (is_state('binary_sensor.tts','on')
+                      and 'media_player.bathroom_speaker' in state_attr('sensor.tts_media_player','entity_id')) }}
+            sequence:
+              # set bathroom speaker tts restore volumes to media volume for appropriate post tts shower off volume levels
+              - service: input_number.set_value
+                alias: 'Set bathroom speaker restore volumes to media volume'
+                target:
+                  entity_id: input_number.bathroom_speaker_tts
+                data:
+                  value: "{{ states('input_number.' ~ media_type ~ '_volume')|float(-1)/100 }}"
+
+              # wait until media resumes if tts
+              - wait_template: "{{ is_state('binary_sensor.tts','off') }}"
+                timeout: 30
+
+      - choose:
+          - conditions:
+              - condition: template
+                alias: 'Bathroom speaker is active media speaker.'
+                value_template: >
+                  {{ is_state('binary_sensor.' ~ media_type,'on')
+                      and states('sensor.' ~ media_type ~ '_media_player') == 'media_player.bathroom_speaker' }}
             sequence:
               - service: script.media_stop
                 data:
-                  media_type: "{{ states('input_select.media_preset_type_shower')|lower }}"
+                  media_type: '{{ media_type }}'
         default:
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: binary_sensor.tts
-                    state: 'on'
-                sequence:
-                  # set bathroom speaker restore volumes (tts, pre shower) to media volume
-                  # for appropriate post tts, shower off volume levels
-                  - service: input_number.set_value
-                    alias: 'Set bathroom speaker restore volumes to media volume'
-                    target:
-                      entity_id:
-                        - input_number.bathroom_speaker_pre_shower_volume
-                        - input_number.bathroom_speaker_tts
-                    data:
-                      value: >
-                        {% set media_type = states('input_select.media_preset_type_shower')|lower %}
-                        {{ states('input_number.' ~ media_type ~ '_volume')|float(-1)/100 }}
-
-                  - wait_template: "{{ is_state('binary_sensor.tts','off') }}"
-                    timeout: 120
-                    continue_on_timeout: false
-
-          - service: media_player.volume_set
-            alias: 'Reset bathroom speaker to default media volume'
-            target:
-              entity_id: media_player.bathroom_speaker
+          - service: script.media_players_set_volumes
             data:
-              volume_level: "{{ states('input_number.bathroom_speaker_pre_shower_volume')|float(-1) }}"
+              media_player: media_player.bathroom_speaker
+              source: '{{ media_type }}'

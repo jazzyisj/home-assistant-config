@@ -8,15 +8,9 @@
   max: 50
   max_exceeded: error
   variables:
-    alert_type: >
-      {% if is_state('alarm_control_panel.master','triggered') %} triggered
-      {% elif is_state('input_boolean.alarm_triggered','on') %} was_triggered
-      {% elif trigger.entity_id == 'input_boolean.alarm_triggered' %} reset
-      {% else %} {{ trigger.id }}
-      {% endif %}
     entities: >
-      {% if alert_type in ['triggered','was_triggered','reset'] %}
-        {% set alert_type = 'notify' %}
+      {% if trigger.entity_id == 'input_boolean.alarm_triggered' %} {% set alert_type = 'notify' %}
+      {% else %} {% set alert_type = trigger.id %}
       {% endif %}
       {{ state_attr('group.led_' ~ alert_type,'entity_id') }}
   trigger:
@@ -35,6 +29,11 @@
       entity_id: variable.tts_saved_messages
       above: 0
 
+    - platform: numeric_state
+      id: media
+      entity_id: variable.tts_saved_messages
+      below: 1
+
     - platform: state
       id: alarm_clock
       entity_id:
@@ -50,10 +49,12 @@
     - platform: state
       id: alarm
       entity_id:
-        - input_boolean.alarm_triggered # on-was_triggered, off-reset
+        - input_boolean.alarm_triggered
         - alert.door_lock_jammed
         - alert.door_lock_failed
+        - alert.alarm_connected
         - binary_sensor.alarm_open_sensor_alert
+        - binary_sensor.alarm_bypassed_sensor_alert
       to:
         - 'on'
         - 'off'
@@ -64,7 +65,7 @@
     - platform: state
       id: alarm
       entity_id: alarm_control_panel.master
-      to: # triggered covered by input_boolean.alarm_triggered
+      to: # triggered - input_boolean.alarm_triggered
         - armed_home
         - armed_night
         - armed_away
@@ -125,16 +126,19 @@
     - platform: state
       id: garage
       entity_id:
-        - cover.garage_door_opener
-        - binary_sensor.garage_door_connected
+        - binary_sensor.garage_door_open
+        - alert.myq_connected
+        - alert.myq_bridge_connected
         - input_boolean.garage_door_close_alert
         - input_boolean.garage_door_open_alert
       to:
         - 'on'
         - 'off'
+        - 'idle'
       from:
         - 'on'
         - 'off'
+        - 'idle'
 
     - platform: state
       id: presence
@@ -143,14 +147,16 @@
         - binary_sensor.sheri_home
         - input_boolean.jason_almost_home
         - input_boolean.sheri_almost_home
-        - binary_sensor.jason_phone_connected #TEMPLATE trigger on reload
-        - binary_sensor.sheri_phone_connected #TEMPLATE trigger on reload
+        - alert.mobile_offline_jason
+        - alert.mobile_offline_sheri
       to:
         - 'on'
         - 'off'
+        - 'idle'
       from:
         - 'on'
         - 'off'
+        - 'idle'
       for: 15 # prevent trigger on temporary state changes
 
     - platform: numeric_state
@@ -161,29 +167,32 @@
       below: 4 # km
 
     - platform: state
-      id: hass
+      id: startup
       entity_id: input_boolean.startup_pending
       to: 'off'
       from: 'on'
-  condition: >
-    {{ true if is_state('input_boolean.alarm_triggered','off')
-        else trigger.id == 'alarm' }}
+  condition:
+    - condition: template
+      alias: 'Alarm not triggered, or trigger is alarm'
+      value_template: >
+        {{ true if is_state('input_boolean.alarm_triggered','off')
+            else trigger.id == 'alarm' }}
+
+    #RELOAD input_boolean.weather_alerts off causing error on dev mode
+    - condition: state
+      entity_id: input_boolean.dev_mode
+      state: 'off'
   action:
     - choose:
-        - conditions: "{{ alert_type == 'reset' }}"
+        - conditions: "{{ trigger.id == 'startup' }}"
           sequence:
             - service: script.led_reset
-      default:
-        - choose:
-            - conditions: "{{ alert_type == 'hass' }}"
-              sequence:
-                - service: script.led_reset
-                - delay: 5 #ZWAVE must finish reset before script.led_notification runs
+            - delay: 5 # allow reset to run
 
-        - service: script.turn_on
-          target:
-            entity_id: script.led_notification
-          data:
-            variables:
-              entities: '{{ entities }}'
-              alert_type: '{{ alert_type }}'
+    - service: script.turn_on
+      target:
+        entity_id: script.led_notification
+      data:
+        variables:
+          entities: '{{ entities }}'
+          alert_type: '{{ trigger.id }}'

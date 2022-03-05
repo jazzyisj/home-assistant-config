@@ -2,55 +2,56 @@
 ## Templates - Garage Climate
 ###############################################################################
 - binary_sensor:
-    - name: 'Garage Extended Heat Alert'
-      unique_id: garage_extended_heat_alert
-      delay_on: "{{ 0 if is_state('binary_sensor.garage_extended_heat_alert','unknown') else 1800 }}"
-      state: >
-        {{ is_state('input_boolean.garage_heat','on')
-            or is_state_attr('climate.garage_thermostat','hvac_mode','heating')
-            and is_state('input_boolean.climate_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
-
-    # -2 buffer to reduce false alerts
-    #GARAGE_HVAC temp removed - use sensor
-    - name: 'Garage Low Temperature Alert'
-      unique_id: garage_low_temperature_alert
-      # let garage heat up when heat turned on
-      delay_on: "{{ 0 if is_state('binary_sensor.garage_low_temperature_alert','unknown') else 1800 }}"
-      state: >
-        {{ (is_state('input_boolean.garage_freeze_protection','on')
-              and (states('sensor.garage_sensor_air_temperature')|int(0)
-                < states('input_number.garage_freeze_temperature')|int(0) - 2 ))
-            or (is_state('input_boolean.garage_heat','on')
-              and (states('sensor.garage_sensor_air_temperature')|int(0)
-                < states('input_number.garage_heat_temperature')|int(0) - 2 ))
-            and is_state('input_boolean.climate_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
-      availability: "{{ is_number(states('sensor.garage_sensor_air_temperature')) }}"
-
-    # + 2 buffer to reduce false alerts
-    #GARAGE_HVAC thermostat condition, temp removed - use sensor
-    - name: 'Garage High Temperature Alert'
-      unique_id: garage_high_temperature_alert
-      # let temp stabalize
-      delay_on: "{{ 0 if is_state('binary_sensor.garage_high_temperature_alert','unknown') else 300 }}"
-      state: >
-        {{ (is_state('input_boolean.garage_heat','on')
-              or is_state('input_boolean.garage_freeze_protection','on'))
-            and states('sensor.garage_sensor_air_temperature')|int(0)
-              > states('input_number.garage_heat_temperature')|int + 2
-            and is_state('input_boolean.climate_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
-
-      availability: "{{ is_number(states('sensor.garage_sensor_air_temperature')) }}"
-
-- sensor:
     - name: 'Garage Furnace'
       unique_id: garage_furnace
+      device_class: running
       icon: mdi:fire
-      state: "{{ state_attr('climate.garage_thermostat','operating_state') }}"
+      state: "{{ states('sensor.garage_furnace_power')|int(-1) > 10 }}"
 
-    - name: 'Garage Furnace Fan'
-      unique_id: garage_furnace_fan
-      icon: mdi:fan
-      state: "{{ state_attr('climate.garage_thermostat','fan_state') }}"
+    - name: 'Garage Temperature Throttle Alert'
+      unique_id: garage_temperature_throttle_alert
+      icon: mdi:thermostat
+      delay_on: 300 # allow furnace delayed on
+      state: >
+        {{ (is_state('binary_sensor.garage_furnace','off')
+            and is_state_attr('climate.garage_thermostat','hvac_action','heating'))
+            and is_state('input_boolean.garage_climate_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
+    - name: 'Garage Extended Heat Alert'
+      unique_id: garage_extended_heat_alert
+      delay_on: "{{ 0 if is_state('binary_sensor.garage_extended_heat_alert','unknown') else 3600 }}"
+      state: >
+        {{ (is_state('binary_sensor.garage_furnace','on')
+              or not state_attr('climate.garage_thermostat','hvac_action') in ['off','idle'])
+            and is_state('input_boolean.garage_climate_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
+    # let garage heat up when heat first turned on, -1 buffer to reduce false alerts
+    - name: 'Garage Low Temperature Alert'
+      unique_id: garage_low_temperature_alert
+      delay_on: "{{ 0 if is_state('binary_sensor.garage_low_temperature_alert','unknown') else 1800 }}"
+      state: >
+        {{ is_state('climate.garage_thermostat','heat')
+            and state_attr('climate.garage_thermostat','current_temperature')|float(none)
+              < state_attr('climate.garage_thermostat','temperature')|float(none) - 1
+            and is_state('alert.garage_temperature_throttle','idle')
+            and is_state('input_boolean.garage_climate_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+      availability: >
+        {{ states('climate.garage_thermostat')|lower not in ['unknown','unavailable','none']
+            and is_number(state_attr('climate.garage_thermostat','current_temperature')) }}
+
+    # let temp stabalize, +1 buffer to reduce false alerts
+    - name: 'Garage High Temperature Alert'
+      unique_id: garage_high_temperature_alert
+      delay_on: "{{ 0 if is_state('binary_sensor.garage_high_temperature_alert','unknown') else 300 }}"
+      state: >
+        {{ is_state_attr('climate.garage_thermostat','hvac_action','heating')
+            and state_attr('climate.garage_thermostat','current_temperature')|float(none)
+              > state_attr('climate.garage_thermostat','temperature')|float(none) + 1
+            and is_state('input_boolean.garage_climate_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+      availability: >
+        {{ state_attr('climate.garage_thermostat','hvac_action') != none
+            and is_number(state_attr('climate.garage_thermostat','current_temperature')) }}
