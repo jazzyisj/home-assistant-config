@@ -1,34 +1,72 @@
 ###############################################################################
+## Light - Front House Potlights In Use
+###############################################################################
+- id: light_front_house_potlights_in_use
+  alias: '[Light] Front House Potlights In Use'
+  description: 'Turn in use timer on/off when device state changes.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.front_house_potlights
+      to: ~
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: light.front_house_potlights
+              state: 'on'
+          sequence:
+            - service: timer.start
+              entity_id: timer.front_house_potlights
+      default:
+        - service: timer.cancel
+          entity_id: timer.front_house_potlights
+
+###############################################################################
+## Light - Front House Potlights Manual Control Off
+###############################################################################
+- id: light_front_house_potlights_manual_control_off
+  alias: '[Light] Front House Potlights Manual Control Off'
+  description: 'Turn adaptive light manual control off.'
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.front_house_potlights
+
+    - platform: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.front_house_potlights
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_outside_lights
+        lights: light.front_house_potlights
+        manual_control: false
+
+###############################################################################
 ## Light - Front House Potlights Nobody Home
 ###############################################################################
 - id: light_front_house_potlights_nobody_home
   alias: '[Light] Front House Potlights Nobody Home'
   description: 'Turn light on when nobody is home.'
   max_exceeded: silent
-  variables:
-    current: "{{ state_attr('light.front_house_potlights','brightness')|int(0) }}"
-    brightness: >
-      {% if is_state('binary_sensor.quiet_time','on') %}
-        {{ 80 if current > 80 or current == 0 else current }}
-      {% else %}
-        {{ 150 if current < 150 else current }}
-      {% endif %}
   trigger:
     - platform: state
       id: lux
       entity_id: binary_sensor.nighttime_illuminance_lights
       to: 'on'
       from: 'off'
-
-    - platform: state
-      id: quiet
-      entity_id: binary_sensor.quiet_time
-      to:
-        - 'on'
-        - 'off'
-      from:
-        - 'on'
-        - 'off'
 
     - platform: state
       id: occupancy
@@ -42,6 +80,10 @@
     - platform: time_pattern
       minutes: '/15'
   condition:
+    - condition: state
+      entity_id: light.front_house_potlights
+      state: 'off'
+
     - condition: state
       entity_id:
         - input_boolean.light_automation
@@ -60,27 +102,23 @@
       state: 'off'
 
     - condition: template
-      alias: 'Light not on and already at set brightness.'
-      value_template: '{{ brightness != current if current > 0 else true }}'
-
-    - condition: template
-      alias: 'Light is on if trigger is quiet time light.'
-      value_template: >
-        {{ is_state('light.front_house_potlights','on')
-            if trigger.id == 'quiet' else true }}
-
-    - condition: template
       alias: 'Presence automation is enabled if occupancy trigger'
       value_template: >
         {{ is_state('input_boolean.presence_automation','on')
               and is_state('input_boolean.occupancy_override','off')
             if trigger.id == 'occupancy' else true }}
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_front_house_potlights_in_use
+
     - service: light.turn_on
       target:
         entity_id: light.front_house_potlights
-      data:
-        brightness: '{{ brightness }}'
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_front_house_potlights_in_use
 
 ###############################################################################
 ## Light - Front House Potlights Auto On
@@ -89,30 +127,12 @@
   alias: '[Light] Front House Potlights Auto On'
   description: 'Turn on light.'
   max_exceeded: silent
-  variables:
-    current: "{{ state_attr('light.front_house_potlights','brightness')|int(0) }}"
-    brightness: >
-      {% if is_state('binary_sensor.quiet_time','on') %}
-        {{ 80 if current > 80 or current == 0 else current }}
-      {% else %}
-        {{ 150 if current < 150 else current }}
-      {% endif %}
   trigger:
     - platform: state
       id: lux
       entity_id: binary_sensor.nighttime_illuminance_lights
       to: 'on'
       from: 'off'
-
-    - platform: state
-      id: quiet
-      entity_id: binary_sensor.quiet_time
-      to:
-        - 'on'
-        - 'off'
-      from:
-        - 'on'
-        - 'off'
 
     - platform: state
       id: occupancy
@@ -150,23 +170,21 @@
       entity_id: input_boolean.alarm_triggered
       state: 'off'
 
-    - condition: template
-      alias: 'Light not on and already at set brightness.'
-      value_template: '{{ brightness != current if current > 0 else true }}'
-
-    - condition: template
-      alias: 'Light is on if trigger is quiet time light.'
-      value_template: "{{ is_state('light.front_house_potlights','on') if trigger.id == 'quiet' else true }}"
-
     - condition: time # prevent light from turning on in morning
-      before: '02:00'
+      before: input_datetime.day_reset
       after: '12:00'
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_front_house_potlights_in_use
+
     - service: light.turn_on
       target:
         entity_id: light.front_house_potlights
-      data:
-        brightness: '{{ brightness }}'
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_front_house_potlights_in_use
 
 ###############################################################################
 ## Light - Front House Potlights Auto Off
@@ -204,6 +222,14 @@
       entity_id: input_boolean.alarm_triggered
       state: 'off'
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_front_house_potlights_in_use
+
     - service: light.turn_off
       target:
         entity_id: light.front_house_potlights
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_front_house_potlights_in_use

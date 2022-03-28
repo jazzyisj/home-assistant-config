@@ -1,34 +1,109 @@
 ###############################################################################
+## Light - Kitchen Potlights In Use
+###############################################################################
+- id: light_kitchen_potlights_in_use
+  alias: '[Light] Kitchen Potlights In Use'
+  description: 'Turn in use timer on/off when device state changes.'
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.kitchen_potlights
+      to: ~
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: light.kitchen_potlights
+              state: 'on'
+          sequence:
+            - service: timer.start
+              entity_id: timer.kitchen_potlights
+      default:
+        - service: timer.cancel
+          entity_id: timer.kitchen_potlights
+
+###############################################################################
+## Light - Kitchen PotLights Manual Control On
+###############################################################################
+- id: light_kitchen_potlights_manual_control_on
+  alias: '[Light] Kitchen PotLights Manual Control On'
+  description: 'Turn adaptive light manual control on.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.scene_active
+      to: 'on'
+      from: 'off'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_main_lights
+        lights: light.kitchen_potlights
+        manual_control: true
+
+###############################################################################
+## Light - Kitchen PotLights Manual Control Off
+###############################################################################
+- id: light_kitchen_potlights_manual_control_off
+  alias: '[Light] Kitchen PotLights Manual Control Off'
+  description: 'Turn adaptive light manual control off.'
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.kitchen_potlights
+
+    - platform: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.kitchen_potlights
+
+    - platform: state
+      entity_id: binary_sensor.scene_active
+      to: 'off'
+      from: 'on'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - binary_sensor.scene_active
+        - script.morning_lights
+      state: 'off'
+  action:
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_main_lights
+        lights: light.kitchen_potlights
+        manual_control: false
+
+###############################################################################
 ## Light - Kitchen Potlights Auto On
 ###############################################################################
 - id: light_kitchen_potlights_auto_on
   alias: '[Light] Kitchen Potlights Auto On'
   description: 'Turn on light.'
   max_exceeded: silent
-  variables:
-    current: "{{ state_attr('light.kitchen_potlights','brightness')|int(0) }}"
-    brightness: >
-      {% if is_state('binary_sensor.quiet_time','on') %}
-        {{ 15 if current > 15 or current == 0 else current }}
-      {% else %}
-        {{ 70 if current < 70 else current }}
-      {% endif %}
   trigger:
     - platform: state
       id: lux
       entity_id: binary_sensor.nighttime_illuminance_lights
       to: 'on'
       from: 'off'
-
-    - platform: state
-      id: quiet
-      entity_id: binary_sensor.quiet_time
-      to:
-        - 'on'
-        - 'off'
-      from:
-        - 'on'
-        - 'off'
+      for:
+        minutes: 90
 
     - platform: state
       id: occupancy
@@ -49,8 +124,7 @@
         - script.morning_lights
         - binary_sensor.scene_active
       to: 'off'
-      from: 'on' # script reload
-
+      from: 'on' # script/template reload
   condition:
     - condition: state
       entity_id:
@@ -63,12 +137,13 @@
       value_template: >
         {{ is_state('input_boolean.presence_automation','on')
               and is_state('input_boolean.occupancy_override','off')
-            if trigger.id == 'occupancy' else true }}
+            if trigger.id in ['away','night'] else true }}
 
     - condition: state
       entity_id:
         - input_boolean.alarm_triggered
-        - binary_sensor.light_scene_active
+        - binary_sensor.scene_active
+        - script.morning_lights
       state: 'off'
 
     - condition: state
@@ -76,22 +151,18 @@
       state:
         - Home
         - Guest
-
-    - condition: template
-      alias: 'Light not on and already at set brightness.'
-      value_template: '{{ brightness != current if current > 0 else true }}'
-
-    - condition: template
-      alias: 'Light is on if trigger is quiet time light.'
-      value_template: >
-        {{ is_state('light.kitchen_potlights','on')
-            if trigger.id == 'quiet' else true }}
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_kitchen_potlights_in_use
+
     - service: light.turn_on
       target:
         entity_id: light.kitchen_potlights
-      data:
-        brightness: '{{ brightness }}'
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_kitchen_potlights_in_use
 
 ###############################################################################
 ## Light - Kitchen Potlights Auto Off
@@ -150,9 +221,18 @@
     - condition: state
       entity_id:
         - input_boolean.alarm_triggered
-        - binary_sensor.light_scene_active
+        - binary_sensor.scene_active
+        - script.morning_lights
       state: 'off'
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_kitchen_potlights_in_use
+
     - service: light.turn_off
       target:
         entity_id: light.kitchen_potlights
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_kitchen_potlights_in_use

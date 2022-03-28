@@ -6,7 +6,10 @@
       unique_id: alarm_connected
       icon: "{{ 'mdi:shield-home' if is_state('binary_sensor.alarm_connected','on') else 'mdi:alert-circle' }}"
       device_class: connectivity
-      state: "{{ not states('alarm_control_panel.master')|lower in ['unknown','unavailable','none'] }}"
+      state: >
+        {{ not states('alarm_control_panel.master')|lower in ['unknown','unavailable','none']
+            and not states('alarm_control_panel.house')|lower in ['unknown','unavailable','none']
+            and not states('alarm_control_panel.garage')|lower in ['unknown','unavailable','none'] }}
 
     - name: 'Alarm Connected Alert'
       unique_id: alarm_connected_alert
@@ -25,23 +28,20 @@
               or is_state('input_boolean.alarm_auto_arming','off'))
             and is_state('input_boolean.alarm_alerts','on') }}
 
-    - name: 'Alarm Auto Arming Disabled Alert'
-      unique_id: alarm_auto_arming_disabled_alert # reverse bool for lovelace glance menus
+    - name: 'Alarm Auto Arming Alert'
+      unique_id: alarm_auto_arming_alert # reverse boolean for lovelace glance menus
       icon: mdi:account-arrow-right
-      state: "{{ is_state('input_boolean.alarm_auto_arming','off') and is_state('input_boolean.alarm_automation','on') }}"
+      state: "{{ is_state('input_boolean.alarm_auto_arming','off') and is_state('input_boolean.alarm_alerts','on') }}"
 
-    # alarm is disconnected, arming, pending or triggered
-    # alarm state changed within last 5 minutes, forces precedence over presence led etc.
-    - name: 'Alarm LED Alert'
-      unique_id: alarm_led_alert
+    - name: 'Alarm Zone Sync Alert'
+      unique_id: alarm_zone_sync_alert
+      icon: mdi:shield-alert
+      delay_on: "{{ 0 if is_state('binary_sensor.alarm_zone_sync_alert','unknown') else 3600 }}"
       state: >
-        {{ is_state('input_boolean.alarm_triggered','on')
-            or states('alarm_control_panel.master') in ['arming','pending','triggered']
-            or now() - states.alarm_control_panel.master.last_changed < timedelta(minutes=5)
-            or is_state('binary_sensor.alarm_open_sensor_alert','on')
-            or is_state('alert.alarm_connected','on')
-            or is_state('alert.door_lock_jammed','on')
-            or is_state('alert.door_lock_failed','on') }}
+        {{ (states('alarm_control_panel.house') != states('alarm_control_panel.master')
+            or states('alarm_control_panel.garage') != states('alarm_control_panel.master'))
+            and is_state('input_boolean.alarm_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
 
     - name: 'Alarm Pending Alert'
       unique_id: alarm_pending_alert
@@ -60,16 +60,6 @@
             and is_state('input_boolean.startup_pending','off') }}
       availability: "{{ states('binary_sensor.someone_home') in ['off','on'] }}"
 
-    - name: 'Garage Disarmed Alert'
-      unique_id: garage_disarmed_alert
-      icon: mdi:shield-alert
-      delay_on: "{{ 0 if is_state('binary_sensor.garage_disarmed_alert','unknown') else 3600 }}"
-      state: >
-        {{ is_state('alarm_control_panel.garage','disarmed')
-            and not is_state('alarm_control_panel.master','disarmed')
-            and is_state('input_boolean.alarm_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
-
     - name: 'Alarm Open Sensor Alert'
       unique_id: alarm_open_sensor_alert
       icon: mdi:shield-alert
@@ -87,6 +77,21 @@
             and state_attr('alarm_control_panel.master','bypassed_sensors')|lower != 'none'
             and is_state('input_boolean.alarm_alerts','on') }}
 
+    # alarm is disconnected, arming, pending or triggered
+    # alarm state changed within last minute, forces priority over presence led etc. for 1 minute
+    - name: 'Alarm LED Alert'
+      unique_id: alarm_led_alert
+      state: >
+        {{ is_state('input_boolean.alarm_triggered','on')
+            or states('alarm_control_panel.master') in ['arming','pending','triggered']
+            or now() - states.alarm_control_panel.master.last_changed < timedelta(minutes=1)
+            or is_state('alert.alarm_connected','on')
+            or is_state('alert.alarm_zone_sync','on')
+            or is_state('binary_sensor.alarm_open_sensor_alert','on')
+            or is_state('binary_sensor.alarm_bypassed_sensor_alert','on')
+            or is_state('alert.door_lock_jammed','on')
+            or is_state('alert.door_lock_failed','on') }}
+
     - name: 'Garage Occupied'
       unique_id: garage_occupied
       state: >
@@ -94,9 +99,17 @@
             or is_state('binary_sensor.garage_door_open','on')
             or is_state('binary_sensor.garage_sensor_motion','on') }}
 
+    - name: 'Danger Alarm'
+      unique_id: danger_alarm
+      state: >
+        {{ (is_state('binary_sensor.smoke_alarm','on')
+              or is_state('binary_sensor.co_alarm','on')
+              or is_state('binary_sensor.heat_alarm','on'))
+            and is_state('alarm_control_panel.master','triggered') }}
+
 - sensor:
-    - name: 'Alarm Status'
-      unique_id: alarm_status
+    - name: 'Master Alarm Status'
+      unique_id: master_alarm_status
       icon: >
         {% if is_state('binary_sensor.alarm_connected','off') %} mdi:shield-remove
         {% elif is_state('input_boolean.alarm_automation','off') %} mdi:shield-off
@@ -115,8 +128,28 @@
         {% else %}{{ states('alarm_control_panel.master')|replace('_',' ')|title }}
         {% endif %}
 
-    - name: 'Alarm Status Garage'
-      unique_id: alarm_status_garage
+    - name: 'House Alarm Status'
+      unique_id: house_alarm_status
+      icon: >
+        {% if is_state('binary_sensor.alarm_connected','off') %} mdi:shield-remove
+        {% elif is_state('input_boolean.alarm_automation','off') %} mdi:shield-off
+        {% elif is_state('alarm_control_panel.house','disarmed') %} mdi:shield-check
+        {% elif is_state('alarm_control_panel.house','armed_home') %} mdi:shield-home
+        {% elif is_state('alarm_control_panel.house','armed_night') %} mdi:shield-moon
+        {% elif is_state('alarm_control_panel.house','armed_away') %} mdi:shield-lock
+        {% elif is_state('alarm_control_panel.house','arming') %} mdi:shield-half-full
+        {% elif is_state('alarm_control_panel.house','pending') %} mdi:shield-alert-outline
+        {% elif is_state('alarm_control_panel.house','triggered') %} mdi:shield-alert
+        {% else %} mdi:alert
+        {% endif %}
+      state: >
+        {% if is_state('binary_sensor.alarm_connected','off') %} Disconnected
+        {% elif is_state('input_boolean.alarm_automation','off') %} Disabled
+        {% else %}{{ states('alarm_control_panel.house')|replace('_',' ')|title }}
+        {% endif %}
+
+    - name: 'Garage Alarm Status'
+      unique_id: garage_alarm_status
       icon: >
         {% if is_state('binary_sensor.alarm_connected','off') %} mdi:shield-remove
         {% elif is_state('input_boolean.alarm_automation','off') %} mdi:shield-off
@@ -127,6 +160,7 @@
         {% elif is_state('alarm_control_panel.garage','arming') %} mdi:shield-half-full
         {% elif is_state('alarm_control_panel.garage','pending') %} mdi:shield-alert-outline
         {% elif is_state('alarm_control_panel.garage','triggered') %} mdi:shield-alert
+        {% elif is_state('binary_sensor.alarm_connected','off') %} mdi:shield-remove
         {% else %} mdi:alert
         {% endif %}
       state: >

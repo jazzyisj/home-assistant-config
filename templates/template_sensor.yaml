@@ -1,7 +1,87 @@
 ###############################################################################
 ## Template - Sensor
 ###############################################################################
+- button:
+    - name: 'Indoor Sump Hours Reset'
+      unique_id: indoor_sump_hours_reset
+      icon: mdi:pump
+      press:
+        - service: script.null_script
+
+    - name: 'Outdoor Sump Hours Reset'
+      unique_id: outdoor_sump_hours_reset
+      icon: mdi:pump
+      press:
+        - service: script.null_script
+
 - binary_sensor:
+    - name: 'LG ThinQ Connected'
+      unique_id: lg_thinq_connected
+      icon: "{{ 'mdi:fridge-industrial' if is_state('binary_sensor.lg_thinq_connected','on') else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: "{{ states('climate.refrigerator_fridge')|lower not in ['unknown','unavailable','none'] }}"
+
+    - name: 'LG ThinQ Connected Alert'
+      unique_id: lg_thinq_connected_alert
+      icon: mdi:fridge-industrial-alert
+      state: "{{ is_state('binary_sensor.lg_thinq_connected','off') }}"
+
+    - name: 'Nest Protect Connected'
+      unique_id: nest_protect_connected
+      icon: "{{ 'mdi:smoke-detector-variant' if is_state('binary_sensor.nest_protect_connected','on') else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: >
+        {{ is_state('binary_sensor.nest_protect_upstairs_connected','on')
+            or is_state('binary_sensor.nest_protect_downstairs_connected','on') }}
+
+    - name: 'Nest Protect Upstairs Connected'
+      unique_id: nest_protect_upstairs_connected
+      icon: "{{ 'mdi:smoke-detector-variant' if is_state('binary_sensor.nest_protect_connected','on') else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: "{{ states('binary_sensor.nest_protect_upstairs_smoke_status') in ['on','off'] }}"
+
+    - name: 'Nest Protect Downstairs Connected'
+      unique_id: nest_protect_downstairs_connected
+      icon: "{{ 'mdi:smoke-detector-variant' if is_state('binary_sensor.nest_protect_connected','on') else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: "{{ states('binary_sensor.nest_protect_downstairs_smoke_status') in ['on','off'] }}"
+
+    - name: 'Nest Protect Connected Alert'
+      unique_id: nest_protect_connected_alert
+      icon: mdi:smoke-detector-variant-off
+      state: >
+        {{ is_state('binary_sensor.nest_protect_connected','off')
+            and is_state('input_boolean.sensor_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
+    - name: 'Power Use Alert'
+      unique_id: power_use_alert
+      icon: mdi:flash-alert
+      device_class: safety
+      delay_on: 300
+      state: "{{ states('sensor.current_power_use_kw')|float(-1) > 11 }}"
+
+    - name: 'Smoke Alarm'
+      unique_id: smoke_alarm
+      device_class: smoke
+      state: >
+        {{ is_state('binary_sensor.nest_protect_downstairs_smoke_status','on')
+            or is_state('binary_sensor.nest_protect_downstairs_smoke_status','on') }}
+
+    - name: 'CO Alarm'
+      unique_id: co_alarm
+      device_class: gas
+      state: >
+        {{ is_state('binary_sensor.nest_protect_downstairs_co_status','on')
+            or is_state('binary_sensor.nest_protect_downstairs_co_status','on') }}
+
+    - name: 'Heat Alarm'
+      unique_id: heat_alarm
+      device_class: heat
+      state: >
+        {{ is_state('binary_sensor.nest_protect_downstairs_heat_status','on')
+            or is_state('binary_sensor.nest_protect_downstairs_heat_status','on') }}
+
     - name: 'Sump Active'
       unique_id: sump_active
       icon: mdi:pump
@@ -24,15 +104,55 @@
       state: "{{ states('sensor.outdoor_sump_power')|int(-1) > 10 }}"
       availability: "{{ is_number(states('sensor.outdoor_sump_power')) }}"
 
-- button:
-    - name: 'Indoor Sump Hours Reset'
-      unique_id: indoor_sump_hours_reset
-      icon: mdi:pump
-      press:
-        - service: script.null_script
+    - name: 'Unavailable Motion'
+      unique_id: unavailable_motion
+      icon: mdi:motion-sensor
+      device_class: problem
+      state: >
+        {% if state_attr('binary_sensor.unavailable_motion','entity_id') != none %}
+          {{ state_attr('binary_sensor.unavailable_motion','entity_id')|count > 0  }}
+        {% endif %}
+      attributes:
+        entity_id: >
+          {{ states.binary_sensor|selectattr('attributes.device_class','eq','motion')
+              |selectattr('state','in',['unknown','unavailable'])|map(attribute='entity_id')|list }}
+- sensor:
+    - name: 'Current Power Use [W]'
+      unique_id: current_power_use_w
+      icon: mdi:lightning-bolt
+      device_class: power
+      state_class: measurement
+      unit_of_measurement: W
+      state: >
+        {{ states('sensor.house_energy_monitor_channel_a_power')|float(0)
+            + states('sensor.house_energy_monitor_channel_b_power')|float(0) }}
 
-    - name: 'Outdoor Sump Hours Reset'
-      unique_id: outdoor_sump_hours_reset
-      icon: mdi:pump
-      press:
-        - service: script.null_script
+    - name: 'Current Power Use [kW]'
+      unique_id: current_power_use_kw
+      icon: mdi:lightning-bolt
+      device_class: power
+      state_class: measurement
+      unit_of_measurement: kW
+      state: "{{ (states('sensor.current_power_use_w')|float(0)/1000)|round(2) }}"
+
+    #ISSUE https://github.com/iMicknl/ha-nest-protect/issues/58
+    #NEST until issue fixed
+    - name: 'Nest Protect Upstairs Replace'
+      unique_id: nest_protect_upstairs_replace
+      icon: mdi:calendar-account-outline
+      device_class: timestamp
+      state: >
+        {% if is_state('input_boolean.startup_pending','off') %}
+          {{ states('sensor.nest_protect_upstairs_replace_by')|as_datetime|as_local }}
+        {% else %} {{ none }}
+        {% endif %}
+
+    - name: 'Nest Protect Downstairs Replace'
+      unique_id: nest_protect_downstairs_replace
+      icon: mdi:calendar-account-outline
+      device_class: timestamp
+      state: >
+        {% if is_state('input_boolean.startup_pending','off') %}
+          {{ states('sensor.nest_protect_downstairs_replace_by')|as_datetime|as_local }}
+        {% else %} {{ none }}
+        {% endif %}

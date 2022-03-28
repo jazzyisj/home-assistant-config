@@ -10,11 +10,24 @@ arrive_home_lights:
       description: 'Person is first person home.'
       example: 'true'
   sequence:
+    - choose: # turn side entrance light on or in use timer
+        - conditions:
+            - condition: state
+              entity_id: light.side_entrance_light
+              state: 'on'
+          sequence:
+            - service: timer.start
+              entity_id: timer.side_entrance_light
+      default:
+        - service: light.turn_on
+          target:
+            entity_id: light.side_entrance_light
+
     - condition: state
       entity_id: binary_sensor.nighttime_illuminance_lights
       state: 'on'
 
-    # don't restore if nobody else was home (lights were off)
+    # not restoring if nobody else was home (lights were off)
     - choose:
         - conditions: '{{ not first_home }}'
           sequence:
@@ -32,50 +45,36 @@ arrive_home_lights:
                     state: "{{ states('light.hallway_potlights') }}"
                     brightness: "{{ state_attr('light.hallway_potlights','brightness')|int(0) }}"
 
-            - service: timer.start
-              entity_id: timer.arrive_home_lights
+    - service: timer.start
+      entity_id: timer.arrive_home_lights
 
-    - choose: # turn side entrance light on or in use timer
-        - conditions:
-            - condition: state
-              entity_id: light.side_entrance_light
-              state: 'on'
-          sequence:
-            - service: timer.start
-              entity_id: timer.side_entrance_light
-      default:
-        - service: light.turn_on
-          target:
-            entity_id: light.side_entrance_light
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_outside_lights
+        lights: light.upstairs_potlights
+        manual_control: true
 
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: binary_sensor.nighttime_illuminance_lights
-              state: 'on'
-          sequence:
-            - service: light.turn_on
-              target:
-                entity_id: light.upstairs_potlights
-              data:
-                brightness: >
-                  {% set current = state_attr('light.hallway_potlights','brightness')|int(0) %}
-                  {% if is_state('input_select.occupancy_mode','Night') %} 5
-                  {% elif is_state('binary_sensor.quiet_time','on') %} 20
-                  {% elif current < 90 %} 90
-                  {% else %}{{ current }}
-                  {% endif %}
+    - service: light.turn_on
+      target:
+        entity_id: light.upstairs_potlights
+
+    - alias: 'Wait for arrive home timer to finish'
+      wait_for_trigger:
+        - platform: state
+          entity_id: timer.arrive_home_lights
+          to: 'idle'
+      timeout: 900
+
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_outside_lights
+        lights: light.upstairs_potlights
+        manual_control: false
 
     # don't restore if nobody else was home (lights were off)
     - choose:
         - conditions: '{{ not first_home }}'
           sequence:
-            - alias: 'Wait for arrive home timer to finish'
-              wait_for_trigger:
-                - platform: state
-                  entity_id: timer.arrive_home_lights
-                  to: 'idle'
-
             - service: script.activate_light_scene
               data:
                 scene: arrive_home_lights_restore

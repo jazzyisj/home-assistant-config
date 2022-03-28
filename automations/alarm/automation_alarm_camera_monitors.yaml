@@ -6,8 +6,8 @@
   description: 'Turn camera monitors on.'
   trigger:
     - platform: state
-      entity_id: alarm_control_panel.master
-      to: triggered
+      entity_id: input_boolean.alarm_triggered
+      to: 'on'
   condition:
     - condition: state
       entity_id:
@@ -15,26 +15,36 @@
         - input_boolean.media_player_automation
         - binary_sensor.someone_home
       state: 'on'
+
+    # no cams for environmental alarms
+    - condition: state
+      entity_id:
+        - binary_sensor.smoke_alarm
+        - binary_sensor.co_alarm
+        - binary_sensor.heat_alarm
+      state: 'off'
   action:
     - service: media_player.turn_on
       entity_id:
         - media_player.living_room_tv
         - media_player.bedroom_tv
 
-    - service: remote.turn_on
-      entity_id: remote.office_tv
-
-    - wait_template: >
-        {{ is_state('media_player.living_room_tv','on')
-            and is_state('media_player.bedroom_tv','on')
-            and is_state('media_player.office_tv','on') }}
-      timeout: 30
+    # if office tv unavailable - Error while executing automation automation.alarm_camera_monitors: Unable to find service remote.turn_on
+    - choose:
+        - conditions: "{{ states('media_player.office_tv')|lower not in ['unknown','unavailable','none'] }}"
+          sequence:
+            - service: remote.turn_on
+              entity_id: remote.office_tv
 
     - wait_template: > # wait for source to be available
         {{ 'HDMI 1' in state_attr('media_player.living_room_tv','source_list')
             and 'HDMI 1' in state_attr('media_player.bedroom_tv','source_list')
             and 'Camera' in state_attr('media_player.office_tv','source_list') }}
-      timeout: 30
+      timeout: 60
+
+    #ISSUE WARNING (MainThread) [homeassistant.components.webostv.media_player] Error calling async_select_source on entity media_player.bedroom_tv, state:off, error: WebOsTvCommandError("Not connected, can't execute command.")
+    #IDEA way to test connection?
+    - delay: 15 # wait for connection #BUG still sometimes not connected - TV won't turn off after alarm if turned on
 
     - service: media_player.select_source
       target:
@@ -52,18 +62,39 @@
 
     - wait_template: "{{ is_state('input_boolean.alarm_triggered','off') }}"
 
-    #ISSUE - source doesn't change if changed on TV on webos, can't check if source changed
-    # - choose: # tv is still on security cam is still camera source, turn it off
-    #     - conditions: "{{ is_state_attr('media_player.living_room_tv','source','HDMI 1') }}"
-    #       sequence:
-    - service: media_player.turn_off
-      entity_id: media_player.living_room_tv
+    # source changes not detected on webos
+    - service: homeassistant.update_entity
+      target:
+        entity_id:
+          - media_player.living_room_tv
+          - media_player.bedroom_tv
 
-    # - choose:
-    #     - conditions: "{{ is_state_attr('media_player.bedroom_tv','source','HDMI 1') }}"
-    #       sequence:
-    - service: media_player.turn_off
-      entity_id: media_player.bedroom_tv
+    - delay: 10 # wait for update
+
+    - choose: # tv is still on security cam is still camera source, turn it off
+        - conditions: "{{ is_state_attr('media_player.living_room_tv','source','HDMI 1') }}"
+          sequence:
+            - service: media_player.select_source
+              target:
+                entity_id: media_player.living_room_tv
+              data:
+                source: Live TV
+
+            - service: media_player.turn_off
+              entity_id: media_player.living_room_tv
+
+    - choose:
+        - conditions: "{{ is_state_attr('media_player.bedroom_tv','source','HDMI 1') }}"
+          sequence:
+            - service: media_player.select_source
+              target:
+                entity_id: media_player.bedroom_tv
+              data:
+                source: Live TV
+
+            - service: media_player.turn_off
+              target:
+                entity_id: media_player.bedroom_tv
 
     - choose:
         - conditions: "{{ is_state_attr('media_player.office_tv','source','Camera') }}"

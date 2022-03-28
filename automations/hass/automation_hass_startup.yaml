@@ -20,7 +20,6 @@
         message: 'Waiting for startup to complete.'
         notification_id: startup_delay
 
-    - service: script.update_groups
     # wait for entities to initialize before continuing
     # use integration group state - binary sensor will always be on at startup
     # use offline devices sensor - binary sensor will always be on at startup
@@ -37,19 +36,6 @@
 
     - service: input_boolean.turn_off
       entity_id: input_boolean.startup_pending
-
-    - variables:
-        hass_leds: >
-          {{ states.light|selectattr('attributes.led_hass','eq',true)
-              |selectattr('state','in',['on','off'])|map(attribute='entity_id')|list }}
-
-    - service: script.inovelli_led_control
-      data:
-        duration: 255
-        color: 105
-        effect: solid
-        brightness: 10
-        entities: '{{ hass_leds }}'
 
     - service: persistent_notification.dismiss
       data:
@@ -122,6 +108,21 @@
                             - title: 'Close'
                               action: close_hass_restart
 
+    - delay: 5 # allow script.led_reset to run
+
+    - variables:
+        hass_leds: >
+          {{ states.light|selectattr('attributes.led_hass','eq',true)
+              |selectattr('state','in',['on','off'])|map(attribute='entity_id')|list }}
+
+    - service: script.inovelli_led_control
+      data:
+        duration: 255
+        color: 105
+        effect: solid
+        brightness: 10
+        entities: '{{ hass_leds }}'
+
     - service: system_log.write
       data:
         level: critical
@@ -136,12 +137,14 @@
   description: 'Clear notification.'
   max_exceeded: silent
   trigger:
-    - platform: event #NOTE from_state of a dismissed persistent notifcations is null, must use state_changed event
+    #NOTE from_state of a dismissed persistent notifcations is null, must use state_changed event
+    - platform: event
       event_type: state_changed
       event_data:
         entity_id: persistent_notification.hass_restart
 
-    - platform: event #BUG html5 closed event doesn't work if notification is in tray
+    #BUG html5 closed event doesn't work if notification is in tray
+    - platform: event
       event_type: html5_notification.closed
       event_data:
         tag: hass_restart
@@ -155,7 +158,8 @@
       event_type: mobile_app_notification_cleared
       event_data:
         tag: hass_restart
-  condition: #BUGFIX conditions required as workaround for unknown persistent notification state
+  condition:
+    #BUGFIX conditions required as workaround for unknown persistent notification state
     - condition: or
       conditions:
         - "{% if trigger.event is defined %}{{ trigger.event.data['tag'] == 'hass_restart' }}{% endif %}"

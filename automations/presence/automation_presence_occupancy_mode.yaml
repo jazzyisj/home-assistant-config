@@ -24,9 +24,7 @@
           sequence:
             - service: script.turn_off
               target:
-                entity_id:
-                  - script.bedtime
-                  - script.bedtime_lights
+                entity_id: script.bedtime
 
             - choose:
                 - conditions:
@@ -107,7 +105,6 @@
                   - script.waketime
                   - script.morning_lights
                   - script.bedtime
-                  - script.bedtime_lights
 
             - service: timer.cancel # light timers cancelled here so lights / fans can turn off
               target:
@@ -190,7 +187,6 @@
       entity_id: input_boolean.startup_pending
       to: 'off'
       from: 'on'
-      for: 60 # let sensor states register
   condition:
     - condition: state
       entity_id: input_boolean.presence_automation
@@ -201,18 +197,22 @@
       target:
         entity_id: input_select.occupancy_mode
       data:
+        # set bedtime back 1 day when bedtime jumps ahead of waketime at day reset
         option: >
           {% set waketime = states('sensor.waketime_today')|as_datetime
-            if states('sensor.next_waketime')|lower not in ['unknown','unavailable','none'] else none %}
+            if states('sensor.waketime_today')|lower not in ['unknown','unavailable','none'] else none %}
           {% set bedtime = states('sensor.bedtime_today')|as_datetime
             if states('sensor.bedtime_today')|lower not in ['unknown','unavailable','none'] else none %}
-
+          {% if bedtime != none and waketime != none %}
+            {% set bedtime = bedtime + timedelta(days=1) if bedtime > waketime else bedtime %}
+          {% endif %}
           {% if is_state('binary_sensor.someone_home','off') %}
             {{ 'Vacation' if is_state('input_select.occupancy_mode','Vacation') else 'Away' }}
           {% elif bedtime == none or waketime == none %}
-            {{ 'Guest' if is_state('binary_sensor.owner_home','off') else 'Home' }}
+            {{ 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
           {% elif bedtime < now() < waketime %}
-            {{ 'Night' if is_state('input_boolean.bedtime_delayed','off') else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
+            {{ 'Night' if is_state('input_boolean.bedtime_delayed','off')
+                else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') }}
           {% else %}
-            {{ 'Guest' if is_state('input_boolean.guest_home','on') and is_state('binary_sensor.owner_home','off') else 'Home' }}
+            {{ 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' }}
           {% endif %}

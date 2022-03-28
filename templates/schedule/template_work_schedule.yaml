@@ -2,53 +2,42 @@
 ## Templates - Work Schedule
 ###############################################################################
 - binary_sensor:
-    - name: 'Work Schedule'
-      unique_id: work_schedule
-      icon: >
-        {% if is_state('binary_sensor.commute_active','on') %}
-          {{ states.binary_sensor.commute_active.attributes.icon }}
-        {% elif is_state('binary_sensor.work_today','on') %}
-          {{ states.binary_sensor.work_today.attributes.icon }}
-        {% elif is_state('calendar.work_holiday','on') %}
-          {{ states.calendar.work_holiday.attributes.icon }}
-        {% else %}
-        mdi:factory
-        {% endif %}
-      state: >
-        {{ is_state('input_boolean.work_schedule','on')
-          and is_state('binary_sensor.work_vacation','off')
-          and is_state('binary_sensor.work_layoff','off') }}
-      availability: >
-        {{ states('binary_sensor.work_vacation') in ['on','off']
-            and states('binary_sensor.work_layoff') in ['on','off'] }}
-
-    #MIDNIGHT delay for afts -> days - prevent after work last work day on afts missed automations
+    #MIDNIGHT delay for afts shift swing - day change happens at day_reset instead of midnight
+    # for afts after work and shift swings for missed automations, bedtime etc
     - name: 'Work Today'
       unique_id: work_today
       icon: >
         {% if states.sensor.work_shift_today.attributes is defined %}
           {{ states.sensor.work_shift_today.attributes.icon }}
         {% endif %}
-      #BUG last_changed read after delay template evaluated?
-      #BUGFIX must toggle boolean twice to update last_changed - automation.schedule_automation_toggle_work_today_off
-      #NOTE delay 1 instead of 0 so no triggers when input_boolean.work_today_off toggles
+      #BUG last_changed read after state/delay template evaluated?
+      # delay 1 instead of 0 so no triggers when input_boolean.work_today_off toggles
       delay_on: >
         {{ 1 if is_state('binary_sensor.work_today','unknown')
-              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
             else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       delay_off: >
         {{ 1 if is_state('binary_sensor.work_today','unknown')
-              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
             else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       state: >
-        {% if is_state('binary_sensor.work_schedule','off')
-            or is_state('input_boolean.work_today_off','on') %} false
-        {% elif is_state('calendar.work_holiday','on') %} {{ is_state('input_boolean.holiday_workday','on') }}
-        {% elif now().weekday() == 5 %} {{ is_state('input_boolean.saturday_workday','on') }}
-        {% elif now().weekday() == 6 %} {{ is_state('input_boolean.sunday_workday','on') }}
-        {% else %} {{ is_state('binary_sensor.workday','on') }}
+        {% if is_state('input_boolean.work_schedule','on') %}
+          {% if is_state('input_boolean.work_today_off','on')
+              or is_state('binary_sensor.work_vacation','on')
+              or is_state('binary_sensor.work_layoff','on') %} false
+          {% elif is_state('calendar.work_holiday','on') %} {{ is_state('input_boolean.holiday_workday','on') }}
+          {% elif now().weekday() == 5 %} {{ is_state('input_boolean.saturday_workday','on') }}
+          {% elif now().weekday() == 6 %} {{ is_state('input_boolean.sunday_workday','on') }}
+          {% else %} {{ is_state('binary_sensor.workday','on') }}
+          {% endif %}
+        {% else %} false
         {% endif %}
-      availability: "{{ states('binary_sensor.work_schedule') in ['on','off'] }}"
 
     - name: 'Work Tomorrow'
       unique_id: work_tomorrow
@@ -56,76 +45,108 @@
         {% if states.sensor.work_shift_tomorrow.attributes is defined %}
           {{ states.sensor.work_shift_tomorrow.attributes.icon }}
         {% endif %}
+      delay_on: >
+        {{ 1 if is_state('binary_sensor.work_tomorrow','unknown')
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.work_tomorrow_off.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
+            else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
+      delay_off: >
+        {{ 1 if is_state('binary_sensor.work_tomorrow','unknown')
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.work_tomorrow_off.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
+            else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       state: >
-        {% if is_state('binary_sensor.work_schedule','off')
-            or is_state('input_boolean.work_tomorrow_off','on') %} false
-        {% elif is_state('binary_sensor.work_holiday_tomorrow','on') %} {{ is_state('input_boolean.holiday_workday','on') }}
-        {% elif now().weekday() == 4 %} {{ is_state('input_boolean.saturday_workday','on') }}
-        {% elif now().weekday() == 5 %} {{ is_state('input_boolean.sunday_workday','on') }}
-        {% else %} {{ is_state('binary_sensor.workday_tomorrow','on') }}
+        {% if is_state('input_boolean.work_schedule','on') %}
+          {% if is_state('input_boolean.work_tomorrow_off','on')
+            or (is_state('binary_sensor.work_vacation','on')
+              and not is_state_attr('binary_sensor.work_vacation','ends_today',true))
+            or is_state_attr('binary_sensor.work_vacation','starts_tomorrow',true)
+            or (is_state('binary_sensor.work_layoff','on')
+              and not is_state_attr('binary_sensor.work_layoff','ends_today',true))
+            or is_state_attr('binary_sensor.work_layoff','starts_tomorrow',true) %} false
+          {% elif is_state('binary_sensor.work_holiday_tomorrow','on') %} {{ is_state('input_boolean.holiday_workday','on') }}
+          {% elif now().weekday() == 4 %} {{ is_state('input_boolean.saturday_workday','on') }}
+          {% elif now().weekday() == 5 %} {{ is_state('input_boolean.sunday_workday','on') }}
+          {% else %} {{ is_state('binary_sensor.workday_tomorrow','on') }}
+          {% endif %}
+        {% else %} false
         {% endif %}
 
+    # calendar dates not tz aware - use as_local
     # holiday start within 24 hours and holiday end not in past
     - name: 'Work Holiday Tomorrow'
       unique_id: work_holiday_tomorrow
       state: >
         {% if state_attr('calendar.work_holiday','start_time') != none
             and state_attr('calendar.work_holiday','end_time') != none %}
-          {# calendar dates not tz aware #}
-          {% set start = state_attr('calendar.work_holiday','start_time')|as_datetime|as_local %}
-          {% set end = state_attr('calendar.work_holiday','end_time')|as_datetime|as_local %}
-            {{ start - now() <= timedelta(days=1) and end > now() }}
+          {% set holiday_start = state_attr('calendar.work_holiday','start_time')|as_datetime|as_local %}
+          {% set holiday_end = state_attr('calendar.work_holiday','end_time')|as_datetime|as_local %}
+          {% set reset_hours = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).hour %}
+          {% set reset_minutes = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).minute %}
+          {{ holiday_start - now() < timedelta(hours=reset_hours,minutes=reset_minutes)
+              and holiday_end - now() > timedelta(hours=reset_hours,minutes=reset_minutes) }}
         {% endif %}
 
-    # work layoff/vacation start within day_reset hours and end more than day_reset hours away
-    # jason vacation, sheri vacation - both must be true
-
-    #MIDNIGHT work today delayed keeps work_today sensor off when this turns off early
+    # calendar dates not tz aware - use as_local
+    # jason vacation, sheri vacation must both be on for vacation mode
     - name: 'Work Vacation'
       unique_id: work_vacation
       icon: mdi:beach
-      state: >
-        {% if state_attr('calendar.work_vacation_jason','start_time') != none
-            and state_attr('calendar.work_vacation_jason','end_time') != none
-            and state_attr('calendar.work_vacation_sheri','start_time') != none
-            and state_attr('calendar.work_vacation_sheri','end_time') != none %}
-          {# calendar dates not tz aware #}
-          {% set vac_jason_start =  state_attr('calendar.work_vacation_jason','start_time')|as_local %}
-          {% set vac_jason_end =  state_attr('calendar.work_vacation_jason','end_time')|as_local %}
-          {% set vac_sheri_start =  state_attr('calendar.work_vacation_sheri','start_time')|as_local %}
-          {% set vac_sheri_end =  state_attr('calendar.work_vacation_sheri','end_time')|as_local %}
-          {% set reset_hours = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).hour %}
-          {% set reset_minutes = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).minute %}
-          {{ vac_jason_start - now() < timedelta(hours=reset_hours) and vac_jason_end - now() > timedelta(hours=reset_hours,minutes=reset_minutes)
-                and vac_sheri_start - now() < timedelta(hours=reset_hours) and vac_sheri_end - now() > timedelta(hours=reset_hours,minutes=reset_minutes) }}
-        {% endif %}
+      state: "{{ is_state('calendar.work_vacation_jason','on') and is_state('calendar.work_vacation_sheri','on') }}"
+      attributes:
+        ends_today: >
+          {% if state_attr('calendar.work_vacation_jason','end_time') != none
+              and state_attr('calendar.work_vacation_sheri','end_time') != none %}
+            {{ (is_state('calendar.work_vacation_jason','on')
+                  and state_attr('calendar.work_vacation_jason','end_time')|as_datetime|as_local < today_at('00:00') + timedelta(days=1))
+                and (is_state('calendar.work_vacation_sheri','on')
+                  and state_attr('calendar.work_vacation_sheri','end_time')|as_datetime|as_local < today_at('00:00') + timedelta(days=1)) }}
+          {% endif %}
+        starts_tomorrow: >
+          {% if state_attr('calendar.work_vacation_jason','start_time') != none
+              and state_attr('calendar.work_vacation_sheri','start_time') != none %}
+            {{ (is_state('binary_sensor.work_vacation_jason','off')
+                  and state_attr('calendar.work_vacation_jason','start_time')|as_datetime|as_local < today_at('23:59') + timedelta(days=1))
+                and (is_state('binary_sensor.work_vacation_sheri','off')
+                  and state_attr('calendar.work_vacation_sheri','start_time')|as_datetime|as_local < today_at('23:59') + timedelta(days=1)) }}
+          {% endif %}
+      availability: >
+        {{ states('calendar.work_vacation_jason')|lower not in ['unknown','unavailable','none']
+            and states('calendar.work_vacation_sheri')|lower not in ['unknown','unavailable','none'] }}
 
-    #MIDNIGHT work today delayed keeps work_today sensor off when this turns off early
+    # calendar dates not tz aware - use as_local
     - name: 'Work Layoff'
       unique_id: work_layoff
       icon: mdi:factory
-      state: >
-        {% if state_attr('calendar.work_layoff','start_time') != none
-            and state_attr('calendar.work_layoff','end_time') != none %}
-          {# calendar dates not tz aware #}
-          {% set layoff_start = state_attr('calendar.work_layoff','start_time')|as_datetime|as_local %}
-          {% set layoff_end = state_attr('calendar.work_layoff','end_time')|as_datetime|as_local %}
-          {% set reset_hours = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).hour %}
-          {% set reset_minutes = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).minute %}
-          {{ layoff_start - now() < timedelta(hours=reset_hours) and layoff_end - now() > timedelta(hours=reset_hours,minutes=reset_minutes) }}
-        {% endif %}
+      state: "{{ is_state('calendar.work_layoff','on') }}"
+      attributes:
+        ends_today: >
+          {% if state_attr('calendar.work_layoff','end_time') != none %}
+            {{ is_state('binary_sensor.work_layoff','on')
+                and state_attr('calendar.work_layoff','end_time')|as_datetime|as_local < today_at('00:00') + timedelta(days=1) }}
+          {% endif %}
+        starts_tomorrow: >
+          {% if state_attr('calendar.work_layoff','start_time') != none %}
+            {{ is_state('binary_sensor.work_layoff','off')
+                and state_attr('calendar.work_layoff','start_time')|as_datetime|as_local < today_at('23:59') + timedelta(days=1) }}
+          {% endif %}
+      availability: "{{ states('calendar.work_layoff')|lower not in ['unknown','unavailable','none'] }}"
 
     - name: 'Shift Selection Alert'
       unique_id: shift_selection_alert
       # so user can select new shift before notification is sent
       delay_on: "{{ 0 if is_state('binary_sensor.shift_selection_alert','unknown') else 300 }}"
       state: >
-        {% if is_state('input_boolean.schedule_alerts','on') and is_state('input_boolean.startup_pending','off') %}
-          {% if is_state('binary_sensor.work_schedule','on') %}
-            {{ is_state('input_boolean.work_shift_override','on') or is_state('sensor.work_shift_today','Off') }}
-          {% endif %}
+        {% if is_state('input_boolean.work_schedule','on')
+              and is_state('input_boolean.schedule_alerts','on')
+              and is_state('input_boolean.startup_pending','off') %}
+            {{ is_state('input_boolean.work_shift_override','on')
+              or is_state('sensor.work_shift_today','Off') }}
         {% endif %}
-      availability: "{{ states('binary_sensor.work_schedule') in ['on','off'] }}"
 
 - sensor:
     - name: 'Work Shift Today'
@@ -161,8 +182,12 @@
           {% set afts_start = state_attr('calendar.afternoons','start_time')|as_datetime|as_local %}
           {% set days_end = state_attr('calendar.days','end_time')|as_datetime|as_local %}
           {% set afts_end = state_attr('calendar.afternoons','end_time')|as_datetime|as_local %}
-          {% if days_start - now() < timedelta(days=1) and days_end - now() > timedelta(hours=24)  %} Days
-          {% elif afts_start - now() < timedelta(days=1) and afts_end - now() > timedelta(hours=24) %} Afternoons
+          {% set reset_hours = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).hour %}
+          {% set reset_minutes = today_at((today_at(states('input_datetime.day_reset')) - today_at('00:00'))).minute %}
+          {% if days_start - now() < timedelta(days=1,hours=reset_hours,minutes=reset_minutes)
+              and days_end - now() > timedelta(days=1,hours=reset_hours,minutes=reset_minutes) %} Days
+          {% elif afts_start - now() < timedelta(days=1,hours=reset_hours,minutes=reset_minutes)
+              and afts_end - now() > timedelta(days=1,hours=reset_hours,minutes=reset_minutes) %} Afternoons
           {% else %}{{ states('sensor.work_shift_today') }}
           {% endif %}
         {% else %}{{ states('sensor.work_shift_today') }}

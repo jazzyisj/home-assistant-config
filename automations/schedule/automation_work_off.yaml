@@ -1,33 +1,39 @@
 ###############################################################################
-## Schedule - Toggle Work Today Off
-#NOTE this toggles input_boolean.work_today_off 2X to reset binary_sensor.work_today delay
+## Schedule - Toggle Work Boolean
+#BUGFIX toggles work booleans 2X to reset binary_sensor.work_today delay
 ###############################################################################
-- id: schedule_automation_toggle_work_today_off
+- id: schedule_automation_toggle_work_boolean
   alias: '[Schedule] Toggle Work Today Off'
   description: 'Toggle work today 2X when boolean changed.'
   max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: input_boolean.work_today_off
+      entity_id:
+        - input_boolean.work_today_off
+        - input_boolean.work_tomorrow_off
+        - input_boolean.saturday_workday
+        - input_boolean.sunday_workday
+        - input_boolean.holiday_workday
       to: ~
   action:
     - service: input_boolean.toggle
       target:
-        entity_id: input_boolean.work_today_off
+        entity_id: '{{ trigger.entity_id }}'
 
     - service: input_boolean.toggle
       target:
-        entity_id: input_boolean.work_today_off
+        entity_id: '{{ trigger.entity_id }}'
 
 ###############################################################################
 ## Schedule - Reset Work Off Today
 ###############################################################################
-- id: schedule_automation_reset_work_off_today 
+- id: schedule_automation_reset_work_off_today
   alias: '[Schedule] Reset Work Off Today'
   description: 'Turn boolean off at end of day.'
   trigger:
+    # can't be at midnight - cancels delay on
     - platform: time
-      at: '00:00:00'
+      at: input_datetime.day_reset
   condition:
     - condition: state
       entity_id: input_boolean.work_today_off
@@ -44,17 +50,79 @@
   alias: '[Schedule] Reset Work Off Tomorrow'
   description: 'Turn boolean off at end of day turn on work today off boolean.'
   trigger:
+    # can't be at midnight - cancels delay on
     - platform: time
-      at: '00:00:00'
+      at: input_datetime.day_reset
   condition:
     - condition: state
       entity_id: input_boolean.work_tomorrow_off
       state: 'on'
   action:
+    - delay: 5 # let automation.schedule_automation_reset_work_off_today run first
+
     - service: input_boolean.turn_on
       target:
-        entity_id: input_boolean.work_today_on
+        entity_id: input_boolean.work_today_off
 
     - service: input_boolean.turn_off
       target:
-        entity_id: input_boolean.work_today_off
+        entity_id: input_boolean.work_tomorrow_off
+
+###############################################################################
+## Schedule - Reset Saturday Workday
+###############################################################################
+- id: schedule_automation_reset_saturday_workday #VERIFY
+  alias: '[Schedule] Reset Saturday Workday'
+  description: 'Turn boolean off after Saturday.'
+  trigger:
+    - platform: template
+      value_template: '{{ now().weekday() == 6 }}'
+      # can't be at midnight - cancels delay on
+      for: "{{ today_at(states('input_datetime.day_reset')) - today_at('00:00') }}"
+  condition:
+    - condition: state
+      entity_id: input_boolean.saturday_workday
+      state: 'on'
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.saturday_workday
+
+###############################################################################
+## Schedule - Reset Sunday Workday
+###############################################################################
+- id: schedule_automation_reset_sunday_workday #VERIFY
+  alias: '[Schedule] Reset Sunday Workday'
+  description: 'Turn boolean off after Sunday.'
+  trigger:
+    - platform: template
+      value_template: '{{ now().weekday() == 0 }}'
+      # can't be at midnight - cancels delay on
+      for: "{{ today_at(states('input_datetime.day_reset')) - today_at('00:00') }}"
+  condition:
+    - condition: state
+      entity_id: input_boolean.sunday_workday
+      state: 'on'
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.sunday_workday
+
+###############################################################################
+## Schedule - Reset Holiday Workday
+###############################################################################
+- id: schedule_automation_reset_holiday_workday #VERIFY
+  alias: '[Schedule] Reset Holiday Workday'
+  description: 'Turn boolean off after holiday.'
+  trigger:
+    - platform: state
+      entity_id: calendar.work_holiday
+      to: 'off' #ISSUE stays on if multi-day holiday
+  condition:
+    - condition: state
+      entity_id: input_boolean.holiday_workday
+      state: 'on'
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.holiday_workday

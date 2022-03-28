@@ -1,0 +1,169 @@
+###############################################################################
+## Hass - Save Timers
+###############################################################################
+- id: hass_save_timers
+  alias: '[Hass] Save Timers'
+  description: 'Save timers for system restart.'
+  mode: queued
+  max: 25
+  max_exceeded: error
+  trigger:
+    platform: state
+    entity_id: &restart_timers
+      - timer.alarm_arming
+      - timer.alarm_clock_nap
+      - timer.alarm_clock_snooze
+      - timer.alarm_pending
+      - timer.alarm_triggered_reset
+      - timer.arrive_home_lights
+      - timer.auto_weekend_alarm_reset
+      - timer.auto_workday_alarm_reset
+      - timer.back_garden_light
+      - timer.back_house_potlights
+      - timer.back_yard_tree_lights
+      - timer.bathroom_fan
+      - timer.bathroom_shower_light
+      - timer.bathroom_speaker_alarm_reset
+      - timer.bathroom_vanity_light
+      - timer.bedroom_fan
+      - timer.bedroom_fan_light
+      - timer.bedroom_hub_alarm_reset
+      - timer.bedroom_potlights
+      - timer.bedtime_delay
+      - timer.chill_scene
+      - timer.company_scene
+      - timer.dining_room_hub_alarm_reset
+      - timer.dining_room_light
+      - timer.dining_room_potlights
+      - timer.downstairs_bathroom_fan
+      - timer.fan_schedule_delay
+      - timer.fan_schedule_duration
+      - timer.front_house_potlights
+      - timer.front_porch_light
+      - timer.garage_speaker_alarm_reset
+      - timer.guest_alarm_reset
+      - timer.hallway_potlights
+      - timer.jphone_alarm_reset
+      - timer.kitchen_potlights
+      - timer.kitchen_sink_light
+      - timer.laundry_room_speaker_alarm_reset
+      - timer.living_room_fan_light
+      - timer.living_room_potlights
+      - timer.living_room_speaker_alarm_reset
+      - timer.manual_alarm_reset
+      - timer.master_bathroom_fan
+      - timer.master_bedroom_light
+      - timer.media_preset_sleep
+      - timer.movie_scene
+      - timer.office_fan
+      - timer.office_fan_light
+      - timer.office_potlights
+      - timer.outside_garage_lights
+      - timer.shower_scene
+      - timer.side_entrance_light
+      - timer.sphone_alarm_reset
+      - timer.timed_mute_duration
+    to: ~
+  action:
+    - variables:
+        timers: *restart_timers
+        modes:
+          - active
+          - paused
+    - repeat:
+        count: 2
+        sequence:
+          - variables:
+              mode: '{{ modes[repeat.index-1] }}'
+              count: "{{ expand(timers)|selectattr('state','eq',mode)|list|count }}"
+
+          - choose:
+              - conditions: '{{ count > 0 }}'
+                sequence:
+                  - service: variable.set_variable
+                    data:
+                      variable: '{{ mode }}_timers'
+                      value: '{{ count }}'
+                      attributes: >
+                        {% set dict_string = namespace(value='') %}
+                        {% for timer in expand(timers)|selectattr('state','eq',mode)|list %}
+                          {% set d = timer.attributes.remaining.split(':')|map('int')|list %}
+                          {% set s = d[0]*3600 + d[1]*60 + d[2] + (timer.last_changed.timestamp()|int(0) if mode == 'active' else 0) %}
+                          {% set dict_string.value = dict_string.value + '"' ~ timer.object_id ~ '":"' ~ s  ~ '"' %}
+                          {% if not loop.last %}{% set dict_string.value = dict_string.value + ',' %}{% endif %}
+                        {% endfor %}
+                        {{- '{' ~ dict_string.value ~ '}' -}}
+                      replace_attributes: true
+            default:
+              - service: variable.set_variable
+                data:
+                  variable: '{{ mode }}_timers'
+                  value: 0
+                  replace_attributes: true
+
+###############################################################################
+## Hass - Restore Timers
+###############################################################################
+- id: hass_restore_timers
+  alias: '[Hass] Restore Timers'
+  description: 'Restore saved timers on system restart.'
+  trigger:
+    platform: homeassistant
+    event: start
+  action:
+    - variables:
+        modes:
+          - active
+          - paused
+    - repeat:
+        count: 2
+        sequence:
+          - variables:
+              mode: '{{ modes[repeat.index-1] }}'
+              timers: >
+                {% if mode == 'active' %}{{ states.variable.active_timers.attributes }}
+                {% else %}{{ states.variable.paused_timers.attributes }}
+                {% endif %}
+              count: '{{ timers|count }}'
+          - choose:
+              - conditions: '{{ count > 0 }}'
+                sequence:
+                  - repeat:
+                      count: '{{ count }}'
+                      sequence:
+                        - variables:
+                            id: >
+                              {% set id = namespace(value = '') %}
+                              {% set iter = namespace(value = 0) %}
+                              {% for key, value in timers.items() %}
+                                {% if iter.value == repeat.index-1 %}
+                                  {% set id.value = key %}
+                                {% endif %}
+                                {% set iter.value = iter.value + 1 %}
+                              {% endfor %}
+                              timer.{{ id.value }}
+                            duration: >
+                              {% set duration =  namespace(value = 0) %}
+                              {% set iter = namespace(value = 0) %}
+                              {% for key, value in timers.items() %}
+                                {% if iter.value == repeat.index-1 %}
+                                  {% set duration.value = value %}
+                                {% endif %}
+                              {% endfor %}
+                              {{ duration.value|int(0) - (now().timestamp()|int(0) if mode == 'active' else 0) }}
+
+                        - condition: template
+                          value_template: '{{ duration > 0 }}'
+
+                        - service: timer.start
+                          target:
+                            entity_id: '{{ id }}'
+                          data:
+                            duration: '{{ duration }}'
+
+                        - condition: template
+                          value_template: "{{ mode == 'paused' }}"
+
+                        - service: timer.pause
+                          target:
+                            entity_id: '{{ id }}'

@@ -1,98 +1,104 @@
 ###############################################################################
-## Light - Bathroom Vanity Light Flux Off
+## Light - Bathroom Vanity Light In Use
 ###############################################################################
-- id: light_bathroom_vanity_light_flux_off
-  alias: '[Light] Bathroom Vanity Light Flux Off'
-  description: 'Turn light flux off.'
+- id: light_bathroom_vanity_light_in_use
+  alias: '[Light] Bathroom Vanity Light In Use'
+  description: 'Turn in use timer on/off when device state changes.'
   mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.bathroom_vanity_rgb_light
+      to: ~
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: light.bathroom_vanity_rgb_light
+              state: 'on'
+          sequence:
+            - service: timer.start
+              entity_id: timer.bathroom_vanity_light
+      default:
+        - service: timer.cancel
+          entity_id: timer.bathroom_vanity_light
+
+###############################################################################
+## Light - Bathroom Vanity Light Manual Control On
+###############################################################################
+- id: light_bathroom_vanity_light_manual_control_on
+  alias: '[Light] Bathroom Vanity Light Manual Control On'
+  description: 'Turn adaptive light manual control on.'
+  max_exceeded: silent
   trigger:
     - platform: state
       id: occupancy
       entity_id: input_select.occupancy_mode
       to: Night
-
-    - platform: state
-      id: shower
-      entity_id: input_boolean.shower_scene
-      to: 'on'
-      from: 'off'
   condition:
     - condition: state
       entity_id: input_boolean.light_automation
       state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
   action:
-    - service: switch.turn_off
-      target:
-        entity_id: switch.light_flux_bathroom
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_rgb_lights
+        lights: light.bathroom_vanity_rgb_light
+        manual_control: true
 
 ###############################################################################
-## Light - Bathroom Vanity Light Flux On
+## Light - Bathroom Vanity Light Manual Control Off
 ###############################################################################
-- id: light_bathroom_vanity_light_flux_on
-  alias: '[Light] Bathroom Vanity Light Flux On'
-  description: 'Control light flux state.'
-  mode: restart
+- id: light_bathroom_vanity_light_manual_control_off
+  alias: '[Light] Bathroom Vanity Light Manual Control Off'
+  description: 'Turn adaptive light manual control off.'
+  max_exceeded: silent
   trigger:
-    - platform: state
-      entity_id: light.bathroom_vanity_rgb_light
-      to: 'off'
-      from: 'on'
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_vanity_light
 
-    - platform: state
-      entity_id: input_boolean.shower_scene
-      to: 'off'
-      from: 'on'
-
-    - platform: state
-      id: occupancy
-      entity_id: input_select.occupancy_mode
-      to:
-        - Home
-        - Guest
-      from:
-        - Night
-        - Away
-        - Vacation
+    - platform: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.bathroom_vanity_light
   condition:
     - condition: state
       entity_id: input_boolean.light_automation
       state: 'on'
 
-    - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
-      value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
-            if trigger.id == 'occupancy' else true }}
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
 
     - condition: not
       conditions:
         - condition: state
           entity_id: input_select.occupancy_mode
           state: Night
-
-        - condition: state
-          entity_id: input_boolean.shower_scene
-          state: 'on'
-
-    - condition: state
-      entity_id:
-        - timer.bathroom_vanity_light
-        - timer.bathroom_shower_light
-      state: 'idle'
   action:
-    - service: switch.turn_on
-      target:
-        entity_id: switch.light_flux_bathroom
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_rgb_lights
+        lights: light.bathroom_vanity_rgb_light
+        manual_control: false
 
 ###############################################################################
 ## Light - Bathroom Vanity Night Light
 ###############################################################################
 - id: light_bathroom_vanity_night_light
   alias: '[Light] Bathroom Vanity Night Light'
-  description: 'Turn on light.'
+  description: 'Turn on light back on in night mode if manually turned off.'
   mode: restart
   trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to: Night
+
     - platform: state
       entity_id: light.bathroom_vanity_rgb_light
       to: 'off'
@@ -105,12 +111,31 @@
     - condition: state
       entity_id: input_boolean.light_automation
       state: 'on'
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - binary_sensor.bathroom_sensor_motion
+        - input_boolean.shower_scene
+      state: 'off'
+
+    - condition: state
+      entity_id: timer.bathroom_vanity_light
+      state: idle
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_bathroom_vanity_light_in_use
+
     - service: light.turn_on
       target:
         entity_id: light.bathroom_vanity_rgb_light
       data:
         profile: night_dim
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_bathroom_vanity_light_in_use
 
 ###############################################################################
 ## Light - Bathroom Vanity Light Auto On
@@ -119,13 +144,6 @@
   alias: '[Light] Bathroom Vanity Light Auto On'
   description: 'Turn on light.'
   mode: restart
-  variables:
-    brightness: >
-      {{ '75' if is_state('binary_sensor.quiet_hours','on')
-          and is_state('input_boolean.shower_scene','off') else '150' }}
-    rgb_color: >
-      {{ state_attr('sensor.flux_color_dining_room','rgb_color')
-          if states.sensor.flux_color_dining_room.attributes.rgb_color != none else [255, 180, 60] }}
   trigger:
     - platform: state
       id: motion
@@ -138,11 +156,6 @@
       entity_id: input_boolean.shower_scene
       to: 'on'
       from: 'off'
-
-    - platform: state
-      id: occupancy
-      entity_id: input_select.occupancy_mode
-      to: Night
   condition:
     - condition: state
       entity_id: input_boolean.light_automation
@@ -161,9 +174,9 @@
           entity_id: binary_sensor.nighttime_illuminance_lights
           state: 'on'
 
-        - condition: numeric_state
-          entity_id: sensor.bathroom_sensor_illuminance
-          below: input_number.bathroom_illuminance_threshold
+        - condition: state
+          entity_id: binary_sensor.bathroom_illuminance_light
+          state: 'on'
   action:
     - choose:
         - conditions:
@@ -181,18 +194,34 @@
               entity_id: timer.bathroom_vanity_light
               state: idle
           sequence:
+            - service: automation.turn_off
+              target:
+                entity_id: automation.light_bathroom_vanity_light_in_use
+
             - service: light.turn_on
               target:
                 entity_id: light.bathroom_vanity_rgb_light
               data:
                 profile: night_default
+
+            - service: automation.turn_on
+              target:
+                entity_id: automation.light_bathroom_vanity_light_in_use
       default:
+        - service: automation.turn_off
+          target:
+            entity_id: automation.light_bathroom_vanity_light_in_use
+
         - service: light.turn_on
           target:
             entity_id: light.bathroom_vanity_rgb_light
-          data:
-            brightness: '{{ brightness }}'
-            rgb_color: '{{ rgb_color }}'
+          #TEST data:
+          #   brightness_pct: "{{ state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')|int(0) }}"
+          #   rgb_color: "{{ state_attr('switch.adaptive_lighting_rgb_lights','rgb_color')|default([255, 214, 170]) }}"
+
+        - service: automation.turn_on
+          target:
+            entity_id: automation.light_bathroom_vanity_light_in_use
 
 ###############################################################################
 ## Light - Bathroom Vanity Light Auto Off
@@ -203,6 +232,13 @@
   description: 'Turn off light.'
   max_exceeded: silent
   trigger:
+    # don't use bathroom illuminance, lights keeps sensor on
+    - platform: state
+      id: lux
+      entity_id: binary_sensor.nighttime_illuminance_lights
+      to: 'off'
+      from: 'on'
+
     - platform: state
       id: motion
       entity_id: binary_sensor.bathroom_sensor_motion
@@ -219,6 +255,12 @@
         - Vacation
       for: 30 # occupant to leave
 
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to: Home
+      from: Night
+
     # req if motion/timer expired during restart
     - platform: state
       entity_id: input_boolean.startup_pending
@@ -229,6 +271,11 @@
       event_type: timer.finished
       event_data:
         entity_id: timer.bathroom_vanity_light
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_shower_light
   condition:
     - condition: state
       entity_id:
@@ -262,12 +309,28 @@
               entity_id: input_select.occupancy_mode
               state: Night
           sequence:
+            - service: automation.turn_off
+              target:
+                entity_id: automation.light_bathroom_vanity_light_in_use
+
             - service: light.turn_on # turn on the light back to night mode setting
               target:
                 entity_id: light.bathroom_vanity_rgb_light
               data:
                 profile: night_dim
+
+            - service: automation.turn_on
+              target:
+                entity_id: automation.light_bathroom_vanity_light_in_use
       default:
+        - service: automation.turn_off
+          target:
+            entity_id: automation.light_bathroom_vanity_light_in_use
+
         - service: light.turn_off
           target:
-            entity_id: light.bathroom_vanity_rgb_light
+            entity_id: light.bathroom_vanity_light
+
+        - service: automation.turn_on
+          target:
+            entity_id: automation.light_bathroom_vanity_light_in_use

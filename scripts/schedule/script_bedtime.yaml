@@ -57,9 +57,11 @@ bedtime:
                           target:
                             entity_id: timer.bedtime_delay
 
-                - delay: 1 # allow new bedtime to calculate
+                - delay: 2 # allow new bedtime to calculate
 
-                - service: script.bedtime_notification
+                - service: script.turn_on
+                  target:
+                    entity_id: script.bedtime_notification
 
                 - service: script.turn_on
                   target:
@@ -67,11 +69,10 @@ bedtime:
                   data:
                     variables:
                       quiet_play: true
-                      min_volume: 35
                       #TEMP wake/next strftime %a in 12hour
                       # {% set wake = state_attr('sensor.next_waketime','12hour') %}
                       # {% set next = state_attr('sensor.alarm_clock_next_alarm','12hour') %}
-                      message: |
+                      message: >
                         {% set time = states('sensor.time') %}
                         {% set wake = as_local(states('sensor.next_waketime')|as_datetime).strftime('%-I:%M %p')
                           if states('sensor.next_waketime') not in  ['unknown','unavailable'] else none %}
@@ -120,7 +121,7 @@ bedtime:
                           {%- elif src == 'sphone' %} Sheri's mobile phone
                           {%- else %} the {{ name }}.
                           {%- endif -%}
-                          {%- if src in ['auto','manual','nap'] -%}, and it will play on the {% endif -%}
+                          {%- if src in ['auto','manual','nap'] -%}.  The alarm will play on the {% endif -%}
                           {%- if src == 'auto' %} {{ states('input_select.alarm_clock_media_player_auto') }}.
                           {%- elif src == 'manual' %} {{ states('input_select.alarm_clock_media_player_manual') }}.
                           {%- elif src == 'nap' %} {{ states('input_select.alarm_clock_media_player_nap') }}.
@@ -169,28 +170,45 @@ bedtime:
                   state: 'off'
 
                 - service: script.turn_on
-                  entity_id: script.bedtime
+                  target:
+                    entity_id: script.bedtime
           default:
-            - service: script.bedtime_notification
+            - service: script.turn_on
+              target:
+                entity_id: script.bedtime_notification
 
-            - service: script.tts_play
+            - service: script.turn_on
+              target:
+                entity_id: script.tts_play
               data:
-                message: >
-                  Heads Up! I'll be turning off the lights in {{ night_delay }} minute{{ 's' if night_delay|int(0) != 1}}!
-                  Turn on the bedtime delay if you'll be staying up a while longer.
-                night_play: true
-                media_player: media_player.dining_room_hub
+                variables:
+                  message: >
+                    Heads Up! I'll be turning off the lights in {{ night_delay }} minute{{ 's' if night_delay|int(0) != 1}}!
+                    Turn on the bedtime delay if you'll be staying up a while longer.
+                  quiet_play: true
+                  media_player: media_player.dining_room_hub
 
             - choose:
                 - conditions:
                     - condition: state
-                      entity_id:
-                        - input_boolean.light_automation
-                        - binary_sensor.nighttime_illuminance_lights
-                      state: 'on'
+                      entity_id: timer.dining_room_light
+                      state: idle
+
+                    - condition: template
+                      value_template: >
+                        {% if is_number(state_attr('light.dining_room_rgb_light','brightness'))
+                            and is_number(state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')) %}
+                          {{ state_attr('light.dining_room_rgb_light','brightness')|int
+                              < (state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')|int * 2.55)|int }}
+                        {% else %} true
+                        {% endif %}
                   sequence:
-                    - service: script.turn_on
-                      entity_id: script.bedtime_lights
+                    - service: light.turn_on
+                      target:
+                        entity_id: light.dining_room_rgb_light
+                      data:
+                        brightness: 5
+                        transition: 3
 
             - delay: # delay before night mode, last chance to turn bedtime delay on
                 minutes: '{{ night_delay }}'
@@ -199,11 +217,14 @@ bedtime:
               entity_id: input_boolean.bedtime_delayed
               state: 'off'
 
-            - service: script.tts_play
+            - service: script.turn_on
+              target:
+                entity_id: script.tts_play
               data:
-                message: 'Good night!'
-                night_play: true
-                media_player: media_player.dining_room_hub
+                variables:
+                  message: 'Good night!'
+                  quiet_play: true
+                  media_player: media_player.dining_room_hub
 
             - service: input_select.select_option
               target:

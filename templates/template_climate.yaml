@@ -1,7 +1,28 @@
 ###############################################################################
 ## Templates - Climate
 ###############################################################################
+- button:
+    - name: 'HVAC Filter Hours Reset'
+      unique_id: hvac_filter_hours_reset
+      icon: mdi:thermostat-box
+      press:
+        - service: script.null_script
+
 - binary_sensor:
+    - name: 'Nest Connected'
+      unique_id: nest_connected
+      icon: "{{ 'mdi:home-circle' if is_state('binary_sensor.nest_connected','on') else 'mdi:alert-circle' }}"
+      device_class: connectivity
+      state: "{{ states('climate.thermostat')|lower not in ['unknown','unavailable','none'] }}"
+
+    - name: 'Nest Connected Alert'
+      unique_id: nest_connected_alert
+      icon: mdi:thermostat
+      state: >
+        {{ is_state('binary_sensor.nest_connected','off')
+            and is_state('input_boolean.climate_alerts','on')
+            and is_state('input_boolean.startup_pending','off') }}
+
     - name: 'HVAC Active'
       unique_id: hvac_active
       state: >
@@ -62,14 +83,14 @@
       # allow temporary open
       delay_on: "{{ 0 if is_state('binary_sensor.hvac_window_door_open_alert','unknown') else 900 }}"
       state: >
-        {% if state_attr('binary_sensor.hvac_window_door_open_alert','entities')|lower not in ['unknown','unavailable','none'] %}
-          {{ state_attr('binary_sensor.hvac_window_door_open_alert','entities')|count > 0
+        {% if state_attr('binary_sensor.hvac_window_door_open_alert','entity_id')|lower not in ['unknown','unavailable','none'] %}
+          {{ state_attr('binary_sensor.hvac_window_door_open_alert','entity_id')|count > 0
               and not is_state('input_select.hvac_mode','off')
               and is_state('input_boolean.climate_alerts','on')
               and is_state('input_boolean.startup_pending','off') }}
         {% endif %}
       attributes:
-        entities: >
+        entity_id: >
           {{ expand('group.door_alert_sensors')|rejectattr('entity_id','eq','binary_sensor.garage_side_door_open_alert')
               |selectattr('state','eq','on')|map(attribute='entity_id')|list
             + expand('group.window_alert_sensors')|selectattr('state','eq','on')
@@ -135,24 +156,18 @@
       icon: "{{ 'mdi:thermometer-plus' if states('sensor.hvac_boost')|int(0) > -1 else  'mdi:thermometer-minus' }}"
       unit_of_measurement: '°C'
       state: >
-        {% set cool = true if is_state('climate.thermostat','cool')
-            or (states('climate.thermostat') == 'heat_cool'
-              and (states('sensor.outside_temperature')|int(0)
-              >= state_attr('climate.thermostat','target_temp_high')|int)) else false %}
         {% if is_state('input_boolean.hvac_boost','on') %}
-          {% if is_state('binary_sensor.outdoor_low_temperature_alert','on')
-              and states('sensor.outdoor_humidity')|int(0) > 65 %} 2
-          {% elif is_state('binary_sensor.outdoor_high_temperature_alert','on')
-              and states('sensor.outdoor_humidity')|int(0) > 65 %} -2
-          {% elif states('sensor.outdoor_humidity')|int(0) > 80 %}{{ -1 if cool else 1 }}
+          {% set cool = true if is_state('climate.thermostat','cool')
+              or (states('climate.thermostat') == 'heat_cool'
+                and (states('sensor.outside_temperature')|int(0)
+                >= state_attr('climate.thermostat','target_temp_high')|int)) else false %}
+          {% if not cool and is_state('binary_sensor.waketime_active','on') %} 2
+          {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %}
+              {{ iif(states('sensor.outdoor_humidity')|int(0) > 80,2,1) }}
+          {% elif is_state('binary_sensor.outdoor_high_temperature_alert','on') %}
+              {{ iif(states('sensor.outdoor_humidity')|int(0) > 80,-1,0) }}
+          {% elif states('sensor.outdoor_humidity')|int(0) > 80 %}{{ iif(cool,-1,1) }}
           {% else %} 0
           {% endif %}
         {% else %} 0
         {% endif %}
-
-- button:
-    - name: 'HVAC Filter Hours Reset'
-      unique_id: hvac_filter_hours_reset
-      icon: mdi:thermostat-box
-      press:
-        - service: script.null_script

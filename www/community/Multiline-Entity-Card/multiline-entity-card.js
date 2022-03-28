@@ -88,12 +88,18 @@ class MultilineEntityCard extends LitElement {
           }
           </div>
 
-          ${this.config.show_icon == false ? '' : html`
-              <ha-icon icon="${state.attributes.icon == undefined ?
-                "mdi:eye" :
-                state.attributes.icon
-              }" ></ha-icon>`
+          ${this.config.image == undefined ?
+                this.config.show_icon == false ? '' : html`
+                  <ha-icon icon="${state.attributes.icon == undefined ?
+                    "mdi:eye" :
+                    state.attributes.icon
+                  }" ></ha-icon>` : html`
+              <img src="${
+                this.config.image
+              }" height=25></img>`
           }
+
+
         </div>
         <div class="info">
           <span class="value">

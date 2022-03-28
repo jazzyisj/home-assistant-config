@@ -4,7 +4,7 @@
 homeassistant:
   customize:
     alert.unavailable_sensor:
-      icon: mdi:smoke-detector
+      icon: mdi:smoke-detector-variant
       category: hass
     alert.unknown_browser:
       icon: mdi:monitor-dashboard
@@ -17,6 +17,9 @@ homeassistant:
       category: hass
     alert.remote_ui:
       icon: mdi:remote-desktop
+      category: hass
+    alert.low_battery:
+      icon: mdi:battery-alert
       category: hass
 
     sensor.browser_kiosk_internal:
@@ -50,6 +53,15 @@ homeassistant:
       icon: mdi:clock-start
     sensor.home_assistant_alerts:
       icon: mdi:alert-rhombus
+
+variable:
+  active_timers:
+    value: 0
+    restore: true
+
+  paused_timers:
+    value: 0
+    restore: true
 
 #DISABLED influxdb: # https://www.home-assistant.io/integrations/influxdb/
 #   host: a0d7b954-influxdb
@@ -101,6 +113,15 @@ input_select:
       - fatal
       - debug
       - notset
+
+input_number:
+  battery_alert_threshold:
+    name: 'Battery Alert Threshold'
+    icon: mdi:battery-alert
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: '%'
 
 group:
   ignored_unavailable_entities:
@@ -156,7 +177,6 @@ group:
   integrations_connected_sensors:
     all: true
     entities:
-      - binary_sensor.alarm_connected
       - binary_sensor.balboa_connected
       - binary_sensor.climacell_connected
       - binary_sensor.dark_sky_connected
@@ -164,8 +184,10 @@ group:
       - binary_sensor.google_calendar_connected
       - binary_sensor.google_traffic_connected
       - binary_sensor.hydrawise_connected
+      - binary_sensor.lg_thinq_connected
       - binary_sensor.myq_connected
       - binary_sensor.nest_connected
+      - binary_sensor.nest_protect_connected
       - binary_sensor.noaa_connected
       - binary_sensor.openuv_connected
       - binary_sensor.iqvia_connected
@@ -179,7 +201,6 @@ group:
     entities:
       - sensor.check_home_assistant_configuration_memory_percent
       - sensor.chrony_memory_percent
-      - sensor.duck_dns_memory_percent
       - sensor.file_editor_memory_percent
       - sensor.frigate_nvr_memory_percent
       - sensor.glances_memory_percent
@@ -188,11 +209,9 @@ group:
       - sensor.influxdb_memory_percent
       - sensor.log_viewer_memory_percent
       - sensor.mariadb_memory_percent
-      - sensor.marytts_memory_percent
       - sensor.mosquitto_broker_memory_percent
       - sensor.motioneye_memory_percent
       - sensor.phpmyadmin_memory_percent
-      - sensor.picotts_memory_percent
       - sensor.samba_share_memory_percent
       - sensor.ssh_web_terminal_memory_percent
       - sensor.unifi_controller_memory_percent
@@ -207,7 +226,6 @@ group:
     entities:
       - sensor.check_home_assistant_configuration_cpu_percent
       - sensor.chrony_cpu_percent
-      - sensor.duck_dns_cpu_percent
       - sensor.file_editor_cpu_percent
       - sensor.frigate_nvr_cpu_percent
       - sensor.glances_cpu_percent
@@ -216,11 +234,9 @@ group:
       - sensor.influxdb_cpu_percent
       - sensor.log_viewer_cpu_percent
       - sensor.mariadb_cpu_percent
-      - sensor.marytts_cpu_percent
       - sensor.mosquitto_broker_cpu_percent
       - sensor.motioneye_cpu_percent
       - sensor.phpmyadmin_cpu_percent
-      - sensor.picotts_cpu_percent
       - sensor.samba_share_cpu_percent
       - sensor.ssh_web_terminal_cpu_percent
       - sensor.unifi_controller_cpu_percent
@@ -235,22 +251,7 @@ sensor:
   # https://www.home-assistant.io/integrations/websocket_api/#track-current-connections
   - platform: websocket_api # https://www.home-assistant.io/integrations/sensor.websocket_api/
 
-  - platform: authenticated # https://github.com/custom-components/authenticated
-    enable_notification: true
-    exclude:
-      - 127.0.0.1
-      - 172.30.32.2
-      - 170.17.0.2
-      - !secret HASSIO_IP
-      - !secret JLAPTOP_IP
-      - !secret JLAPTOP_WIFI_IP
-      - !secret SHERI_TABLET_IP
-      - !secret JPHONE_IP
-      - !secret SPHONE_IP
-      - !secret KIOSK_IP
-
-    provider: ipapi # ipapi, extreme, ipvigilante
-    log_location: '/config/home-assistant.log'
+  - platform: uptime
 
   - platform: folder # https://www.home-assistant.io/integrations/folder/
     folder: '/config/www/alarm_snapshots' # path must be in allowlist_external_dirs
@@ -260,6 +261,9 @@ sensor:
     folder: '/config/tts' # path must be in allowlist_external_dirs
     filter: '*'
 
+  - platform: filesize
+    file_paths: /config/home-assistant.log # path must be in allowlist_external_dirs
+
   - platform: sql # https://www.home-assistant.io/integrations/sql/
     db_url: !secret MARIADB_URL
     queries:
@@ -267,11 +271,6 @@ sensor:
         query: 'SELECT table_schema "database", Round(Sum(data_length + index_length) / 1048576, 2) "value" FROM information_schema.tables WHERE table_schema="homeassistant" GROUP BY table_schema;'
         column: 'value'
         unit_of_measurement: MB
-
-  - platform: filesize
-    file_paths: /config/home-assistant.log # path must be in allowlist_external_dirs
-
-  - platform: uptime
 
   - platform: feedparser
     name: 'Home Assistant Alerts'
@@ -284,6 +283,22 @@ sensor:
       - link
     exclusions:
       - language
+
+  - platform: authenticated # https://github.com/custom-components/authenticated
+    enable_notification: true
+    exclude:
+      - 127.0.0.1
+      - 170.17.0.2
+      - 172.30.32.2
+      - !secret HASSIO_IP
+      - !secret JLAPTOP_IP
+      - !secret JLAPTOP_WIFI_IP
+      - !secret SHERI_TABLET_IP
+      - !secret JPHONE_IP
+      - !secret SPHONE_IP
+      - !secret KIOSK_IP
+    provider: ipapi # ipapi, extreme, ipvigilante
+    log_location: '/config/home-assistant.log'
 
   # https://developers.home-assistant.io/docs/api/supervisor/endpoints
   - platform: command_line
@@ -363,13 +378,47 @@ sensor:
     scan_interval: 30
     command_timeout: 10
 
+
+  - platform: mqtt
+    name: 'Kiosk Motion' #TODO
+    state_topic: 'fully/event/onMotion/6c1f5c36-170d28b1'
+    value_template: '{{ value_json.event }}'
+
 alert:
+  device_offline:
+    name: 'Device Offline'
+    title: 'Device Offline'
+    message: "- {{ expand(state_attr('sensor.offline_devices','entity_id'))|map(attribute='name')|join('<br>- ') }}"
+    done_message: clear_notification
+    entity_id: binary_sensor.device_offline_alert
+    state: 'on'
+    repeat: 1440
+    notifiers: jason
+    data:
+      tag: device_offline
+      group: System
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      notification_url: mdi:alert-circle
+      icon_url: !secret HASSIO_ICON
+      ledColor: !secret WARNING_COLOR
+      color: !secret WARNING_COLOR
+      vibrationPattern: !secret ALERT_VIBRATION
+      clickAction: /lovelace-mobile/system
+      actions:
+        - title: 'Pause Alert'
+          action: pause_device_offline
+
   integration_offline:
     name: 'Integration Offline'
     title: 'Integration Offline'
-    message: "- {{ expand('group.integrations_connected_sensors')|selectattr('state','eq','off')|map(attribute='name')|join('<br>- ') }}"
+    message: > #VERIFY name attribute is blank?
+      - {{ expand('group.integrations_connected_sensors')
+            |selectattr('state','eq','off')|map(attribute='entity_id')|join('<br>- ') }}
     done_message: clear_notification
-    entity_id: binary_sensor.integration_offline_alert
+    entity_id: binary_sensor.integrations_connected_alert
     state: 'on'
     repeat: 1440
     notifiers: jason
@@ -389,6 +438,37 @@ alert:
       actions:
         - title: 'Pause Alert'
           action: pause_integration_offline
+
+  low_battery:
+    name: 'Low Battery'
+    title: 'Low Battery'
+    message: |
+      {%- set entities = expand(state_attr('binary_sensor.low_battery_alert','entity_id')) -%}
+      {%- for item in entities -%}
+      {{- item.name|lower|replace(': battery level','')|title }} - {{ item.state }}%
+      {%- if not loop.last %}<br/>{% endif -%}
+      {%- endfor -%}
+    done_message: clear_notification
+    entity_id: binary_sensor.low_battery_alert
+    state: 'on'
+    repeat: 1440
+    notifiers: jason
+    data:
+      tag: low_battery
+      group: System
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      notification_icon: mdi:battery-alert
+      icon_url: !secret BATTERY_ICON
+      ledColor: !secret WARNING_COLOR
+      color: !secret WARNING_COLOR
+      vibrationPattern: !secret ALERT_VIBRATION
+      clickAction: /lovelace-mobile/system
+      actions:
+        - title: 'Pause Alert'
+          action: pause_low_battery
 
   remote_ui:
     name: 'Remote UI'
@@ -416,36 +496,10 @@ alert:
         - title: 'Pause Alert'
           action: pause_remote_ui
 
-  device_offline:
-    name: 'Device Offline'
-    title: 'Device Offline'
-    message: "- {{ expand(state_attr('sensor.offline_devices','entities'))|map(attribute='name')|join('<br>- ') }}"
-    done_message: clear_notification
-    entity_id: binary_sensor.device_offline_alert
-    state: 'on'
-    repeat: 1440
-    notifiers: jason
-    data:
-      tag: device_offline
-      group: System
-      channel: Alert
-      importance: max
-      ttl: 0
-      priority: high
-      notification_url: mdi:alert-circle
-      icon_url: !secret HASSIO_ICON
-      ledColor: !secret WARNING_COLOR
-      color: !secret WARNING_COLOR
-      vibrationPattern: !secret ALERT_VIBRATION
-      clickAction: /lovelace-mobile/system
-      actions:
-        - title: 'Pause Alert'
-          action: pause_device_offline
-
   unavailable_sensor:
     name: 'Unavailable Sensor'
     title: 'Unavailable Sensors'
-    message: "- {{ expand(state_attr('sensor.unavailable_sensors','entities'))|map(attribute='name')|join('<br>- ') }}"
+    message: "- {{ expand(state_attr('sensor.unavailable_sensors','entity_id'))|map(attribute='name')|join('<br>- ') }}"
     done_message: clear_notification
     entity_id: binary_sensor.unavailable_sensor_alert
     state: 'on'
@@ -472,7 +526,7 @@ alert:
   unknown_browser:
     name: 'Unknown Browser'
     title: 'Unknown Browser'
-    message: "- {{ expand(state_attr('sensor.unknown_browsers','entities'))|map(attribute='name')|join('<br>- ') }}"
+    message: "- {{ expand(state_attr('sensor.unknown_browsers','entity_id'))|map(attribute='name')|join('<br>- ') }}"
     done_message: clear_notification
     entity_id: binary_sensor.unknown_browser_alert
     state: 'on'

@@ -1,0 +1,82 @@
+###############################################################################
+## Mobile - Jason Phone Offline Alert
+###############################################################################
+- id: mobile_jason_phone_offline_alert
+  alias: '[Mobile] Jason Phone Offline Alert'
+  description: 'Play announcement when alert turns on.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: alert.jason_phone_offline
+      to: 'on'
+      for:
+        minutes: 15
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to: Home
+      from: Night
+      for:
+        minutes: 30
+
+    - platform: state
+      entity_id: binary_sensor.jason_home
+      to: 'on'
+      from: 'off'
+      for:
+        minutes: 15
+  condition:
+    - condition: state
+      entity_id:
+        - alert.jason_phone_offline
+        - binary_sensor.jason_home
+      state: 'on'
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state: Home
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+              and is_state('input_boolean.occupancy_override','off')
+            if trigger.id == 'occupancy' else true }}
+  action:
+    - repeat:
+        sequence:
+          - service: script.tts_play
+            data:
+              message: >
+                Jason, your mobile phone went offline at
+                {{ as_local(states.binary_sensor.jason_phone_connected.last_changed).strftime('%-I:%M %p') }}
+              quiet_play: true
+
+          - wait_template: "{{ not is_state('alert.jason_phone_offline','on') }}"
+            timeout:
+              hours: 1
+
+        until:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: alert.jason_phone_offline
+                state: 'on'
+
+###############################################################################
+## Mobile - Pause Offline Jason Alert
+###############################################################################
+- id: mobile_pause_offline_jason_alert
+  alias: '[Mobile] Pause Offline Jason Alert'
+  description: 'Pause alert.'
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_jason_phone_offline
+  action:
+    - service: alert.turn_off
+      target:
+        entity_id: alert.jason_phone_offline

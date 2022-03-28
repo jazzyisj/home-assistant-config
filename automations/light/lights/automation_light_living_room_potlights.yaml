@@ -1,34 +1,76 @@
 ###############################################################################
-## Light - Living Room Potlights Auto On
+## Light - Living Room Potlights In Use
 ###############################################################################
-- id: light_living_room_potlights_auto_on
-  alias: '[Light] Living Room Potlights Auto On'
-  description: 'Turn on lights.'
-  max_exceeded: silent
-  variables:
-    current: "{{ state_attr('light.living_room_potlights','brightness')|int(0) }}"
-    brightness: >
-      {% if is_state('binary_sensor.quiet_time','on') %}
-        {{ 15 if current > 15 or current == 0 else current }}
-      {% else %}
-        {{ 30 if current < 30 else current }}
-      {% endif %}
+- id: light_living_room_potlights_in_use
+  alias: '[Light] Living Room Potlights In Use'
+  description: 'Turn in use timer on/off when device state changes.'
+  mode: restart
   trigger:
     - platform: state
-      id: quiet
-      entity_id: binary_sensor.quiet_time
-      to:
-        - 'on'
-        - 'off'
-      from:
-        - 'on'
-        - 'off'
+      entity_id: light.living_room_potlights
+      to: ~
+  action:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: light.living_room_potlights
+              state: 'on'
+          sequence:
+            - service: timer.start
+              entity_id: timer.living_room_potlights
+      default:
+        - service: timer.cancel
+          entity_id: timer.living_room_potlights
+
+###############################################################################
+## Light - Living Room PotLights Manual Control On
+###############################################################################
+- id: light_living_room_potlights_manual_control_on
+  alias: '[Light] Living Room PotLights Manual Control On'
+  description: 'Turn adaptive light manual control on.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.scene_active
+      to: 'on'
+      from: 'off'
+  condition:
+    - condition: state
+      entity_id: input_boolean.light_automation
+      state: 'on'
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: 'off'
+  action:
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_main_lights
+        lights: light.living_room_potlights
+        manual_control: true
+
+###############################################################################
+## Light - Living Room PotLights Manual Control Off
+###############################################################################
+- id: light_living_room_potlights_manual_control_off
+  alias: '[Light] Living Room PotLights Manual Control Off'
+  description: 'Turn adaptive light manual control off.'
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.living_room_potlights
+
+    - platform: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.living_room_potlights
 
     - platform: state
-      id: scene
       entity_id: binary_sensor.scene_active
       to: 'off'
-      from: 'on' # script/template reload
+      from: 'on'
   condition:
     - condition: state
       entity_id: input_boolean.light_automation
@@ -36,35 +78,15 @@
 
     - condition: state
       entity_id:
-        - binary_sensor.light_scene_active
         - input_boolean.alarm_triggered
+        - binary_sensor.scene_active
       state: 'off'
-
-    - condition: state
-      entity_id: input_select.occupancy_mode
-      state:
-        - Home
-        - Guest
-
-    - condition: state
-      entity_id: binary_sensor.nighttime_illuminance_lights
-      state: 'on'
-
-    - condition: template
-      alias: 'Light is on but timer is not if trigger is quiet time'
-      value_template: >
-        {{ is_state('light.living_room_potlights','on') and is_state('timer.living_room_potlights','idle')
-            if trigger.id == 'quiet' else true }}
-
-    - condition: template
-      alias: 'Light is not already at new brightness.'
-      value_template: '{{ brightness != current if current > 0 else true }}'
   action:
-    - service: light.turn_on
-      target:
-        entity_id: light.living_room_potlights
+    - service: adaptive_lighting.set_manual_control
       data:
-        brightness: '{{ brightness }}'
+        entity_id: switch.adaptive_lighting_main_lights
+        lights: light.living_room_potlights
+        manual_control: false
 
 ###############################################################################
 ## Light - Living Room Potlights Auto Off
@@ -109,15 +131,10 @@
 
     - condition: state
       entity_id:
-        - binary_sensor.light_scene_active
         - input_boolean.alarm_triggered
+        - binary_sensor.scene_active
+        - script.morning_lights
       state: 'off'
-
-    - condition: template
-      alias: "Don't turn off after scene if night lux on"
-      value_template: >
-        {{ is_state('binary_sensor.nighttime_illuminance_lights','off')
-            if trigger.id == 'scene' else true }}
 
     - condition: template
       alias: 'Timer is not on if trigger is lux'
@@ -125,6 +142,14 @@
         {{ is_state('timer.living_room_potlights','idle')
             if trigger.id == 'lux' else true }}
   action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_living_room_potlights_in_use
+
     - service: light.turn_off
       target:
         entity_id: light.living_room_potlights
+
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_living_room_potlights_in_use

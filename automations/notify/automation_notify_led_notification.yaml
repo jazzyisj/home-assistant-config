@@ -9,7 +9,8 @@
   max_exceeded: error
   variables:
     entities: >
-      {% if trigger.entity_id == 'input_boolean.alarm_triggered' %} {% set alert_type = 'notify' %}
+      {% if trigger.entity_id == 'input_boolean.alarm_triggered'
+          or trigger.from_state.state == 'triggered' %} {% set alert_type = 'notify' %}
       {% else %} {% set alert_type = trigger.id %}
       {% endif %}
       {{ state_attr('group.led_' ~ alert_type,'entity_id') }}
@@ -53,14 +54,17 @@
         - alert.door_lock_jammed
         - alert.door_lock_failed
         - alert.alarm_connected
+        - alert.alarm_zone_sync
         - binary_sensor.alarm_open_sensor_alert
         - binary_sensor.alarm_bypassed_sensor_alert
       to:
         - 'on'
         - 'off'
+        - 'idle'
       from:
         - 'on'
         - 'off'
+        - 'idle'
 
     - platform: state
       id: alarm
@@ -147,8 +151,8 @@
         - binary_sensor.sheri_home
         - input_boolean.jason_almost_home
         - input_boolean.sheri_almost_home
-        - alert.mobile_offline_jason
-        - alert.mobile_offline_sheri
+        - alert.jason_phone_offline
+        - alert.sheri_phone_offline
       to:
         - 'on'
         - 'off'
@@ -175,24 +179,22 @@
     - condition: template
       alias: 'Alarm not triggered, or trigger is alarm'
       value_template: >
-        {{ true if is_state('input_boolean.alarm_triggered','off')
-            else trigger.id == 'alarm' }}
-
-    #RELOAD input_boolean.weather_alerts off causing error on dev mode
-    - condition: state
-      entity_id: input_boolean.dev_mode
-      state: 'off'
+        {{ true if trigger.entity_id == 'input_boolean.alarm_triggered'
+              or trigger.from_state.state == 'triggered'
+            else is_state('input_boolean.alarm_triggered','off') }}
   action:
     - choose:
-        - conditions: "{{ trigger.id == 'startup' }}"
+        - conditions: >
+            {{ trigger.id == ['startup']
+                or (trigger.entity_id == 'input_boolean.alarm_triggered'
+                  and is_state('input_boolean.alarm_triggered','off')) }}
           sequence:
             - service: script.led_reset
-            - delay: 5 # allow reset to run
-
-    - service: script.turn_on
-      target:
-        entity_id: script.led_notification
-      data:
-        variables:
-          entities: '{{ entities }}'
-          alert_type: '{{ trigger.id }}'
+      default:
+        - service: script.turn_on
+          target:
+            entity_id: script.led_notification
+          data:
+            variables:
+              entities: '{{ entities }}'
+              alert_type: '{{ trigger.id }}'
