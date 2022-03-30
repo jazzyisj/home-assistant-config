@@ -6,19 +6,17 @@ bedtime_notification:
   description: 'Send bedtime notification.'
   icon: mdi:bed
   variables:
-    today_bedtime: "{{ states('sensor.bedtime_today') }}"
-    bedtime_delay: >
-      {{ (states('input_number.bedtime_warning_delay')|int(-1) * 60)|int
-          if now() <= today_bedtime|as_datetime else 0 }}
-    night_delay: "{{ (states('input_number.night_mode_delay')|int(-1) * 60)|int }}"
+    today_bedtime: "{{ state_attr('sensor.bedtime_today','delayed_bedtime') }}"
     delayed_bedtime: >
       {{ today_bedtime if now() <= today_bedtime|as_datetime
           else state_attr('timer.bedtime_delay','finishes_at')
           if not is_state('timer.bedtime_delay','idle') else now() }}
+    bedtime_delay: "{{ states('input_number.bedtime_warning_delay') if now().replace(second=0) <= today_bedtime|as_datetime else 0 }}"
     night_mode: >
-      {% set bed = now() if now().replace(second=0) <= today_bedtime|as_datetime
-          and is_state('input_boolean.bedtime_delayed','off') else delayed_bedtime|as_datetime %}
-      {{ bed + timedelta(minutes=bedtime_delay + night_delay) }}
+      {% if today_bedtime != none %}
+        {% set bed = now() if now().replace(second=0) >= today_bedtime|as_datetime else today_bedtime|as_datetime %}
+        {{ bed + timedelta(minutes=bedtime_delay|int + states('input_number.night_mode_delay')|int) }}
+      {% endif %}
   sequence:
     - condition: state
       entity_id:
@@ -30,27 +28,24 @@ bedtime_notification:
       data:
         title: "{{ 'Bedtime Delayed' if is_state('input_boolean.bedtime_delayed','on') else 'Time For Bed!' }}"
         message: >
-          {%- set time = states('sensor.time') -%}
-          {%- set next_alarm = state_attr('sensor.alarm_clock_next_alarm','12hour') -%}
-          {%- set waketime = state_attr('sensor.next_waketime','12hour') -%}
-          {%- set delayed_bedtime_display =  state_attr('sensor.bedtime_today','delayed_bedtime')
-                if is_state('input_boolean.bedtime_delayed','on')
-                  else state_attr('sensor.bedtime_today','12hour') -%}
-          {%- set src = state_attr('sensor.alarm_clock_next_alarm','source') -%}
-          <br/>Wake Time: {{ waketime -}}
-          {%- if waketime == next_alarm -%}
-            <br/>Alarm Source: {{ state_attr('sensor.alarm_clock_next_alarm','source_name') -}}
-            {%- if src in ['auto','manual','nap'] -%}
+          {% set time = states('sensor.time') %}
+          {% set next_alarm = state_attr('sensor.alarm_clock_next_alarm','12hour') %}
+          {% set waketime = state_attr('sensor.next_waketime','12hour') %}
+          {% set src = state_attr('sensor.alarm_clock_next_alarm','source') %}
+          Wake Time: {{ waketime }}
+          {% if waketime == next_alarm -%}
+            <br/>Alarm Source: {{ state_attr('sensor.alarm_clock_next_alarm','source_name') }}
+            {% if src in ['auto','manual','nap'] %}
               <br/>Alarm Player:
-              {%- if src == 'auto' %} {{ states('input_select.alarm_clock_media_player_auto') -}}
-              {%- elif src == 'manual' %} {{ states('input_select.alarm_clock_media_player_manual') -}}
-              {%- elif src == 'nap' %} {{ states('input_select.alarm_clock_media_player_nap') -}}
-              {%- else %} {{ src|replace('_',' ')|title -}}
-              {%- endif -%}
-            {%- endif -%}
-          {%- else -%}<br/>Alarm: No alarm clock set.
-          {%- endif -%}
-          <br/>Bedtime: {{ delayed_bedtime_display -}}
+              {% if src == 'auto' %} {{ states('input_select.alarm_clock_media_player_auto') }}
+              {% elif src == 'manual' %} {{ states('input_select.alarm_clock_media_player_manual') }}
+              {% elif src == 'nap' %} {{ states('input_select.alarm_clock_media_player_nap') }}
+              {% else %} {{ src|replace('_',' ')|title -}}
+              {% endif %}
+            {% endif %}
+          {% else %}<br/>Alarm Clock: None
+          {% endif %}
+          <br/>Bedtime: {{ state_attr('sensor.bedtime_today','12hour') -}}
           <br/>Bedtime {{ 'Delayed:' if is_state('input_boolean.bedtime_delayed','on')
             else 'Delay:' }} {{ states('input_number.bedtime_delay')|int }} minutes
         data:
@@ -60,19 +55,13 @@ bedtime_notification:
           importance: max
           ttl: 0
           priority: high
-          persistent: true
+          persistent: "{{ true if is_state('binary_sensor.bedtime_active','on') else false }}"
           sticky: "{{ true if is_state('binary_sensor.bedtime_active','on') else false }}"
-          timeout: >
-            {% if now() < today_bedtime|as_datetime or is_state('input_select.occupancy_mode','Night') %} 300
-            {% else %} {{ night_mode|as_timestamp }}
-            {% endif %}
-          chronometer: true #VERIFY 5 hours at bedtime? something to do with tz?
-          when: >
-            {% if now() < today_bedtime|as_datetime or is_state('input_select.occupancy_mode','Night') %} 300
-            {% else %} {{ night_mode|as_timestamp }}
-            {% endif %}'{{ night_mode|as_timestamp|int }}'
+          timeout: "{{ iif(now() < today_bedtime|as_datetime or is_state('input_select.occupancy_mode','Night'),300,0) }}"
+          chronometer: true #VERIFY
+          when: '{{ night_mode|as_timestamp(now().timestamp())|int }}'
           notification_icon: '{{ states.script.bedtime_notification.attributes.icon }}'
-          icon_url: !secret ALARM_CLOCK_ICON
+          icon_url: !secret BEDTIME_ICON
           ledColor: !secret NOTIFY_COLOR
           color: !secret NOTIFY_COLOR
           vibrationPattern: !secret GENERAL_VIBRATION

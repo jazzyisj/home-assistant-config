@@ -12,23 +12,26 @@
         {% endif %}
       #BUG last_changed read after state/delay template evaluated?
       # delay 1 instead of 0 so no triggers when input_boolean.work_today_off toggles
-      delay_on: >
+      delay_on: > #TODO delay template not working?
         {{ 1 if is_state('binary_sensor.work_today','unknown')
-              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
+            or now().timestamp() - states.input_boolean.startup_pending.last_changed|as_timestamp < 60
+            or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 60
+            or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 60
+            or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 60
+            or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 60
             else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       delay_off: >
         {{ 1 if is_state('binary_sensor.work_today','unknown')
-              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.startup_pending.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_today_off.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 60
             else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       state: >
-        {% if is_state('input_boolean.work_schedule','on') %}
-          {% if is_state('input_boolean.work_today_off','on')
+        {% if is_state('input_boolean.work_schedule','on') and is_state('input_boolean.startup_pending','off') %}
+          {% if is_state('input_boolean.work_today_override','on') %} true
+          {% elif is_state('input_boolean.work_today_off','on')
               or is_state('binary_sensor.work_vacation','on')
               or is_state('binary_sensor.work_layoff','on') %} false
           {% elif is_state('calendar.work_holiday','on') %} {{ is_state('input_boolean.holiday_workday','on') }}
@@ -47,21 +50,25 @@
         {% endif %}
       delay_on: >
         {{ 1 if is_state('binary_sensor.work_tomorrow','unknown')
-              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.work_tomorrow_off.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.startup_pending.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_tomorrow_off.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 60
             else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       delay_off: >
         {{ 1 if is_state('binary_sensor.work_tomorrow','unknown')
-              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.work_tomorrow_off.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 10
-              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 10
+              or now().timestamp() - states.input_boolean.startup_pending.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_schedule.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.work_tomorrow_off.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.saturday_workday.last_changed|as_timestamp < 60
+              or now().timestamp() - states.input_boolean.sunday_workday.last_changed|as_timestamp < 60
             else today_at(states('input_datetime.day_reset')) - today_at('00:00') }}
       state: >
-        {% if is_state('input_boolean.work_schedule','on') %}
-          {% if is_state('input_boolean.work_tomorrow_off','on')
+        {% if is_state('input_boolean.work_schedule','on')
+            and is_state('input_boolean.startup_pending','off') %}
+          {% if is_state('input_boolean.work_tomorrow_override','on') %} true
+          {% elif is_state('input_boolean.work_tomorrow_off','on')
             or (is_state('binary_sensor.work_vacation','on')
               and not is_state_attr('binary_sensor.work_vacation','ends_today',true))
             or is_state_attr('binary_sensor.work_vacation','starts_tomorrow',true)
@@ -136,28 +143,14 @@
           {% endif %}
       availability: "{{ states('calendar.work_layoff')|lower not in ['unknown','unavailable','none'] }}"
 
-    - name: 'Shift Selection Alert'
-      unique_id: shift_selection_alert
-      # so user can select new shift before notification is sent
-      delay_on: "{{ 0 if is_state('binary_sensor.shift_selection_alert','unknown') else 300 }}"
-      state: >
-        {% if is_state('input_boolean.work_schedule','on')
-              and is_state('input_boolean.schedule_alerts','on')
-              and is_state('input_boolean.startup_pending','off') %}
-            {{ is_state('input_boolean.work_shift_override','on')
-              or is_state('sensor.work_shift_today','Off') }}
-        {% endif %}
-
 - sensor:
     - name: 'Work Shift Today'
       unique_id: work_shift_today
       icon: >
-        {% if is_state('input_boolean.work_schedule','off') %} mdi:alpha-x-circle
-        {% else %}
-          {% if is_state('sensor.work_shift_today','Days') %} mdi:alpha-d-circle
-          {% elif is_state('sensor.work_shift_today','Afternoons') %} mdi:alpha-a-circle
-          {% else %} mdi:calendar-alert
-          {% endif %}
+        {% if is_state('binary_sensor.work_today','off') %} mdi:alpha-x-circle
+        {% elif is_state('sensor.work_shift_today','Days') %} mdi:alpha-d-circle
+        {% elif is_state('sensor.work_shift_today','Afternoons') %} mdi:alpha-a-circle
+        {% else %} mdi:calendar-alert
         {% endif %}
       state: "{{ states('input_select.current_work_shift') }}"
 
@@ -166,7 +159,7 @@
     - name: 'Work Shift Tomorrow'
       unique_id: work_shift_tomorrow
       icon: >
-        {% if is_state('input_boolean.work_schedule','off') %} mdi:alpha-x-circle
+        {% if is_state('binary_sensor.work_tomorrow','off') %} mdi:alpha-x-circle
         {% elif is_state('sensor.work_shift_tomorrow','Days') %} mdi:alpha-d-circle
         {% elif is_state('sensor.work_shift_tomorrow','Afternoons') %} mdi:alpha-a-circle
         {% else %} mdi:calendar-alert

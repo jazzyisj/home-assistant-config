@@ -39,11 +39,30 @@ media_players_set_volumes:
           {% set media_players = expand(media_players)|rejectattr('attributes.device_class','eq','tv')|map(attribute='entity_id')|list %}
           {{ media_players }}
 
-    - condition: state # do not run if system is muted (kills mute)
+    # do not run if system is muted (kills mute)
+    - condition: state
       entity_id: switch.system_mute
       state: 'off'
 
+    # do not run if phone in use and source is tts off
+    - condition: template
+      value_template: "{{ iif(source == 'tts_off',is_state('binary_sensor.mobile_phone_in_use','off'),true) }}"
+
+    # do not run if tts on in use and source is phone off
+    - condition: template
+      value_template: "{{ iif(source == 'phone_off',is_state('binary_sensor.tts','off'),true) }}"
+
     - choose:
+        # if tts on and source is phone (phone_tts), set stored phone vols to stored tts vols #TODO
+        - conditions: "{{ source == 'tts_all' and is_state('binary_sensor.mobile_phone_in_use','on') }}"
+          sequence:
+            - service: script.media_players_save_volumes
+              data:
+                source: phone_tts
+                media_players: '{{ media_players }}'
+
+    - choose:
+        # if source is media and phone in use, save phone volumes
         - conditions: >
             {% set found = namespace(value=0) %}
             {% for type in media_types %}
@@ -55,15 +74,6 @@ media_players_set_volumes:
               data:
                 source: phone
                 media_players: '{{ media_players }}'
-
-        #TODO if tts is on and source not tts save "source" tts?
-
-        # - conditions: "{{ source == 'phone_all' and is_state('binary_sensor.tts','on') }}"
-        #   sequence:
-        #     - service: script.media_players_save_volumes
-        #       data:
-        #         source: phone_tts
-        #         media_players: '{{ media_players }}'
 
         - conditions: "{{ source in ['phone_all','tts_all'] }}"
           sequence:
@@ -112,10 +122,9 @@ media_players_set_volumes:
                       quiet_volume: >
                         {{ states('input_number.tv_quiet_volume')|int(-1)/100
                             if state_attr(player,'device_class') == 'tv'
-                              else states('input_number.speaker_quiet_volume')|int(-1)/100 }}
+                              else states('input_number.speaker_quiet_volume')|int/100 }}
                       media_volume: "{{ states('input_number.' ~ source ~ '_volume')|float(-1)/100 if source in media_types }}"
-                      tts_volume: "{{ 0 if player in state_attr('sensor.tts_media_player','entity_id') else 0.15 }}"
-                      phone_volume: '{{ player_volume if player_volume < 0.2 else 0.2 }}'
+                      lower_volume: '{{ player_volume if player_volume < 0.25 else 0.25 }}'
                       reset_volume: >
                         {{ states('input_number.media_default_volume')|float/100
                             if media_type in media_types else default_volume }}
@@ -127,7 +136,7 @@ media_players_set_volumes:
                             and is_state('input_boolean.media_type_volume_adjustments','on') %}
                           {% set media_type = source if media_type not in media_types else media_type %}
                           {% set media_type =  ('spotify' if 'spotify' in media_type else media_type) %}
-                          {{ 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(0) }}
+                          {{ 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(-1) }}
                         {% else %} 1 {# no adjustment #}
                         {% endif %}
                       #NOTE volume default 0.5/0.5 = 1 (no adjustment)
@@ -136,9 +145,8 @@ media_players_set_volumes:
                             if is_state('input_boolean.volume_balancing','on') else 1 }}
                       new_volume: >
                         {% if source_off %} {% set volume = source_volume %}
-                        {% elif source == 'tts_all' %} {% set volume = tts_volume %}
-                        {% elif source == 'phone_all' or (source in media_types
-                            and is_state('binary_sensor.mobile_phone_in_use','on')) %} {% set volume = phone_volume %}
+                        {% elif source in ['phone_all','tts_all'] or (source in media_types
+                            and is_state('binary_sensor.mobile_phone_in_use','on')) %} {% set volume = lower_volume %}
                         {% elif source in media_types %} {% set volume = media_volume %}
                         {% elif source == 'alarm_clock' %} {% set volume = alarm_clock_volume %}
                         {% elif source == 'reset' %} {% set volume = reset_volume %}
