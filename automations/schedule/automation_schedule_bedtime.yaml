@@ -147,7 +147,8 @@
               data:
                 message: >
                   You've elected to stay up past your bedtime today.
-                  Your bedtime has been delayed by {{ bedtime_delay }} minutes.
+                  Your bedtime has been delayed by {{ bedtime_delay }}
+                  minutes and is now set for {{ state_attr('sensor.bedtime_today','12hour') }}.
                 quiet_play: true
 
     - condition: template
@@ -159,11 +160,38 @@
     - service: script.bedtime_notification
 
 ###############################################################################
-## Schedule - Bedtime Delay Turned Off
+## Schedule - Bedtime Delay Reset
 ###############################################################################
-- id: schedule_bedtime_delay_turned_off
-  alias: '[Schedule] Bedtime Delay Turned Off'
+- id: schedule_bedtime_delay_reset
+  alias: '[Schedule] Bedtime Delay Reset'
   description: 'Turn bedtime delay back on if scene active.'
+  trigger:
+    - platform: state
+      id: delay_off
+      entity_id: input_boolean.bedtime_delayed
+      to: 'off'
+      from: 'on'
+  condition:
+    - condition: state
+      alias: 'Scene is active'
+      entity_id: binary_sensor.scene_active
+      state: 'on'
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.bedtime_delayed
+
+    - service: browser_mod.toast
+      data:
+        message: 'Bedtime delay cannot be turned off when a scene is active.'
+        duration: 30000
+
+###############################################################################
+## Schedule - Bedtime Delay Finished
+###############################################################################
+- id: schedule_bedtime_delay_finished
+  alias: '[Schedule] Bedtime Delay Finished'
+  description: 'Wait for delay back on or run bedtime.'
   max_exceeded: silent
   trigger:
     - platform: state
@@ -171,69 +199,16 @@
       entity_id: input_boolean.bedtime_delayed
       to: 'off'
       from: 'on'
-  action:
-    - choose:
-        - conditions:
-            - condition: state
-              alias: 'Scene is active'
-              entity_id: binary_sensor.scene_active
-              state: 'on'
-          sequence:
-            - service: input_boolean.turn_on
-              target:
-                entity_id: input_boolean.bedtime_delayed
 
-            - service: browser_mod.toast
-              data:
-                message: 'Bedtime delay cannot be turned off when a scene is active.'
-                duration: 30000
-      default:
-        - condition: not
-          conditions:
-            - condition: state
-              entity_id: timer.bedtime_delay
-              state: idle
-
-        - service: timer.cancel
-          target:
-            entity_id: timer.bedtime_delay
-
-###############################################################################
-## Schedule - Bedtime Delay Timer Finished
-###############################################################################
-- id: schedule_bedtime_delay_timer finished
-  alias: '[Schedule] Bedtime Delay Timer Finished'
-  description: 'Wait for delay back on or run bedtime.'
-  max_exceeded: silent
-  trigger:
     - platform: event
       event_type: timer.finished
       event_data:
         entity_id: timer.bedtime_delay
-  action:
-    - service: input_boolean.turn_off
-      target:
-        entity_id: input_boolean.bedtime_delayed
-
-    - service: script.turn_on
-      target:
-        entity_id: script.tts_play
-      data:
-        variables:
-          message: >
-            Are you still awake? I'm going to turn the lights off soon!
-            Let me know if you'd like to stay up a while longer.
-          quiet_play: true
-
-    - service: script.bedtime_notification
-
-    - delay:
-        minutes: "{{ states('input_number.bedtime_warning_delay')|int }}"
-
+  condition:
     - condition: state
-      entity_id: input_boolean.bedtime_delayed
-      state: 'off'
-
+      entity_id: binary_sensor.bedtime_active
+      state: 'on'
+  action:
     - service: script.bedtime
 
 ###############################################################################

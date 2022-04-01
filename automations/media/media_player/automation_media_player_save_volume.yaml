@@ -1,51 +1,25 @@
 ###############################################################################
-## Media Media Player Volume Changed #TODO kill?
+## Media Media Player Save Volume
 ###############################################################################
-- id: media_player_volume_changed
-  alias: '[Media Player] Volume Changed'
-  description: 'Update media volume when media type media player volume.'
+- id: media_player_save_volume
+  alias: '[Media Player] Save Volume'
+  description: 'Save media volume when media player volume changes.'
   mode: queued
   max: 20
   max_exceeded: error
   trace:
     stored_traces: 20
   variables:
-    media_type: >
-      {% set type = namespace(value='') %}
-      {% set media_types = state_attr('binary_sensor.media_on','media_types') %}
-      {% for media_type in media_types %}
-        {% if trigger.entity_id == states('sensor.' ~ media_type ~ '_media_player') %}
-          {% set type.value = media_type %}
-        {% endif %}
-      {% endfor %}
-      {{ type.value }}
-    # reverse media type adjustment to get proper media volume
-    volume: >
-      {% set player_volume = ('%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float(-1) * 100))|int(-1) %}
-      {% set media_type = 'spotify' if 'spotify' in media_type else media_type %}
-      {% set volume = (player_volume / (1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(0)))|int
-          if is_state('input_boolean.media_type_volume_adjustments','on') else player_volume %}
-      {{ 100 if volume > 100 else 0 if volume < 0 else volume }}
+    player_volume: "{{ '%0.2f'|format(state_attr(trigger.entity_id,'volume_level')|float(-1))|float }}"
   trigger:
     - platform: state
-      entity_id: !include /config/include/media_player_entities.yaml
+      entity_id: !include /config/include/media_player_entities_single.yaml
       attribute: volume_level
       to: ~
   condition:
-    # alarm announcements are full volume
     - condition: state
       entity_id: input_boolean.alarm_triggered
       state: 'off'
-
-    - condition: state
-      entity_id:
-        - script.media_play
-        - script.media_players_set_volumes
-      state: 'off'
-
-    - condition: template
-      alias: 'Trigger entity is a media type player'
-      value_template: "{{ media_type != '' }}"
 
     - condition: template
       alias: 'Volume not changed by media player turning off or becoming unavailable (sets volume to 0)'
@@ -62,20 +36,21 @@
             {% for item in state_attr('sensor.alarm_clock_media_player','entity_id') %}
               {% if item == trigger.entity_id %}{% set found.value = 1 %}{% endif %}
             {% endfor %}
-            {{ found.value != 1 }}
+            {{ found.value|int != 1 }}
           {% else %}{{ alarm != trigger.entity_id }}
           {% endif %}
         {% endif %}
 
     - condition: template
-      alias: 'Volume not changed by any active tts media player'
+      alias: 'Volume not changed by an active tts media player'
       value_template: >
         {% if is_state('binary_sensor.tts','off') %} true
         {% else %}
           {% set tts = states('sensor.tts_media_player') %}
+          {% set tts_sensor = 'sensor.' ~ tts.split('.')[1] %}
           {% if is_state_attr(tts,'type','group') and tts != trigger.entity_id %}
             {% set found = namespace(value=0) %}
-              {% for item in state_attr('sensor.tts_media_player','entity_id') %}
+              {% for item in state_attr(tts_sensor,'entity_id') %}
                 {% if item == trigger.entity_id %}{% set found.value = 1 %}{% endif %}
               {% endfor %}
             {{ found.value != 1 }}
@@ -85,6 +60,6 @@
   action:
     - service: input_number.set_value
       target:
-        entity_id: 'input_number.{{ media_type }}_volume'
+        entity_id: "input_number.{{ trigger.entity_id.split('.')[1] }}_current_volume"
       data:
-        value: '{{ volume }}'
+        value: '{{ player_volume }}'

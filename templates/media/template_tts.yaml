@@ -1,6 +1,41 @@
 ###############################################################################
 ## Templates - TTS
 ###############################################################################
+# - trigger:
+#     - platform: homeassistant
+#       id: startup
+#       event: start
+
+#     - platform: state
+#       entity_id: group.play_tts_players
+#       attribute: entity_id
+
+#     - platform: state
+#       entity_id: input_boolean.dev_mode
+#       to: 'off'
+- select:
+    - name: 'TTS Media Player Manual'
+      unique_id: tts_media_player_manual
+      optimistic: true
+      state: "{{ states('select.tts_media_player_manual') }}"
+      select_option: #TEST "{{ iif(option == 'unknown','None',option) }}"
+        - condition: template
+          value_template: "{{ is_state('select.tts_media_player_manual','unknown') }}"
+
+        - service: select.select_option
+          target:
+            entity_id: select.tts_media_player_manual
+          data:
+            option: None
+      options: >
+        {% set options = namespace(value=[]) %}
+        {% set tts_players = expand(state_attr('group.play_tts_players','entity_id'))
+            |map(attribute='name')|list %}
+        {% for item in tts_players -%}
+          {% set options.value = options.value + [item] %}
+        {% endfor %}
+        {{ ['None'] + options.value }}
+
 - binary_sensor:
     - name: 'TTS'
       unique_id: tts
@@ -13,15 +48,18 @@
       unique_id: tts_media_player
       icon: mdi:animation-play
       state: >
-        {% if is_state('input_select.occupancy_mode','Night') %}
+        {% if not is_state('select.tts_media_player_manual','None') %}
+          {% set tts = states('select.tts_media_player_manual') %}
+        {% elif is_state('input_select.occupancy_mode','Night') %}
           {% set tts = states('input_select.tts_media_player_night') %}
         {% elif is_state('binary_sensor.quiet_time','on') %}
           {% set tts = states('input_select.tts_media_player_quiet') %}
         {% else %}
           {% set tts = states('input_select.tts_media_player') %}
         {% endif %}
-        {% set tts_player = expand('group.play_tts_players')|selectattr('name','eq',tts)
-            |map(attribute='entity_id')|join('') %}
+
+        {% set tts_player = expand('group.play_tts_players')
+              |selectattr('name','eq',tts)|map(attribute='entity_id')|join('') %}
         {{ tts_player if tts_player|lower != '' else 'media_player.dining_room_hub' }}
       attributes:
         player_state: "{{ states(states('sensor.tts_media_player')) }}"
