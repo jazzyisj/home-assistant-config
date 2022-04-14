@@ -2,7 +2,7 @@
 
 Home Assistant (Hassio) configuration, updated to v2022.4.3
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_v2022_4.png)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_4.png)
 
 ## TAGS USED IN CODE
 
