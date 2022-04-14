@@ -4,9 +4,16 @@
 - button:
     - name: 'HVAC Filter Hours Reset'
       unique_id: hvac_filter_hours_reset
-      icon: mdi:thermostat-box
+      icon: mdi:air-filter
       press:
         - service: script.null_script
+
+- button:
+    - name: 'Reset Thermostat'
+      unique_id: reset_thermostat
+      icon: mdi:thermostat-box
+      press:
+        - service: script.set_thermostat
 
 - binary_sensor:
     - name: 'Nest Connected'
@@ -21,7 +28,8 @@
       state: >
         {{ is_state('binary_sensor.nest_connected','off')
             and is_state('input_boolean.climate_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.wan_connected','on') }}
 
     - name: 'HVAC Active'
       unique_id: hvac_active
@@ -33,18 +41,17 @@
     - name: 'HVAC Filter Alert'
       unique_id: hvac_filter_alert
       state: >
-        {% set filter_hours = states('sensor.hvac_filter_hours')|int(-1) > 100 %}
+        {% set filter_hours = states('sensor.hvac_filter_hours')|int(-1) > 250 %}
         {% set reset_time = states('button.hvac_filter_hours_reset') %}
         {% set time_limit = false %}
         {% if reset_time|lower not in ['unknown','unavailable','none'] %}
-          {% set time_limit = now() - reset_time|as_datetime > timedelta(days=90) %}
+          {% set time_limit = now() - reset_time|as_datetime > timedelta(days=60) %}
         {% endif %}
         {{ filter_hours or time_limit }}
 
     - name: 'Indoor Low Temperatature Alert'
       unique_id: indoor_low_temperature_alert
-      # let temp stabilize, avoid false alerts
-      delay_on: "{{ 0 if is_state('binary_sensor.indoor_high_temperature_alert','unknown') else 1800 }}"
+      delay_on: 1800
       state: >
         {{ ((states('sensor.thermostat_temperature')|int(0) < states('input_number.low_temperature_threshold')|int(0))
               and not states('sensor.thermostat_temperature')|lower in ['unknown','unavailable','none'])
@@ -54,11 +61,9 @@
             and is_state('input_boolean.startup_pending','off') }}
 
     # add bathroom temp differential to temp threshold to reduce false alerts
-    # can't use availability template because of separate sensors
     - name: 'Indoor High Temperature Alert'
       unique_id: indoor_high_temperature_alert
-      # let temp stabilize, avoid false alerts
-      delay_on: "{{ 0 if is_state('binary_sensor.indoor_high_temperature_alert','unknown') else 1800 }}"
+      delay_on: 1800
       state: >
         {{ (states('sensor.thermostat_temperature')|int(0) > states('input_number.high_temperature_threshold')|int(0)
               and not states('sensor.thermostat_temperature')|lower in ['unknown','unavailable','none'])
@@ -69,9 +74,8 @@
             and is_state('input_boolean.startup_pending','off') }}
 
     - name: 'Indoor High Humidity Alert'
-      unique_id: indoor_high_humidity_alert # can't use availability template because of separate sensors
-      # let humidity stabilize, avoid false alerts
-      delay_on: "{{ 0 if is_state('binary_sensor.indoor_high_humidity_alert','unknown') else 3600 }}"
+      unique_id: indoor_high_humidity_alert
+      delay_on: 3600
       state: >
         {{ (states('sensor.thermostat_humidity')|int(0) > states('input_number.high_humidity_threshold')|int(0)
               and not states('sensor.thermostat_humidity')|lower in ['unknown','unavailable','none'] )
@@ -82,8 +86,7 @@
 
     - name: 'Bathroom Mold Risk Alert'
       unique_id: bathroom_mold_risk_alert
-      # let temp/humidity stabilize, avoid false alerts
-      delay_on: "{{ 0 if is_state('binary_sensor.bathroom_mold_risk_alert','unknown') else 3600 }}"
+      delay_on: 3600
       state: >
         {{ states('sensor.bathroom_mold_risk')|int(0) > states('input_number.mold_risk_threshold')|int(0)
             and is_state('input_boolean.climate_alerts','on')
@@ -91,8 +94,7 @@
 
     - name: 'HVAC Window Door Open Alert'
       unique_id: hvac_window_door_open_alert
-      # allow temporary open
-      delay_on: "{{ 0 if is_state('binary_sensor.hvac_window_door_open_alert','unknown') else 900 }}"
+      delay_on: 900
       state: >
         {% if state_attr('binary_sensor.hvac_window_door_open_alert','entity_id')|lower not in ['unknown','unavailable','none'] %}
           {{ state_attr('binary_sensor.hvac_window_door_open_alert','entity_id')|count > 0
@@ -108,18 +110,7 @@
               |map(attribute='entity_id')|list }}
 
 - sensor:
-    - name: 'Thermostat Mode'
-      unique_id: thermostat_mode
-      icon: mdi:hvac
-      state: >
-        {% if is_state('climate.thermostat','heat') %} Heat
-        {% elif is_state('climate.thermostat','cool') %} Cool
-        {% elif is_state('climate.thermostat','heat_cool') %} Auto
-        {% elif is_state('climate.thermostat','fan_only') %} Fan
-        {% elif is_state('climate.thermostat','off') %} Off
-        {% else %} {{ none }}
-        {% endif %}
-
+    # req for hvac runtime history stats
     - name: 'Thermostat HVAC State'
       unique_id: thermostat_hvac_state
       state: "{{ state_attr('climate.thermostat','hvac_action') }}"
@@ -127,57 +118,55 @@
     - name: 'Thermostat Target Temperature'
       unique_id: thermostat_target_temperature
       icon: mdi:hvac
+      device_class: temperature
+      unit_of_measurement: °C
       state: >
-        {% if states('climate.thermostat') in ['heat','cool'] %}{{ state_attr('climate.thermostat','temperature') }}
-        {% elif states('climate.thermostat') == 'heat_cool' %}
+        {% set hvac_mode = states('climate.thermostat') %}
+        {% if hvac_mode in ['heat','cool'] %}
+          {{ state_attr('climate.thermostat','temperature') }}
+        {% elif hvac_mode == 'heat_cool' %}
           {% if states('sensor.outside_temperature')|int(0)
               > state_attr('climate.thermostat','target_temp_high')|int %}
             {{ state_attr('climate.thermostat','target_temp_high') }}
           {% else %}
             {{ state_attr('climate.thermostat','target_temp_low') }}
           {% endif %}
-        {% else %} off
+        {% else %} {{ none }}
         {% endif %}
+      availability: "{{ states('climate.thermostat')|lower not in ['unknown','unavailable','none'] }}"
 
     # overload climate integration sensors
     - name: 'Indoor Temperature'
-      unique_id: indoor_temperature
+      unique_id: indoor_temperature #IDEA - remote sensor backup values
       device_class: temperature
       state_class: measurement
       unit_of_measurement: °C
-      state: >
-        {% if is_number(states('sensor.thermostat_temperature')) %}
-          {{ '%0.1f'|format(states('sensor.thermostat_temperature')|float('unknown')) }}
-        {% endif %}
+      state: "{{ '%0.1f'|format(states('sensor.thermostat_temperature')|float(none)) }}"
       availability: "{{ is_number(states('sensor.thermostat_temperature')) }}"
 
     - name: 'Indoor Humidity'
-      unique_id: indoor_humidity
+      unique_id: indoor_humidity #IDEA - remote sensor backup values
       device_class: humidity
       state_class: measurement
       unit_of_measurement: '%'
-      state: >
-        {% if is_number(states('sensor.thermostat_humidity')) %}
-          {{ states('sensor.thermostat_humidity')|int('unknown') }}
-        {% endif %}
+      state: "{{ '%0.1f'|format(states('sensor.thermostat_humidity')|int(none)) }}"
       availability: "{{ is_number(states('sensor.thermostat_humidity')) }}"
 
     - name: 'HVAC Boost'
       unique_id: hvac_boost
-      icon: "{{ 'mdi:thermometer-plus' if states('sensor.hvac_boost')|int(0) > -1 else  'mdi:thermometer-minus' }}"
+      icon: "{{ iif(states('sensor.hvac_boost')|int(0) > -1,'mdi:thermometer-plus','mdi:thermometer-minus') }}"
       unit_of_measurement: '°C'
       state: >
         {% if is_state('input_boolean.hvac_boost','on') %}
-          {% set cool = true if is_state('climate.thermostat','cool')
-              or (states('climate.thermostat') == 'heat_cool'
-                and (states('sensor.outside_temperature')|int(0)
-                >= state_attr('climate.thermostat','target_temp_high')|int)) else false %}
+          {% set humidity = states('sensor.outdoor_humidity')|int(0) %}
+          {% set hvac_mode = states('climate.thermostat') %}
+          {% set cool = true if hvac_mode == 'cool'
+              or (hvac_mode == 'heat_cool' and states('sensor.outside_temperature')|int(0)
+                >= state_attr('climate.thermostat','target_temp_high')|int) else false %}
           {% if not cool and is_state('binary_sensor.waketime_active','on') %} 2
-          {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %}
-              {{ iif(states('sensor.outdoor_humidity')|int(0) > 80,2,1) }}
-          {% elif is_state('binary_sensor.outdoor_high_temperature_alert','on') %}
-              {{ iif(states('sensor.outdoor_humidity')|int(0) > 80,-1,0) }}
-          {% elif states('sensor.outdoor_humidity')|int(0) > 80 %}{{ iif(cool,-1,1) }}
+          {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} {{ iif(humidity > 80,2,1) }}
+          {% elif is_state('binary_sensor.outdoor_high_temperature_alert','on') %} {{ iif(humidity > 80,-1,0) }}
+          {% elif humidity > 80 %}{{ iif(cool,-1,1) }}
           {% else %} 0
           {% endif %}
         {% else %} 0

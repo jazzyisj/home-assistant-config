@@ -6,7 +6,13 @@
   description: 'Run bed time routine.'
   trigger:
     - platform: time
-      at: sensor.next_bedtime
+      id: bedtime
+      at: sensor.bedtime_warning
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bedtime_delay
   condition:
     - condition: state
       entity_id:
@@ -42,7 +48,7 @@
   action:
     - service: script.bedtime
       data:
-        warning: true
+        warning: "{{ iif(trigger.id == 'bedtime',true,false) }}"
 
 ###############################################################################
 ## Schedule - Bedtime Clear Notification
@@ -53,20 +59,13 @@
   max_exceeded: silent
   trigger:
     - platform: state
-      id: delay
       entity_id: input_boolean.bedtime_delayed
       to: 'off'
       from: 'on'
 
     - platform: state
-      id: occ
       entity_id: input_select.occupancy_mode
       to: Night
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: bedtime_delay_off
   action:
     - service: "notify.{{ states('sensor.notify_service_home') }}"
       data:
@@ -137,7 +136,7 @@
                   data:
                     message: >
                       Your bedtime has been delayed by {{ bedtime_delay }} minutes.
-                      I'll check on you again at {{ state_attr('sensor.bedtime_today','12hour') }}
+                      I'll check on you again at {{ state_attr('sensor.delayed_bedtime','12hour') }}
                       to see if you've come to your senses yet.
                     quiet_play: true
           default:
@@ -148,7 +147,7 @@
                 message: >
                   You've elected to stay up past your bedtime today.
                   Your bedtime has been delayed by {{ bedtime_delay }}
-                  minutes and is now set for {{ state_attr('sensor.bedtime_today','12hour') }}.
+                  minutes and is now set for {{ state_attr('sensor.delayed_bedtime','12hour') }}.
                 quiet_play: true
 
     - condition: template
@@ -160,38 +159,11 @@
     - service: script.bedtime_notification
 
 ###############################################################################
-## Schedule - Bedtime Delay Reset
+## Schedule - Bedtime Delay Turned Off
 ###############################################################################
-- id: schedule_bedtime_delay_reset
-  alias: '[Schedule] Bedtime Delay Reset'
-  description: 'Turn bedtime delay back on if scene active.'
-  trigger:
-    - platform: state
-      id: delay_off
-      entity_id: input_boolean.bedtime_delayed
-      to: 'off'
-      from: 'on'
-  condition:
-    - condition: state
-      alias: 'Scene is active'
-      entity_id: binary_sensor.scene_active
-      state: 'on'
-  action:
-    - service: input_boolean.turn_on
-      target:
-        entity_id: input_boolean.bedtime_delayed
-
-    - service: browser_mod.toast
-      data:
-        message: 'Bedtime delay cannot be turned off when a scene is active.'
-        duration: 30000
-
-###############################################################################
-## Schedule - Bedtime Delay Finished
-###############################################################################
-- id: schedule_bedtime_delay_finished
-  alias: '[Schedule] Bedtime Delay Finished'
-  description: 'Wait for delay back on or run bedtime.'
+- id: schedule_bedtime_delay_turned_off
+  alias: '[Schedule] Bedtime Delay Turned Off'
+  description: 'Run bedtime script.'
   max_exceeded: silent
   trigger:
     - platform: state
@@ -199,17 +171,36 @@
       entity_id: input_boolean.bedtime_delayed
       to: 'off'
       from: 'on'
-
-    - platform: event
-      event_type: timer.finished
-      event_data:
-        entity_id: timer.bedtime_delay
-  condition:
-    - condition: state
-      entity_id: binary_sensor.bedtime_active
-      state: 'on'
   action:
-    - service: script.bedtime
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.scene_active
+              state: 'on'
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.bedtime_delayed
+
+            - service: browser_mod.toast
+              data:
+                message: 'Bedtime delay cannot be turned off when a scene is active.'
+                duration: 30000
+
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.bedtime_active
+              state: 'on'
+
+            - condition: not
+              conditions:
+                - condition: state
+                  entity_id: timer.bedtime_delay
+                  state: idle
+          sequence:
+            - service: timer.finish
+              target:
+                entity_id: timer.bedtime_delay
 
 ###############################################################################
 ## Schedule - Turn On Bedtime Delay
@@ -227,7 +218,7 @@
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
-        action: bedtime_delayed
+        action: bedtime_delay_on
   action:
     - service: input_boolean.turn_on
       target:
@@ -259,13 +250,3 @@
     - service: input_boolean.turn_off
       target:
         entity_id: input_boolean.bedtime_delayed
-
-    - condition: not
-      conditions:
-        - condition: state
-          entity_id: timer.bedtime_delay
-          state: idle
-
-    - service: timer.cancel
-      target:
-        entity_id: timer.bedtime_delay

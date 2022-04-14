@@ -5,36 +5,39 @@
     # if any calendar connected, google calendar is connected
     - name: 'Google Calendar Connected'
       unique_id: google_calendar_connected
-      icon: "{{ 'mdi:calendar' if is_state('binary_sensor.google_calendar_connected','on') else 'mdi:alert-circle' }}"
+      icon: mdi:calendar
       device_class: connectivity
       state: >
-        {{ state_attr('calendar.days','start_time') != none
-            or state_attr('calendar.afternoons','start_time') != none
-            or state_attr('calendar.work_holiday','start_time') != none
-            or state_attr('calendar.work_vacation_jason','start_time') != none
-            or state_attr('calendar.work_vacation_sheri','start_time') != none
-            or state_attr('calendar.work_layoff','start_time') != none
-            or state_attr('calendar.garbage','start_time') != none
-            or state_attr('calendar.recycle','start_time') != none
-            or state_attr('calendar.yardwaste','start_time') != none }}
+        {% set bad_states = ['unknown','unavailable','none'] %}
+        {{ states('calendar.days1') not in bad_states
+            or states('calendar.days2') not in bad_states
+            or states('calendar.afternoons1') not in bad_states
+            or states('calendar.afternoons2') not in bad_states
+            or states('calendar.work_holiday') not in bad_states
+            or states('calendar.work_vacation_jason') not in bad_states
+            or states('calendar.work_vacation_sheri') not in bad_states
+            or states('calendar.garbage') not in bad_states
+            or states('calendar.recycle') not in bad_states
+            or states('calendar.yardwaste') not in bad_states }}
 
     - name: 'Google Calendar Connected Alert'
       unique_id: google_calendar_connected_alert
       icon: mdi:calendar
       state: >
-        {% if is_state('input_boolean.schedule_alerts','on') and is_state('input_boolean.startup_pending','off') %}
-          {{ is_state('binary_sensor.google_calendar_connected','off') }}
-        {% endif %}
+        {{ is_state('binary_sensor.google_calendar_connected','off')
+            and is_state('input_boolean.schedule_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.wan_connected','on') }}
 
     - name: 'Calendar Alert'
       unique_id: calendar_alert
       state: >
         {% if is_state('input_boolean.schedule_alerts','on') and is_state('input_boolean.startup_pending','off')
-            and state_attr('binary_sensor.calendar_alert','calendars') != none %}
-          {{ state_attr('binary_sensor.calendar_alert','calendars')|count > 0 }}
+            and state_attr('binary_sensor.calendar_alert','entity_id') != none %}
+          {{ state_attr('binary_sensor.calendar_alert','entity_id')|count > 0 }}
         {% endif %}
-      attributes: # vacation calendars not included - often empty
-        calendars: >
+      attributes: # vacation/layoff calendars not included - often empty
+        entity_id: >
           {{ states.calendar|selectattr('attributes.start_time','eq',null)
               |rejectattr('entity_id','in',['calendar.work_vacation_jason','calendar.work_vacation_sheri','calendar.work_layoff'])
               |map(attribute='name')|list }}
@@ -43,84 +46,116 @@
 - sensor:
     - name: 'Next Waste Day'
       unique_id: next_waste_day
+      device_class: timestamp
       icon: >
-        {% if states('sensor.next_waste_day') == states('sensor.next_garbage_day')
+        {% set next = states('sensor.next_waste_day') %}
+        {% if next == states('sensor.next_garbage_day')
             and states.sensor.next_garbage_day.attributes is defined %}
           {{ states.sensor.next_garbage_day.attributes.icon }}
-        {% elif states('sensor.next_waste_day') == states('sensor.next_recycle_day')
+        {% elif next == states('sensor.next_recycle_day')
             and states.sensor.next_recycle_day.attributes is defined %}
           {{ states.sensor.next_recycle_day.attributes.icon }}
-        {% elif states('sensor.next_waste_day') == states('sensor.next_yardwaste_day')
+        {% elif next == states('sensor.next_yardwaste_day')
             and states.sensor.next_yardwaste_day.attributes is defined %}
           {{ states.sensor.next_yardwaste_day.attributes.icon }}
         {% else %} mdi:trash-can
         {% endif %}
       state: >
-        {% if state_attr('calendar.garbage','start_time') != none
-            and state_attr('calendar.recycle','start_time') != none
-            and state_attr('calendar.yardwaste','start_time') != none %}
-          {% set garbage = state_attr('calendar.garbage','start_time')|as_datetime|as_local %}
-          {% set recycle = state_attr('calendar.recycle','start_time')|as_datetime|as_local %}
-          {% set yardwaste = state_attr('calendar.yardwaste','start_time')|as_datetime|as_local %}
-          {% set next = [garbage,recycle,yardwaste]|min %}
-          {% if next.day == now().day %} Today
-          {% elif next - now() <= timedelta(hours=24) %} Tomorrow
-          {% elif next-now() > timedelta(days=365) %} None
-          {% else %} {{ next.strftime('%a, %b %d') }}
-          {% endif %}
-        {% endif %}
+        {% set garbage = none if states('sensor.next_garbage_day')|lower in ['unknown','unavailable','none']
+            else states('sensor.next_garbage_day')|as_datetime|as_local %}
+        {% set recycle = none if states('sensor.next_recycle_day')|lower in ['unknown','unavailable','none']
+            else states('sensor.next_recycle_day')|as_datetime|as_local %}
+        {% set yardwaste = none if states('sensor.next_yardwaste_day')|lower in ['unknown','unavailable','none']
+            else states('sensor.next_yardwaste_day')|as_datetime|as_local %}
+        {% set types = [garbage, recycle, yardwaste] %}
+        {% set active = namespace(types=[]) %}
+        {% for item in types if item != none %}
+          {% set active.types = active.types + [item] %}
+        {% endfor %}
+        {{ none if active.types == [] else active.types|min }}
       attributes:
-        waste_type: >
-          {% if states('sensor.next_waste_day') == states('sensor.next_garbage_day') %} garbage
-          {% elif states('sensor.next_waste_day') == states('sensor.next_recycle_day') %} recycle
-          {% elif states('sensor.next_waste_day') == states('sensor.next_yardwaste_day') %} yardwaste
+        display: >
+          {% set next = none if states('sensor.next_waste_day')|lower in ['unknown','unavailable','none']
+              else states('sensor.next_waste_day')|as_datetime %}
+          {% if next != none %}
+            {% if next.day == now().day %} Today
+            {% elif next - now() <= timedelta(hours=24) %} Tomorrow
+            {% elif next-now() > timedelta(days=365) %} None
+            {% else %} {{ next.strftime('%a, %b %d') }}
+            {% endif %}
+          {% else %} unknown
           {% endif %}
-      availability: >
-        {{ state_attr('calendar.garbage','start_time') != none
-            or state_attr('calendar.recycle','start_time') != none
-            or state_attr('calendar.yardwaste','start_time') != none }}
+        waste_type: >
+          {% set next = states('sensor.next_waste_day') %}
+          {% if next == states('sensor.next_garbage_day') %} garbage
+          {% elif next == states('sensor.next_recycle_day') %} recycle
+          {% elif next == states('sensor.next_yardwaste_day') %} yardwaste
+          {% endif %}
 
     - name: 'Next Garbage Day'
       unique_id: next_garbage_day
       icon: mdi:trash-can
-      state: >
+      device_class: timestamp
+      state: > # as_local - add tz
         {% if state_attr('calendar.garbage','start_time') != none %}
-          {% set start = state_attr('calendar.garbage','start_time')|as_datetime|as_local %}
-          {% if is_state('calendar.garbage','on') %} Today
-          {% elif start - now() < timedelta(days=1) %} Tomorrow
-          {% else %} {{ start.strftime('%a, %b %d') }}
-          {% endif %}
+          {{ state_attr('calendar.garbage','start_time')|as_datetime|as_local }}
+        {% else %} {{ none }}
         {% endif %}
-      availability: "{{ state_attr('calendar.garbage','start_time') != none }}"
+      attributes:
+        display: >
+          {% if state_attr('calendar.garbage','start_time') != none %}
+            {% set start = state_attr('calendar.garbage','start_time')|as_datetime|as_local %}
+            {% if is_state('calendar.garbage','on') %} Today
+            {% elif start - now() < timedelta(days=1) %} Tomorrow
+            {% else %} {{ start.strftime('%a, %b %d') }}
+            {% endif %}
+          {% else %} unknown
+          {% endif %}
+      # availability: "{{ state_attr('calendar.garbage','start_time') != none }}"
 
     - name: 'Next Recycle Day'
       unique_id: next_recycle_day
       icon: mdi:recycle
-      state: >
+      device_class: timestamp
+      state: > # as_local - add tz
         {% if state_attr('calendar.recycle','start_time') != none %}
-          {% set start = state_attr('calendar.recycle','start_time')|as_datetime|as_local %}
-          {% if is_state('calendar.recycle','on') %} Today
-          {% elif start - now() < timedelta(days=1) %} Tomorrow
-          {% else %} {{ start.strftime('%a, %b %d') }}
-          {% endif %}
+          {{ state_attr('calendar.recycle','start_time')|as_datetime|as_local }}
+        {% else %} {{ none }}
         {% endif %}
-      availability: "{{ state_attr('calendar.recycle','start_time') != none }}"
+      attributes:
+        display: >
+          {% if state_attr('calendar.recycle','start_time') != none %}
+            {% set start = state_attr('calendar.recycle','start_time')|as_datetime|as_local %}
+            {% if is_state('calendar.recycle','on') %} Today
+            {% elif start - now() < timedelta(days=1) %} Tomorrow
+            {% else %} {{ start.strftime('%a, %b %d') }}
+            {% endif %}
+          {% else %} unknown
+          {% endif %}
+      # availability: "{{ state_attr('calendar.recycle','start_time') != none }}"
 
     - name: 'Next Yardwaste Day'
       unique_id: next_yardwaste_day
       icon: mdi:pine-tree
-      state: >
+      device_class: timestamp
+      state: > # as_local - add tz
         {% if state_attr('calendar.yardwaste','start_time') != none %}
-          {% set start = state_attr('calendar.yardwaste','start_time')|as_datetime|as_local %}
-          {% if is_state('calendar.yardwaste','on') %} Today
-          {% elif start - now() < timedelta(days=1) %} Tomorrow
-          {% else %} {{ start.strftime('%a, %b %d') }}
-          {% endif %}
+          {{ state_attr('calendar.yardwaste','start_time')|as_datetime|as_local }}
+        {% else %} {{ none }}
         {% endif %}
       attributes:
+        display: >
+          {% if state_attr('calendar.yardwaste','start_time') != none %}
+            {% set start = state_attr('calendar.yardwaste','start_time')|as_datetime|as_local %}
+            {% if is_state('calendar.yardwaste','on') %} Today
+            {% elif start - now() < timedelta(days=1) %} Tomorrow
+            {% else %} {{ start.strftime('%a, %b %d') }}
+            {% endif %}
+          {% else %} unknown
+          {% endif %}
         warning: >
           {% if state_attr('calendar.yardwaste','start_time') != none %}
             {% set start = state_attr('calendar.yardwaste','start_time')|as_datetime|as_local %}
             {{ start - now() < timedelta(days=3) and start - now() > timedelta(days=1) }}
           {% endif %}
-      availability: "{{ state_attr('calendar.yardwaste','start_time') != none }}"
+      # availability: "{{ state_attr('calendar.yardwaste','start_time') != none }}"

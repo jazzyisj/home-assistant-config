@@ -22,6 +22,7 @@ entities:
           :host {
             --paper-item-icon-color:
               {% if is_state('binary_sensor.uptime_robot_connected','off') %} var(--entity-severe-color)
+              {% elif states('sensor.hassio','up')|lower in ['unknown','unavailable'] %} var(--entity-disabled-color)
               {% elif is_state('sensor.hassio','up') %} var(--entity-ok-color)
               {% else %} var(--entity-warning-color)
               {% endif %}
@@ -29,33 +30,6 @@ entities:
           }
     entities:
       - entity: switch.hassio_active
-
-  - type: custom:auto-entities
-    filter:
-      include:
-        - group: group.integration_connected_sensors
-          options:
-            secondary_info: last-changed
-            card_mod:
-              style: |
-                :host {
-                  --paper-item-icon-color: var(--entity-warning-color);
-                  --paper-item-icon-active-color: var(--entity-ok-color);
-                }
-    sort:
-      method: name
-      ignore_case: true
-    card:
-      type: custom:fold-entity-row
-      head:
-        entity: binary_sensor.integrations_connected
-        card_mod:
-          style: |
-            :host {
-              --paper-item-icon-color: var(--entity-severe-color);
-              --paper-item-icon-active-color: var(--entity-ok-color);
-            }
-      padding: 5
 
   - entity: binary_sensor.remote_ui
     double_tap_action:
@@ -73,7 +47,10 @@ entities:
     card_mod:
       style: |
         :host {
-          --paper-item-icon-color: var(--entity-severe-color);
+          --paper-item-icon-color:
+              {% if states('binary_sensor.remote_ui')|lower in ['unknown','unavailable'] %} var(--entity-severe-color);
+              {% else %} var(--entity-disabled-color);
+              {% endif %}
           --paper-item-icon-active-color: var(--entity-ok-color);
         }
 
@@ -83,7 +60,7 @@ entities:
     filter:
       include:
         - entity_id: 'sensor.browser_*'
-          # attributes: #BETA no attribute?
+          # attributes: #BMOD attributes missing
           #   type: 'browser_mod'
           options:
             secondary_info: last-changed
@@ -112,9 +89,10 @@ entities:
         style: |
           :host {
             --paper-item-icon-color:
-              {% if is_state('binary_sensor.unknown_browser_alert','on') %} var(--entity-severe-color)
-              {% elif is_state('binary_sensor.unknown_browser_alert','off') %} var(--entity-ok-color)
-              {% else %} var(--entity-critical-color)
+              {% set state = states('binary_sensor.unknown_browser_alert') %}
+              {% if state == 'on' %} var(--entity-severe-color)
+              {% elif state == 'off' %} var(--entity-ok-color)
+              {% else %} var(--entity-disabled-color)
               {% endif %}
             ;
           }
@@ -130,8 +108,10 @@ entities:
       style: |
         :host {
           --paper-item-icon-color:
-            {% if states('sensor.connected_clients')|int(0) > 0 %} var(--entity-ok-color)
-            {% else %} var(--entity-warning-color)
+            {% set state = states('sensor.connected_clients') %}
+            {% if state|int(-1) > 0 %} var(--entity-ok-color)
+            {% elif state|int(-1) == 0 %} var(--entity-warning-color)
+            {% else %} var(--entity-disabled-color)
             {% endif %}
           ;
         }
@@ -145,7 +125,6 @@ entities:
         hide_header: false
         title: 'System Updates'
         card: !include /config/lovelace/card/hass/hass_updates.yaml
-
     double_tap_action:
       action: more-info
     hold_action:
@@ -155,9 +134,13 @@ entities:
       style: |
         :host {
           --paper-item-icon-color:
-            {% if states('sensor.breaking_change_warnings')|int(0) > 0 %} var(--entity-critical-color)
-            {% elif states('sensor.updates_available')|int(-1) > 0 %} var(--entity-warning-color)
-            {% else %} var(--entity-ok-color)
+            {% set state = states('sensor.updates_available') %}
+            {% if state|int(-1) > 0 %}
+              {% if states('sensor.breaking_change_warnings')|int(-1) > 0 %} var(--entity-critical-color)
+              {% else %} var(--entity-warning-color)
+              {% endif %}
+            {% elif state|int(-1) == 0 %} var(--entity-ok-color)
+            {% else %} var(--entity-disabled-color)
             {% endif %}
           ;
         }
@@ -166,7 +149,9 @@ entities:
     entity: sensor.backup_state
     name: 'System Backups'
     icon: mdi:folder-sync
-    state: "{{ 'Problem' if is_state('binary_sensor.backups_stale','on') else 'OK' }}"
+    state: >
+      {{ 'Problem' if is_state('binary_sensor.backups_stale','on')
+        else states('sensor.backup_state')|replace('_',' ')|title }}
     secondary: >
       Backups: {{ state_attr('sensor.backup_state','backups_in_home_assistant') }}
       -  Latest: {{ state_attr('sensor.backup_state','last_backup')|as_timestamp(none)|timestamp_custom('%b %-d,%Y %H:%M %p',true,none) }}
@@ -182,9 +167,11 @@ entities:
       style: |
         :host {
           --paper-item-icon-color:
+            {% set state = states('sensor.backup_state') %}
             {% if is_state('binary_sensor.backups_stale','on') %} var(--entity-critical-color)
-            {% elif not is_state('sensor.backup_state','backed_up') %} var(--entity-warning-color)
-            {% else %} var(--entity-ok-color)
+            {% elif state|lower in ['unknown','unavailable'] %} var(--entity-disabled-color)
+            {% elif is_state('sensor.backup_state','backed_up') %} var(--entity-ok-color)
+            {% else %} var(--entity-warning-color)
             {% endif %}
           ;
         }
@@ -197,7 +184,7 @@ entities:
         :host {
           --paper-item-icon-color:
             {% if 'persistent_notification.hass_alert' in states.persistent_notification|map(attribute='entity_id')|list %} var(--entity-warning-color)
-            {% elif states('sensor.home_assistant_alerts')|lower in ['unknown','unavailable','none'] %} var(--entity-warning-color)
+            {% elif states('sensor.home_assistant_alerts')|lower in ['unknown','unavailable'] %} var(--entity-disabled-color)
             {% else %} var(--entity-ok-color)
             {% endif %}
           ;
@@ -267,19 +254,24 @@ entities:
       ignore_case: true
     card:
       type: custom:fold-entity-row
+      padding: 5
       head:
-        entity: input_boolean.hass_automation
-        state_color: true
-        card_mod:
-          style: |
-            :host {
-              --paper-item-icon-color:
-                {% if is_state('input_boolean.system_automation','off') %} var(--entity-warning-color)
-                {% else %} var(--state-icon-color)
-                {% endif %}
-              ;
-            }
-        padding: 5
+        type: custom:template-entity-row
+        entity: sensor.dummy
+        name: 'HASS Automations'
+        icon: mdi:sync-alert
+        tap_action: none
+
+  - type: custom:github-entity-row
+    repo: jazzyisj/home-assistant-config
+    hold_action:
+      action: url
+      url_path: !secret GITHUB_HASS_CONFIG
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color: var(--state-icon-color);
+        }
 
   - type: buttons
     entities:
@@ -317,13 +309,3 @@ entities:
           }
 card_mod:
   class: basic
-#BETA   - type: custom:github-entity-row
-#     repo: jazzyisj/home-assistant-config
-#     hold_action:
-#       action: url
-#       url_path: !secret GITHUB_HASS_CONFIG
-#     card_mod:
-#       style: |
-#         :host {
-#           --paper-item-icon-color: var(--state-icon-color);
-#         }

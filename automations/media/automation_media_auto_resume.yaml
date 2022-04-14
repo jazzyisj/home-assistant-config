@@ -9,29 +9,29 @@
     media_on: "{{ state_attr('binary_sensor.media_on','media_types') }}"
     media_types: "{{ state_attr('sensor.media_types','media_types') }}"
     media_type: >
-      {% if trigger.id in media_types %} {{ trigger.id }}
-      {% elif trigger.id == 'playlist' %} {{ trigger.entity_id[13:-9] }}
-      {% elif trigger.id == 'player' %} {{ trigger.entity_id[13:-13] }}
+      {% if media_types != none and trigger.id in media_types %} {{ trigger.id }}
+      {% elif trigger.id == 'playlist' %} {{ trigger.entity_id[7:-9] }}
+      {% elif trigger.id == 'player' %} {{ trigger.entity_id[7:-13] }}
       {% else %} all
       {% endif %}
   trigger:
     - platform: state
       id: playlist
       entity_id:
-        - input_select.radio_playlist
-        - input_select.spotify_hassio_playlist
-        - input_select.spotify_jason_playlist
-        - input_select.spotify_sheri_playlist
-        - input_select.youtube_playlist
+        - select.radio_playlist
+        - select.spotify_hassio_playlist
+        - select.spotify_jason_playlist
+        - select.spotify_sheri_playlist
+        - select.youtube_playlist
 
     - platform: state
       id: player
       entity_id:
-        - input_select.radio_media_player
-        - input_select.spotify_hassio_media_player
-        - input_select.spotify_jason_media_player
-        - input_select.spotify_sheri_media_player
-        - input_select.youtube_media_player
+        - select.radio_media_player
+        - select.spotify_hassio_media_player
+        - select.spotify_jason_media_player
+        - select.spotify_sheri_media_player
+        - select.youtube_media_player
 
     - platform: state
       id: startup
@@ -83,6 +83,9 @@
         action: youtube_restart
   condition:
     - condition: template
+      value_template: '{{ media_on != none and media_types != none }}'
+
+    - condition: template
       alias: 'Any media is on if media type is all else media type is on'
       value_template: >
         {{ is_state('binary_sensor.media_on','on') if media_type == 'all'
@@ -102,9 +105,10 @@
     - choose:
         - conditions: "{{ trigger.id == 'player' }}"
           sequence:
-            - service: script.media_stop
+            # turn off current media players
+            - service: script.media_players_off
               data:
-                media_type: '{{ media_type }}'
+                media_players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','entity_id') }}"
 
     - repeat:
         count: "{{ media_on|count if media_type == 'all' else 1 }}"
@@ -129,7 +133,8 @@
                       {% set alarm_player = states('sensor.alarm_clock_media_player') %}
                       {% set alarm_group = state_attr('sensor.alarm_clock_media_player','entity_id') %}
 
-                      {% if is_state('binary_sensor.alarm_clock','on') %}
+                      {% if is_state('binary_sensor.alarm_clock','off') %} true
+                      {% else %}
                         {% set found = namespace(value=0) %}
                         {% set media_player = states(media_sensor) %}
                         {% set media_group = state_attr(media_sensor,'entity_id') %}
@@ -152,8 +157,7 @@
                             {% set found.value = 1 %}
                           {% endif %}
                         {% endif %}
-                        {{ found.value|int(0) != 1 }}
-                      {% else %} true
+                        {{ found.value != 1 }}
                       {% endif %}
                 sequence:
                   - service: script.media_play

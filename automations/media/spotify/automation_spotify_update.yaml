@@ -1,163 +1,4 @@
 ###############################################################################
-## Spotify - Spotify Hassio Update
-###############################################################################
-- id: spotify_spotify_hassio_update
-  alias: '[Spotify] Spotify Hassio Update'
-  description: 'Update Spotify Hassio media player.'
-  mode: restart
-  trigger:
-    - platform: state
-      entity_id: sensor.spotify_hassio_media_player
-      attribute: player_state
-      to: ~
-  action:
-    # make sure we update at least once if spotify is off
-    - service: homeassistant.update_entity
-      target:
-        entity_id: media_player.spotify_hassio_main
-
-###############################################################################
-## Spotify - Playlist Update
-###############################################################################
-- id: spotify_playlist_update
-  alias: '[Spotify] Playlist Update'
-  description: 'Update spotify playlist select options, restore previous selection on startup.'
-  mode: restart
-  variables:
-    selected_playlists: "{{ state_attr('group.spotify_selected_playlists','entity_id') }}"
-    stored_playlists: "{{ state_attr('group.spotify_stored_playlists','entity_id') }}"
-    playlists: "{{ state_attr('sensor.playlists_sensor','playlists') }}"
-    category_names: "{{ state_attr('sensor.spotify_categories','category_names') }}"
-  trigger:
-    - platform: homeassistant
-      id: startup
-      event: start
-
-    - platform: state
-      id: sensor
-      entity_id: sensor.playlists_sensor #RELOAD triggers on template reload
-      attribute: playlists
-  condition:
-    - condition: template
-      alias: 'Playlist is populated if trigger is not startup'
-      value_template: "{{ playlists != none and playlists|count > 0 if trigger.id != 'startup' else true }}"
-
-    - condition: template
-      alias: 'To/from state not unknown/unavailable' # prevent trigger on template reload
-      value_template: >
-        {{ trigger.to_state.state not in ['unknown','unavailable']
-            and trigger.from_state.state not in ['unknown','unavailable'] if trigger.id == 'sensor' else true }}
-  action:
-    # wait for sensor to populate (startup)
-    - wait_template: >
-        {% set plist = state_attr('sensor.playlists_sensor','playlists') %}
-        {{ plist != none and plist|count > 0 }}
-      timeout:
-        minutes: 10
-      continue_on_timeout: false
-
-    - delay: 1 # allow sensor to populate
-
-    - service: automation.turn_off
-      target:
-        entity_id: &spotify_automations
-          - automation.spotify_store_playlist_selection # don't overwrite stored values
-          - automation.media_auto_resume # triggered by input_select.spotify_hassio_playlist
-      data:
-        stop_actions: false
-
-    - variables:
-        options: >
-          {% set options = namespace(value=[]) %}
-          {% for item in playlists -%}
-            {% set options.value = options.value + [item.name] %}
-          {% endfor %}
-
-          {% for name in category_names %}
-            {% set options.value = options.value + [name] %}
-          {% endfor %}
-          {{ options.value }}
-
-    - service: input_select.set_options
-      target:
-        entity_id:
-          - input_select.spotify_hassio_playlist
-          - input_select.media_preset_spotify_hassio_wake
-          - input_select.media_preset_spotify_hassio_morning
-          - input_select.media_preset_spotify_hassio_sleep
-          - input_select.media_preset_spotify_hassio_jason
-          - input_select.media_preset_spotify_hassio_sheri
-          - input_select.media_preset_spotify_hassio_guest
-          - input_select.media_preset_spotify_hassio_shower
-          - input_select.media_preset_spotify_hassio_chill
-          - input_select.media_preset_spotify_hassio_company
-          - input_select.alarm_clock_spotify_hassio_auto
-          - input_select.alarm_clock_spotify_hassio_manual
-          - input_select.alarm_clock_spotify_hassio_nap
-      data:
-        options: '{{ options }}'
-
-    - choose:
-        - conditions: "{{ trigger.id == 'startup' }}" #NOTE only req on startup, now automatic
-          sequence:
-            - repeat: # restore previous selection (values reset when options reloaded)
-                count: '{{ selected_playlists|count}}'
-                sequence:
-                  - variables:
-                      select_entity: '{{ selected_playlists[repeat.index-1] }}'
-                      stored_value: '{{ states(stored_playlists[repeat.index-1]) }}'
-
-                  - choose:
-                      - conditions: "{{ stored_value in state_attr(select_entity,'options') }}"
-                        sequence:
-                          - service: input_select.select_option
-                            target:
-                              entity_id: '{{ select_entity }}'
-                            data:
-                              option: '{{ stored_value }}'
-
-    - service: automation.turn_on
-      target:
-        entity_id: *spotify_automations
-
-###############################################################################
-## Spotify - Store Playlist Selection
-###############################################################################
-- id: spotify_store_playlist_selection
-  alias: '[Spotify] Store Playlist Selection'
-  description: 'Update stored spotify playlist selection.'
-  mode: queued
-  max: 25
-  variables:
-    entity: "{{ 'input_select.spotify_playlist_' ~ trigger.entity_id|replace('media_player.spotify_','') }}"
-    playlist: "{{ state_attr(trigger.entity_id,'media_playlist') }}"
-  trigger:
-    - platform: state
-      entity_id:
-        - input_select.spotify_hassio_playlist
-        - input_select.spotify_jason_playlist
-        - input_select.spotify_sheri_playlist
-        - input_select.media_preset_spotify_hassio_wake
-        - input_select.media_preset_spotify_hassio_morning
-        - input_select.media_preset_spotify_hassio_sleep
-        - input_select.media_preset_spotify_hassio_guest
-        - input_select.media_preset_spotify_hassio_shower
-        - input_select.media_preset_spotify_hassio_chill
-        - input_select.media_preset_spotify_hassio_company
-        - input_select.alarm_clock_spotify_hassio_auto
-        - input_select.alarm_clock_spotify_hassio_manual
-        - input_select.alarm_clock_spotify_hassio_nap
-        - input_select.media_preset_spotify_hassio_jason
-        - input_select.media_preset_spotify_hassio_sheri
-  condition: "{{ states(trigger.entity_id)|lower not in ['','unknown','unavailable','none'] }}"
-  action:
-    - service: input_text.set_value
-      target:
-        entity_id: "{{ trigger.entity_id|replace('input_select','input_text') }}"
-      data:
-        value: '{{ states(trigger.entity_id) }}'
-
-###############################################################################
 ## Spotify - Playlist Selection Update
 ###############################################################################
 - id: spotify_playlist_selection_update
@@ -173,7 +14,7 @@
   condition:
     - condition: template
       alias: 'Valid playlist'
-      value_template: "{{ playlist in state_attr('input_select.spotify_hassio_playlist','options') }}"
+      value_template: "{{ playlist in state_attr('select.spotify_hassio_playlist','options') }}"
 
     - condition: template
       alias: 'Playlist is not a category'
@@ -183,19 +24,19 @@
       alias: 'Alarm clock media player is not spotify media player'
       value_template: >
         {% if is_state('binary_sensor.alarm_clock','on') %}
-          {{ states('input_select.alarm_clock_sound_manual') != 'Spotify Hassio' }}
+          {{ states('select.alarm_clock_sound_manual') != 'Spotify Hassio' }}
         {% else %} true
         {% endif %}
   action:
     - service: automation.turn_off
       target:
-        entity_id: automation.media_auto_resume # triggered by input_select.spotify_hassio_playlist
+        entity_id: automation.media_auto_resume # triggered by select.spotify_hassio_playlist
       data:
         stop_actions: false
 
-    - service: input_select.select_option
+    - service: select.select_option
       target:
-        entity_id: input_select.spotify_hassio_playlist
+        entity_id: select.spotify_hassio_playlist
       data:
         option: '{{ playlist }}'
 

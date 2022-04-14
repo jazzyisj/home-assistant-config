@@ -1,65 +1,25 @@
 ###############################################################################
 ## Templates - Youtube
 ###############################################################################
-- binary_sensor:
-    - name: 'Youtube Connected'
-      unique_id: youtube_connected
-      icon: >
-        {{ 'mdi:youtube' if not states('media_player.ytube_music_player')|lower
-            in ['unknown','unavailable','none'] else 'mdi:alert-circle' }}
-      device_class: connectivity
-      state: "{{ states('media_player.ytube_music_player')|lower not in ['unknown','unavailable','none'] }}"
+- trigger:
+    - platform: state #IDEA youtube playlist sensor from integration
+      entity_id: sensor.youtube_playlists
+      attribute: playlists
+      to: ~
 
-    - name: 'Youtube Connected Alert'
-      unique_id: youtube_connected_alert
-      icon: mdi:youtube
-      state: >
-        {{ is_state('binary_sensor.youtube_connected','off')
-            and is_state('input_boolean.media_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
 
-    - name: 'Youtube'
-      unique_id: youtube
-      icon: mdi:youtube
-      delay_off: 5 # allow switch playlist, media player etc.
-      state: >
-        {{ states('media_player.youtube') in ['playing','paused']
-            or states('input_text.active_youtube_media_player') not in ['off','']
-            or is_state('input_boolean.resume_youtube','on') }}
-
-- sensor:
-    - name: 'Youtube Media Player'
-      unique_id: youtube_media_player
-      icon: mdi:youtube
-      state: >
-        {{ expand(state_attr('group.play_media_players','entity_id'))
-              |selectattr('name','eq',states('input_select.youtube_media_player'))
-              |map(attribute='entity_id')|join('') }}
-      attributes:
-        player_state: "{{ states(states('sensor.youtube_media_player')) }}"
-        entity_id: >
-          {% set player = states('sensor.youtube_media_player') %}
-          {% if player|lower not in ['off','','unknown','unavailable','none'] %}
-            {{ expand(state_attr('group.single_media_players','entity_id'))
-                |selectattr('attributes.' ~ player.split('.')[1],'eq',true)|map(attribute='entity_id')|list
-                  if is_state_attr(player,'type','group') else [player] }}
-          {% endif %}
-
-    # media_content_id:
-    #   playlist <- normal
-    #   channel
-    #   vid_channel
-    #   album
-    #   track
-    #   history
-    #   user_tracks
-    #   user_album
-    #   user_artist
-
-    - name: 'Youtube Playlists' #IDEA playlist sensor
+    - platform: event
+      event_type: event_template_reloaded
+  sensor:
+    - name: 'Youtube Playlists'
       unique_id: youtube_playlists
       icon: mdi:youtube
-      state: ok
+      state: >
+        {% set playlists = state_attr('sensor.youtube_playlists','playlists') %}
+        {{ 0 if playlists == none else playlists|count }}
       attributes:
         playlists: >
           {{
@@ -101,3 +61,103 @@
               }
             ]
           }}
+        playlist_names: >
+          {% set options = namespace(value=[]) %}
+          {% set playlists = state_attr('sensor.youtube_playlists','playlists') %}
+          {% if playlists != none %}
+            {% for item in playlists -%}
+              {% set options.value = options.value + [item.name] %}
+            {% endfor %}
+          {% endif %}
+          {{ options.value }}
+
+- trigger:
+    - platform: state
+      entity_id: sensor.media_play_media_players
+      attribute: player_names
+      to: ~
+
+    - platform: state
+      entity_id: input_text.youtube_media_player
+      to: ~
+  select:
+    - name: 'Youtube Media Player'
+      unique_id: youtube_media_player
+      state: "{{ states('input_text.youtube_media_player') }}"
+      select_option:
+        - condition: template
+          value_template: '{{ option != none }}'
+
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.youtube_media_player
+          data:
+            value: '{{ option }}'
+      options: "{{ state_attr('sensor.media_play_media_players','player_names') }}"
+
+- trigger:
+    - platform: state
+      entity_id: sensor.youtube_playlists
+      attribute: playlist_names
+      to: ~
+
+    - platform: state
+      entity_id: input_text.youtube_playlist
+      to: ~
+  select:
+    - name: 'Youtube Playlist'
+      unique_id: youtube_playlist
+      state: "{{ states('input_text.youtube_playlist') }}"
+      select_option:
+        - condition: template
+          value_template: '{{ option != none }}'
+
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.youtube_playlist
+          data:
+            value: '{{ option }}'
+      options: "{{ state_attr('sensor.youtube_playlists','playlist_names') }}"
+
+- binary_sensor:
+    #ISSUE youtube media players doesn't go unavailable, this doesn't work
+    - name: 'Youtube Connected'
+      unique_id: youtube_connected
+      icon: >
+        {{ 'mdi:youtube' if not states('media_player.ytube_music_player')|lower
+            in ['unknown','unavailable','none'] else 'mdi:alert-circle' }}
+      device_class: connectivity
+      state: "{{ states('media_player.ytube_music_player')|lower not in ['unknown','unavailable','none'] }}"
+
+    - name: 'Youtube Connected Alert'
+      unique_id: youtube_connected_alert
+      icon: mdi:youtube
+      state: >
+        {{ is_state('binary_sensor.youtube_connected','off')
+            and is_state('input_boolean.media_alerts','on')
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.wan_connected','on') }}
+
+    - name: 'Youtube'
+      unique_id: youtube
+      icon: mdi:youtube
+      delay_off: 5 # allow switch playlist, media player etc.
+      state: >
+        {{ states('media_player.youtube') in ['playing','paused']
+            or is_state('input_boolean.resume_youtube','on') }}
+
+- sensor:
+    - name: 'Youtube Media Player'
+      unique_id: youtube_media_player
+      icon: mdi:youtube
+      state: >
+        {% set active = states('input_text.active_youtube_media_player') %}
+        {% set selected = expand('group.media_play_media_players')
+            |selectattr('name','eq',states('select.youtube_media_player'))|map(attribute='entity_id')|join('') %}
+        {{ iif(active != 'off',active,selected) }}
+      attributes:
+        entity_id: >
+          {% set player = states('sensor.youtube_media_player') %}
+          {% if player not in ['unknown','unavailable'] %}
+          {{ state_attr('sensor.' ~ player.split('.')[1],'entity_id') if is_state_attr(player,'type','group') else [player] }}
+          {% endif %}

@@ -13,26 +13,28 @@
       state: "{{ states.alert|selectattr('state','eq','off')|list|count > 0 }}"
 
     - name: 'Integrations Connected'
-      unique_id: integration_connected
+      unique_id: integrations_connected
       icon: "{{ iif(is_state('binary_sensor.integrations_connected','on'),'mdi:api','mdi:api-off') }}"
       device_class: connectivity
+      delay_off: 5
       state: "{{ is_state('group.integration_connected_sensors','on') }}"
 
     - name: 'Integration Connected Alert'
       unique_id: integration_connected_alert
-      delay_on: "{{ iif(is_state('binary_sensor.integration_connected_alert','unknown'),0,900) }}"
+      delay_on: 300
       state: >
         {{ is_state('binary_sensor.integrations_connected','off')
               and is_state('input_boolean.hass_alerts','on')
               and is_state('input_boolean.startup_pending','off') }}
-      availability: "{{ states('binary_sensor.integrations_connected') in ['off','on'] }}"
 
     - name: 'Kiosk Connected'
       unique_id: kiosk_connected
       icon: "{{ iif(is_state('binary_sensor.integrations_connected','on'),'mdi:tablet-dashboard','mdi:alert-circle') }}"
       device_class: connectivity
       state: >
-        {{ states('light.fire_tablet_screen') in ['on','off']
+        {{ is_state('device_tracker.kiosk_tablet','home')
+            and states('media_player.kiosk_media_player') not in ['unknown','unavailable']
+            and states('light.fire_tablet_screen') in ['on','off']
             and is_number(states('sensor.browser_kiosk_internal')) }}
 
     - name: 'Update Available Alert'
@@ -40,8 +42,13 @@
       icon: mdi:alert
       device_class: update
       state: >
-        {% set unavail = state_attr('sensor.updates_available','entity_id') %}
-        {% if unavail != none %} {{ unavail|count > 0 }}
+        {% if is_state('input_boolean.startup_pending','off')
+            and is_state('input_boolean.hass_alerts','on') %}
+          {% set unavail = state_attr('sensor.updates_available','entity_id') %}
+          {% if unavail != none %} {{ unavail|count > 0 }}
+          {% elif is_state('group.other_update_entities','on') %} true
+          {% else %} false
+          {% endif %}
         {% else %} false
         {% endif %}
 
@@ -54,29 +61,21 @@
     - name: 'Uptime Robot Connected Alert'
       unique_id: uptime_robot_connected_alert
       icon: mdi:sort-clock-descending
-      delay_on: "{{ 0 if is_state('binary_sensor.uptime_robot_connected_alert','unknown') else 900 }}"
-      delay_off: "{{ 0 if is_state('binary_sensor.uptime_robot_connected_alert','unknown') else 900 }}"
+      delay_on: 300
       state: >
         {{ is_state('binary_sensor.uptime_robot_connected','off')
             and is_state('input_boolean.hass_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.wan_connected','on') }}
 
     - name: 'Remote UI Alert'
       unique_id: remote_ui_alert
-      # allow for temporary disconnections before alerting, prevent trigger on shutdown
-      delay_on: "{{ 0 if is_state('binary_sensor.remote_ui_alert','unknown') else 300 }}"
+      delay_on: 300 # prevent trigger on shutdown
       state: >
         {{ states('binary_sensor.remote_ui') in ['off','unknown','unavailable','none']
             and is_state('input_boolean.hass_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
-
-    - name: 'Device Offline Alert'
-      unique_id: device_offline_alert
-      delay_on: 60
-      state: >
-        {{ states('sensor.offline_devices')|int(-1) > 0
-            and is_state('input_boolean.hass_alerts','on')
-            and is_state('input_boolean.startup_pending','off') }}
+            and is_state('input_boolean.startup_pending','off')
+            and is_state('binary_sensor.wan_connected','on') }}
 
     - name: 'Unavailable Sensor Alert'
       unique_id: unavailable_sensor_alert
@@ -130,7 +129,7 @@
       icon: "{{ iif(states('sensor.updates_available')|int(-1) > 0,'mdi:cloud-upload','mdi:cloud-check') }}"
       state: >
         {% set entities = state_attr('sensor.updates_available','entity_id') %}
-        {% if entities != none %} {{ entites|count }}
+        {% if entities != none %} {{ entities|count }}
         {% else %} {{ entities }}
         {% endif %}
       attributes:
@@ -158,7 +157,7 @@
         {% elif is_state('sensor.zwave_status','minor')
             or is_state('sensor.hass_files_status','minor')
             or is_state('alert.unavailable_sensor','on')
-            or is_state('binary_sensor.hass_update','on') %} minor
+            or is_state('alert.udpate_available','on') %} minor
         {% else %} ok
         {% endif %}
 
@@ -258,7 +257,7 @@
         {% else %} ok
         {% endif %}
 
-    - name: 'Connected Browsers' #BETA had to ditch attributes.type
+    - name: 'Connected Browsers' #BMOD attributes missing type: browser_mod
       unique_id: connected_browsers
       unit_of_measurement: browsers
       icon: mdi:monitor-cellphone
@@ -270,9 +269,10 @@
       attributes:
         entity_id: >
           {{ states.sensor|selectattr('entity_id','search','browser_')
-              |rejectattr('state','eq','unavailable')|map(attribute='entity_id')|list }}
+              |rejectattr('state','in',['unknown','unavailable'])
+              |map(attribute='entity_id')|list }}
 
-    - name: 'Unknown Browsers' #BETA had to ditch attributes.type
+    - name: 'Unknown Browsers' #BMOD attributes missing
       unique_id: unknown_browsers
       unit_of_measurement: browsers
       state: >
@@ -283,7 +283,9 @@
       attributes:
         entity_id: >
           {{ states.sensor|selectattr('entity_id','search','browser_')
-            |selectattr('attributes.authorized','ne',true)|map(attribute='entity_id')|list }}
+            |selectattr('attributes.authorized','ne',true)
+            |rejectattr('state','in',['unknown','unavailable'])
+            |map(attribute='entity_id')|list }}
 
     # display hass uptime in friendly format
     - name: 'Home Assistant Uptime'
@@ -325,28 +327,6 @@
         {% endif %}
         {{ uptime.strftime('%a') }} {{ date }} {{ uptime.strftime('%b %Y') }} {{ uptime.strftime('at %-I:%M %p') }}
 
-    - name: 'Offline Devices'
-      unique_id: offline_devices
-      icon: "{{ 'mdi:alert-circle' if states('sensor.offline_devices')|int(0) > 0 else 'mdi:check-circle' }}"
-      unit_of_measurement: devices
-      state: >
-        {% set entities = state_attr('sensor.offline_devices','entity_id') %}
-        {% if entities != none %} {{ entities|count }}
-        {% else %} {{ entities }}
-        {% endif %}
-      attributes:
-        entity_id: >
-          {% if state_attr('group.ignored_unavailable_entities','entity_id') != none %}
-            {% set ignore_ts = (now().timestamp() - 60)|as_datetime %}
-            {{ states|rejectattr('domain','in',['group','binary_sensor','sensor','geo_location'])
-              |rejectattr('entity_id','in',state_attr('group.ignored_unavailable_entities','entity_id'))
-              |rejectattr('entity_id','search','browser_')
-              |rejectattr('entity_id','search','_do_not_disturb')
-              |rejectattr('last_changed','ge',ignore_ts)
-              |selectattr('state','in',['unavailable','unknown'])
-              |map(attribute='entity_id')|list }}
-          {% endif %}
-
     - name: 'Unavailable Sensors'
       unique_id: unavailable_sensors
       icon: "{{ 'mdi:alert-circle' if states('sensor.unavailable_sensors')|int(0) > 0 else 'mdi:check-circle' }}"
@@ -357,11 +337,15 @@
         {% else %} {{ entities }}
         {% endif %}
       attributes:
-        entity_id: > #BETA |rejectattr('entity_id','search','browser_')
+        entity_id: >
           {% if state_attr('group.ignored_unavailable_entities','entity_id') != none %}
             {% set ignore_ts = (now().timestamp() - 60)|as_datetime %}
-            {{ states|selectattr('domain','in',['sensor','binary_sensor'])
+            {{ states
+              |rejectattr('domain','in',['group','geo_location'])
               |rejectattr('entity_id','in',state_attr('group.ignored_unavailable_entities','entity_id'))
+              |rejectattr('last_changed','ge',ignore_ts)
+              |rejectattr('entity_id','search','browser_')
+              |rejectattr('entity_id','search','_do_not_disturb')
               |rejectattr('entity_id','search','_alarm_volume')
               |rejectattr('entity_id','search','_next_alarm')
               |rejectattr('entity_id','search','_memory_percent')
@@ -378,6 +362,7 @@
               |rejectattr('entity_id','search','_latest_release')
               |rejectattr('entity_id','search','_latest_commit')
               |rejectattr('entity_id','search','_latest_tag')
+              |rejectattr('entity_id','search','_discussions')
               |rejectattr('entity_id','search','_latest_discussion')
               |rejectattr('last_changed','ge',ignore_ts)
               |selectattr('state','in',['unavailable','unknown'])

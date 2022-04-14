@@ -3,38 +3,53 @@
 ###############################################################################
 - id: hass_kiosk_restart
   alias: '[Hass] Kiosk Restart'
-  description: 'Restart kiosk if unavailable.'
+  description: 'Restart kiosk at startup, if unavailable.'
   max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: sensor.browser_kiosk_internal
-      to: unavailable
+      entity_id: binary_sensor.kiosk_connected
+      to: 'off'
+      from: 'on'
 
     - platform: state
       entity_id: input_boolean.startup_pending
       to: 'off'
       from: 'on'
-      for: 120 # wait for kiosk to connect
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: restart_kiosk
+      for: 60
   condition:
     - condition: state
       entity_id: input_boolean.startup_pending
       state: 'off'
+      for: 60
   action:
+    #2022.4 template select templates not refreshing in UI chrome, mobile app - kiosk ok
+    # already done here no dupe with hass_startup
+    # reloads fully kiosk, populates states for buttons, sensors etc
+    - service: browser_mod.window_reload
+
     - service: button.press
       target:
-        entity_id: button.fire_tablet_restart_browser
+        entity_id: button.fire_tablet_load_start_url
 
     - wait_template: "{{ is_state('binary_sensor.kiosk_connected','on') }}"
-      timeout: 300 #VERIFY
+      timeout: 60
 
-    - service: light.turn_on
-      target:
-        entity_id: light.fire_tablet_screen
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.kiosk_screen
+              state: unknown
+          sequence:
+            # trigger MQTT event to populate binary_sensor.kiosk_screen
+            - service: light.toggle
+              target:
+                entity_id: light.fire_tablet_screen
+
+            - delay: 1
+
+            - service: light.toggle
+              target:
+                entity_id: light.fire_tablet_screen
 
     - condition: state
       entity_id: binary_sensor.kiosk_connected
@@ -65,3 +80,20 @@
 
             - title: 'Restart Kiosk'
               action: restart_kiosk
+
+###############################################################################
+## Hass - Kiosk Browser Restart
+###############################################################################
+- id: hass_kiosk_brower_restart
+  alias: '[Hass] Kiosk Browser Restart'
+  description: 'Restart kiosk at startup, unavailable.'
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: restart_kiosk
+  action:
+    - service: button.press
+      target:
+        entity_id: button.fire_tablet_restart_browser

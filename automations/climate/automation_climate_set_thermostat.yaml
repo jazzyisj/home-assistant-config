@@ -7,6 +7,25 @@
   mode: restart
   trigger:
     - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Night
+        - Guest
+        - Away
+        - Vacation
+      #ERROR (MainThread) [homeassistant.components.automation.climate_occupancy_mode_control] [Climate] Occupancy Mode Control: Error executing script. Unexpected error for call_service at pos 2: Error from API: 429: RESOURCE_EXHAUSTED: Rate limited for the Thermostat.: Too Many Requests
+      for:
+        minutes: 5 # prevent trigger on quick changes in state (eg guest-> home-> guest)
+
+    - platform: state
+      id: override
+      entity_id: input_boolean.hvac_presence_override
+      to: 'on'
+      from: 'off'
+
+    - platform: state
       id: home
       entity_id:
         - input_number.home_heat_temperature
@@ -33,18 +52,44 @@
 
     - platform: state
       id: sensor
-      entity_id: sensor.hvac_boost #RELOAD triggers on template reload
+      entity_id: sensor.hvac_boost
       to: ~
+
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: 'off'
+      from: 'on'
   condition:
     - condition: state
-      entity_id: input_boolean.climate_automation
+      entity_id:
+        - input_boolean.climate_automation
+        - input_boolean.climate_occupancy_control
       state: 'on'
+
+    - condition: template
+      alias: 'To/from state not unknown/unavailable'
+      value_template: >
+        {{ trigger.to_state.state not in ['unknown','unavailable']
+            and trigger.from_state.state not in ['unknown','unavailable'] }}
 
     - condition: not
       conditions:
         - condition: state
           entity_id: alert.hvac_window_door_open
           state: 'on'
+
+    - condition: template
+      alias: 'Occupancy automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.presence_automation','on')
+              and is_state('input_boolean.occupancy_override','off')
+            if trigger.id == 'occupancy' else true }}
+
+    - condition: template
+      alias: 'Presence automation is enabled if occupancy trigger'
+      value_template: >
+        {{ is_state('input_boolean.climate_occupancy_control','on')
+            if trigger.id == 'occupancy' else true }}
 
     - condition: template
       alias: 'Current occupancy mode corresponds to trigger preset'
@@ -64,8 +109,22 @@
     # delay to allow user to finish setting temps, restart mode will run script with last set value
     - delay: 30
 
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state:
+                - Home
+                - Guest
+
+            - condition: state
+              entity_id: input_boolean.hvac_presence_override
+              state: 'on'
+          sequence:
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.hvac_presence_override
+
     # turn on script prevent automation fail when set thermostat when Nest rate limit hit (script still fails)
     - service: script.turn_on
       target:
         entity_id: script.set_thermostat
-

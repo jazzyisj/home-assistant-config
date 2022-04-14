@@ -5,12 +5,6 @@
   alias: '[Media Player] Auto Off'
   description: 'Automatically stop and turn off media players.'
   mode: restart
-  variables:
-    media_players: >
-      {% set media_players = expand(state_attr('group.single_media_players','entity_id')) %}
-      {% set media_players = media_players|rejectattr('attributes.device_class','eq','tv')
-          if trigger.id in ['alarm','mute'] else media_players %}
-      {{ media_players|map(attribute='entity_id')|list }}
   trigger:
     - platform: state
       id: away
@@ -23,7 +17,6 @@
       id: night
       entity_id: input_select.occupancy_mode
       to: Night
-      for: 60
 
     - platform: state
       id: alarm
@@ -43,18 +36,31 @@
       state: 'on'
 
     - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
+        {{ is_state('input_boolean.occupancy_override','off')
             if trigger.id in ['away','night'] else true }}
-
-    - condition: template
-      alias: 'Alarm automation is enabled if alarm trigger'
-      value_template: >
-        {{ is_state('input_boolean.alarm_automation','on')
-            if trigger.id == 'alarm' else true }}
   action:
-    - service: script.media_players_off
-      data:
-        media_players: '{{ media_players }}'
+    - choose:
+        - conditions: "{{ trigger.id in ['alarm','mute'] }}"
+          sequence:
+            - service: script.media_players_off
+              data:
+                media_players: "{{ state_attr('group.single_media_players','entity_id') }}"
+      default:
+        - choose:
+            - conditions:
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Night
+              sequence:
+                - service: script.media_players_off
+                  data: #TV exclude TV's until after delay
+                    media_players: "{{ state_attr('group.single_media_players','entity_id') }}"
+
+                - delay:
+                    minutes: 60
+
+        - service: script.media_players_off
+          data:
+            media_players: "{{ state_attr('group.media_players','entity_id') }}"

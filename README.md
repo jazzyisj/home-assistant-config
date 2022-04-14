@@ -1,51 +1,15 @@
 # Home Assistant Configuration
 
-Home Assistant (Hassio) configuration, updated to v2022.3.1
+Home Assistant (Hassio) configuration, updated to v2022.4.3
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_v2.png)
-
-## Entity Counts:
-
-    Alarm_control_panel: 3
-    Alert: 99
-    Automation: 604
-    Binary_sensor: 411
-    Button: 50
-    Calendar: 9
-    Camera: 20
-    Climate: 5
-    Counter: 1
-    Cover: 1
-    Device_tracker: 77
-    Fan: 6
-    Geo_location: 38
-    Group: 53
-    Input_boolean: 209
-    Input_button: 1
-    Input_datetime: 38
-    Input_number: 164
-    Input_select: 89
-    Input_text: 79
-    Light: 46
-    Lock: 4
-    Media_player: 32
-    Number: 6
-    Person: 2
-    Proximity: 2
-    Remote: 1
-    Scene: 9
-    Script: 73
-    Select: 42
-    Sensor: 967
-    Sun: 1
-    Switch: 62
-    Timer: 47
-    Utility_meter: 2
-    Variable: 1
-    Weather: 8
-    Zone: 5
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_v2022_4.png)
 
 ## TAGS USED IN CODE
+
+    #INFO - info level log tag
+    #WARNING - warning level log tag
+    #ERROR - error level log tag
+    #CRITICAL - critical level log tag
 
     #TODO - to be completed
     #VERIFY - to be verifed
@@ -53,19 +17,15 @@ Home Assistant (Hassio) configuration, updated to v2022.3.1
     #TEMP - temporary option/code
     #ISSUE - unresolved issue
     #IDEA - idea for future option/function
-
+    #STYLE - css styling needs work
+    #IMAGE - new image required
+    #QUESTION - question I need to answer
     #DELETE - code tagged for deletion
     #DISABLED - disabled code
     #BUG - unfixable bug in HA/component
     #BUGFIX - workaround for bug
     #NOTE - special notes, unresolvable issue
 
-    #STYLE - css styling needs work
-    #IMAGE - new image required
-    #QUESTION - question I need to answer
-
-    #DEV - dev mode notes
-    #RELOAD - triggers on template reload
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
     #LOCK_USER - new lock user code
@@ -76,17 +36,55 @@ Home Assistant (Hassio) configuration, updated to v2022.3.1
     #SPOTIFY - spotify issues/notes
     #APEX - apex graph issues
     #DARKSKY - darksky code to replace
+    #NEST - Nest/Nest Protect issues
+    #BMOD - browser mode attributes missing
+    #2022.4 - v2202.4 unresolved issue
 
-    #INFO - info level log tag
-    #WARNING - warning level log tag
-    #ERROR - error level log tag
-    #CRITICAL - critical level log tag
+## Entity Counts:
 
-## Home Assistant Installed Addons
+    Alarm_control_panel: 3
+    Alert: 107
+    Automation: 693
+    Binary_sensor: 449
+    Button: 58
+    Calendar: 11
+    Camera: 20
+    Climate: 5
+    Counter: 1
+    Cover: 1
+    Device_tracker: 60
+    Fan: 9
+    Geo_location: 7
+    Group: 55
+    Input_boolean: 213
+    Input_button: 1
+    Input_datetime: 38
+    Input_number: 191
+    Input_select: 24
+    Input_text: 92
+    Light: 44
+    Lock: 4
+    Media_player: 33
+    Number: 16
+    Person: 2
+    Proximity: 2
+    Remote: 1
+    Scene: 9
+    Script: 74
+    Select: 114
+    Sensor: 935
+    Sun: 1
+    Switch: 100
+    Timer: 54
+    Update: 93
+    Variable: 1
+    Weather: 8
+    Zone: 5
+
+## Installed Addons
 
 - Check Home Assistant configuration
 - Chrony
-- Duck DNS
 - File editor
 - Frigate NVR
 - Glances
@@ -95,15 +93,17 @@ Home Assistant (Hassio) configuration, updated to v2022.3.1
 - InfluxDB
 - Log Viewer
 - MariaDB
+- MaryTTS
 - motionEye
 - Mosquitto broker
 - phpMyAdmin
+- RTSPtoWeb - WebRTC
 - Samba share
 - SSH & Web Terminal
 - Studio Code Server
 - UniFi Network Application
 - VLC
 - WeatherFlow to MQTT
-- ZeroTier One
 - Z-Wave JS
 - Z-Wave JS to MQTT
+- ZeroTier One

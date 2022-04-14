@@ -96,6 +96,20 @@ class MultilineEntityCard extends LitElement {
         this.showValue = value
       }
 
+      var uom = this._hass.states[this.config.entity]['attributes']['unit_of_measurement'];
+      var uomPrefix = "";
+      var uomSuffix = "";
+
+      if (uom != undefined && uom.length > 0) {
+        if (this.config.unit_of_measurement == "prefix") {
+          uomPrefix = uom;
+        }
+        if (this.config.unit_of_measurement == "suffix"){
+          uomSuffix = uom;
+        }
+      }
+
+
       return html`
         <ha-card @click="${this._handleClick}">
         <div class="header">
@@ -124,7 +138,9 @@ class MultilineEntityCard extends LitElement {
         </div>
         <div class="info">
           <span class="value">
+            ${uomPrefix}
             ${this.stringToHTML(this.showValue)}
+            ${uomSuffix}
           </span>
         </div>
         </ha-card>

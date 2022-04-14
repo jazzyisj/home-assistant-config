@@ -17,32 +17,75 @@
       from: Night
 
     - platform: state
-      id: presence
+      id: occupancy
       entity_id: binary_sensor.sheri_home
+      to: 'on'
+      from: 'off'
+
+    - platform: state
+      entity_id: binary_sensor.waketime_active
+      to: 'on'
+      from: 'off'
+
+    # make sure runs if waketime is off
+    - platform: time
+      id: house
+      at: input_datetime.house_waketime
   condition:
     - condition: state
-      entity_id:
-        - binary_sensor.sheri_home
-        - input_boolean.presence_automation
+      entity_id: binary_sensor.sheri_home
       state: 'on'
+
+    - condition: template
+      alias: 'If trigger is house waketime, waketime today is unknown'
+      value_template: "{{ iif(trigger.id == 'house',states('sensor.waketime_today') == 'unknown',true) }}"
+
+    - condition: template
+      alias: 'Occupancy override is off if occupancy trigger'
+      value_template: "{{ iif(trigger.id == 'occupancy',is_state('input_boolean.occupancy_override','off'),true) }}"
   action:
     - choose:
         - conditions:
             - condition: state
               entity_id: input_select.occupancy_mode
               state: Night
-          sequence:
-            - service: notify.mobile_app_sphone
-              data:
-                message: command_dnd
-                title: priority_only # alarms_only, off, priority_only, total_silence
-      default:
-        - service: notify.mobile_app_sphone
-          data:
-            message: command_dnd
-            title: 'off'
 
-        - service: notify.mobile_app_sphone
+            - condition: state
+              entity_id: binary_sensor.waketime_active
+              state: 'off'
+          sequence:
+            - service: select.select_option
+              target:
+                entity_id: select.sheri_phone_dnd
+              data:
+                option: priority_only
+
+            - service: number.set_value
+              target:
+                entity_id: number.sheri_phone_alarm_volume
+              data:
+                value: "{{ states('input_number.mobile_waketime_volume_sheri') }}"
+      default:
+        - service: select.select_option
+          target:
+            entity_id: select.sheri_phone_dnd
           data:
-            message: command_ringer_mode
-            title: normal # normal, silent, vibrate
+            option: 'off'
+
+        - service: select.select_option
+          target:
+            entity_id: select.sheri_phone_ringer_mode
+          data:
+            option: normal
+
+        - choose:
+            - conditions:
+                - condition: numeric_state
+                  entity_id: sensor.sphone_volume_level_alarm
+                  below: input_number.mobile_waketime_volume_sheri
+              sequence:
+                - service: number.set_value
+                  target:
+                    entity_id: number.sheri_phone_alarm_volume
+                  data:
+                    value: "{{ states('input_number.mobile_waketime_volume_sheri') }}"
