@@ -6,13 +6,14 @@
   description: 'Automatically disarm house alarm.'
   trigger:
     - platform: state
-      entity_id: input_boolean.alarm_automation
+      entity_id: input_boolean.alarm_enabled
       to: 'off'
       from: 'on'
       for: 5 # allow automation check to turn boolean back on
   action:
     - service: script.disarm_alarm
       data:
+        zone: all
         person: hassio
 
 ###############################################################################
@@ -32,10 +33,6 @@
       {% elif to_state in ['Unlocked (Dawn)'] %} dawn
       {% else %} hassio
       {% endif %}
-    zone: >
-      {% if trigger.entity_id == '' %} garage
-      {% else %} master
-      {% endif %}
   trigger:
     - platform: state
       id: lock
@@ -43,12 +40,14 @@
         - sensor.side_door_lock_status
         - sensor.front_door_lock_status
         - sensor.back_door_lock_status
-        - sensor.garage_door_lock_status
       to: #LOCK_USER
         - Unlocked (Jason)
         - Unlocked (Sheri)
         - Unlocked (Dawn)
         - Unlocked (Keypad)
+      not_from:
+        - unknown
+        - unavailable
 
     - platform: event
       event_type: mobile_app_notification_action
@@ -71,17 +70,8 @@
         action: open_garage_sheri
   condition:
     - condition: state
-      entity_id: input_boolean.alarm_automation
+      entity_id: input_boolean.alarm_enabled
       state: 'on'
-
-    - condition: template
-      alias: 'Lock automation is enabled if lock trigger'
-      value_template: >
-        {{ is_state('input_boolean.lock_automation','on')
-            if trigger.id == 'lock' else true }}
-
-    - "{{ trigger.from_state.state|lower not in ['unknown','unavailable','none']
-      if trigger.id == 'lock' else true }}"
   action:
     - choose:
         - conditions: "{{ person in ['jason','sheri'] }}"
@@ -93,8 +83,10 @@
                   tag: '{{ person }}_almost_home'
 
     - condition: template
-      alias: 'Alarm zone is not already disarmed'
-      value_template: "{{ not is_state('alarm_control_panel.' ~ zone,'disarmed') }}"
+      alias: 'Alarm zones not disarmed'
+      value_template: >
+        {{ not is_state('alarm_control_panel.house','disarmed')
+            and  not is_state('alarm_control_panel.garage','disarmed') }}
 
     - choose:
         - conditions:
@@ -105,65 +97,44 @@
             - service: script.disarm_alarm
               data:
                 person: '{{ person }}'
-                zone: "{{ 'garage' if trigger.entity_id == 'sensor.garage_door_lock_status' else 'master' }}"
       default:
         - wait_template: > #TEMP #ISSUE locked sensor not updating fast enough
             {% if person == 'jason' %}
               {{ (states('binary_sensor.jphone_device_locked') in ['on','off']
                     and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')))
-                  or is_state('alarm_control_panel.master','disarmed') }}
+                  or is_state('alarm_control_panel.house','disarmed')
+                  or is_state('alarm_control_panel.garage','disarmed') }}
             {% elif person == 'sheri' %}
               {{ (states('binary_sensor.sphone_device_locked') in ['on','off']
                     and (is_state('binary_sensor.sheri_home','on') or is_state('input_boolean.sheri_almost_home','on')))
-                  or is_state('alarm_control_panel.master','disarmed') }}
+                  or is_state('alarm_control_panel.house','disarmed')
+                  or is_state('alarm_control_panel.garage','disarmed') }}
             {% elif trigger.id == 'lock' %} true
             {% endif %}
           timeout: 600
 
         - choose:
-            - conditions: "{{ not is_state('alarm_control_panel.master','disarmed') }}"
+            - conditions: >
+                {{ not is_state('alarm_control_panel.house','disarmed')
+                    or not is_state('alarm_control_panel.garage','disarmed') }}
               sequence:
                 - choose:
                     - conditions: '{{ wait.completed }}' # device unlocked
                       sequence:
-                        - service: script.turn_on
-                          target:
-                            entity_id: script.disarm_alarm
+                        - service: script.disarm_alarm
                           data:
-                            variables:
-                              person: '{{ person }}'
-                              zone: master
-
-                        - delay: 15 # wait for alarm to disarm
-
-                        - wait_template: "{{ not is_state('alarm_control_panel.master','disarmed') }}"
-                          timeout: # wait then rearm alarm if wasn't already rearmed
-                            minutes: 5
-
-                        - choose:
-                            - conditions:
-                                - condition: state
-                                  entity_id: alarm_control_panel.master
-                                  state: disarmed
-                              sequence:
-                                - service: script.arm_alarm
-                                  data:
-                                    mode: >
-                                      {% if is_state('binary_sensor.someone_home','off') %} away
-                                      {% elif is_state('input_select.occupancy_mode','Night') %} night
-                                      {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %} home
-                                      {% endif %}
-
+                            person: '{{ person }}'
+                            zone: all
                   default:
                     - service: browser_mod.toast
                       data:
                         duration: 30000
-                        message: '{{ person|title }} attempted to disarm the house alarm with a locked device.'
+                        message: '{{ person|title }} attempted to disarm the alarm with a locked device.'
 
                     - service: notify.mobile
                       data:
                         title: 'Alarm Error'
-                        message: '{{ person|title }} attempted to disarm the house alarm with a locked device.'
+                        message: '{{ person|title }} attempted to disarm the alarm with a locked device.'
                         data:
                           tag: '{{ person }}_almost_home'
                           group: Alarm
@@ -186,3 +157,17 @@
                             - title: 'Cameras'
                               action: URI
                               uri: !secret LOREX_URI
+
+    - wait_template: >
+        {{ not is_state('alarm_control_panel.house','disarmed')
+            or not is_state('alarm_control_panel.garage','disarmed') }}
+      timeout: # wait then rearm alarm if wasn't already rearmed
+        minutes: 10
+
+    - service: script.arm_alarm
+      data:
+        mode: >
+          {% if is_state('binary_sensor.someone_home','off') %} away
+          {% elif is_state('input_select.occupancy_mode','Night') %} night
+          {% elif states('input_select.occupancy_mode') in ['Home','Guest'] %} home
+          {% endif %}

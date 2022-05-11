@@ -1,0 +1,78 @@
+###############################################################################
+## Weather LED
+###############################################################################
+weather_led:
+  alias: 'Weather LED'
+  description: 'Set led notification.'
+  mode: queued
+  fields:
+    reset:
+      description: 'Reset LED'
+      example: 'true'
+  variables:
+    reset: '{{ reset|default(false) }}'
+    entities: "{{ state_attr('group.weather_led','entity_id') }}"
+    quiet: "{{ is_state('binary_sensor.quiet_time','on') }}"
+    alert_state: >
+      {% if is_state('binary_sensor.noaa_weather_alert','on') %}
+        {% set alert = state_attr('binary_sensor.noaa_weather_alert','severity') %}
+      {% elif is_state('binary_sensor.envcan_weather_alert','on') %}
+        {% set alert = state_attr('binary_sensor.envcan_weather_alert','severity') %}
+      {% endif %}
+      {% if alert in ['extreme','watch'] %} extreme
+      {% elif alert in ['severe','warning'] %} severe
+      {% elif alert in ['moderate','advisory'] %} moderate
+      {% elif alert in ['minor','statement'] %} minor
+      {% elif is_state('binary_sensor.storm_approaching_alert','on') %} storm
+      {% elif is_state('binary_sensor.outdoor_high_temperature_alert','on') %} high_temp
+      {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} low_temp
+      {% else %} off
+      {% endif %}
+    duration: 255
+    color: >
+      {% if alert_state == 'extreme' %} 240
+      {% elif alert_state == 'severe' %} 5
+      {% elif alert_state == 'moderate' %} 35
+      {% elif alert_state == 'minor' %} 50
+      {% elif alert_state == 'storm' %} 190
+      {% elif alert_state == 'high_temp' %} 15
+      {% elif alert_state == 'low_temp' %} 25
+      {% else %} 170
+      {% endif %}
+    brightness: >
+      {% if alert_state in ['extreme','severe','moderate','minor'] %} 10
+      {% elif quiet %} 2
+      {% elif alert_state != 'off' %} 5
+      {% else %} 3
+      {% endif %}
+    effect: >
+      {% if alert_state == 'extreme' %} fast blink
+      {% elif alert_state == 'severe' %} solid
+      {% elif alert_state == 'moderate' %} solid
+      {% elif alert_state == 'minor' %} solid
+      {% elif alert_state == 'storm' %} solid
+      {% elif alert_state == 'high_temp' %} solid
+      {% elif alert_state == 'low_temp' %} solid
+      {% else %} off
+      {% endif %}
+  sequence:
+    - choose:
+        - conditions: "{{ alert_state == 'off' and not reset }}"
+          sequence:
+            - service: script.turn_on
+              target:
+                entity_id: script.led_reset
+              data:
+                variables:
+                  entities: '{{ entities }}'
+      default:
+        - service: script.turn_on
+          target:
+            entity_id: script.inovelli_led_control
+          data:
+            variables:
+              entities: '{{ entities }}'
+              duration: '{{ duration }}'
+              color: '{{ color }}'
+              brightness: '{{ brightness }}'
+              effect: '{{ effect }}'

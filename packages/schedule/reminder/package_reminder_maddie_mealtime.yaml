@@ -1,0 +1,230 @@
+###############################################################################
+## Package - Maddie Mealtime Reminder
+###############################################################################
+input_boolean:
+  maddie_mealtime_enabled:
+    name: 'Maddie Mealtime: Enabled'
+    icon: mdi:dog
+  maddie_mealtime_active:
+    name: 'Maddie Mealtime: Active'
+    icon: mdi:dog
+
+input_datetime:
+  maddie_mealtime_days_1:
+    name: 'Maddie Mealtime: Days 1'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_days_2:
+    name: 'Maddie Mealtime: Days 2'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_days_3:
+    name: 'Maddie Mealtime: Days 3'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_afternoons_1:
+    name: 'Maddie Mealtime: Afternoons 1'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_afternoons_2:
+    name: 'Maddie Mealtime: Afternoons 2'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_afternoons_3:
+    name: 'Maddie Mealtime: Afternoons 3'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_weekends_1:
+    name: 'Maddie Mealtime: Weekends 1'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_weekends_2:
+    name: 'Maddie Mealtime: Weekends 2'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  maddie_mealtime_weekends_3:
+    name: 'Maddie Mealtime: Weekends 3'
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+template:
+  - binary_sensor:
+      - name: 'Maddie Mealtime'
+        unique_id: maddie_mealtime
+        picture: !secret MADDIE_ENTITY_ICON
+        state: "{{ is_state('input_boolean.maddie_mealtime_active','on') }}"
+
+automation:
+  ###############################################################################
+  ## Reminders - Turn Off Maddie Mealtime
+  ###############################################################################
+  - id: reminders_turn_off_maddie_mealtime
+    alias: '[Reminders] Turn Off Maddie Mealtime'
+    description: 'Turn off reminder active boolean.'
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_enabled
+        to: 'off'
+        from: 'on'
+
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_active
+        to: 'on'
+        from: 'off'
+
+      - platform: event
+        id: action
+        event_type: mobile_app_notification_action
+        event_data:
+          action: maddie_mealtime_done
+    condition:
+      - or:
+          - condition: state
+            entity_id: input_boolean.maddie_mealtime_enabled
+            state: 'off'
+
+          - "{{ trigger.id == 'action' }}"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.maddie_mealtime_active
+
+  ###############################################################################
+  ## Reminders - Activate Maddie Mealtime
+  ###############################################################################
+  - id: reminders_activate_maddie_mealtime
+    alias: '[Reminders] Activate Maddie Mealtime'
+    description: 'Turn on reminder active boolean.'
+    trigger:
+      - platform: template
+        value_template: >
+          {% set time = states('sensor.time') %}
+          {% set shift = states('sensor.time_trigger_shift') %}
+          {{ (shift == 'days' and time == states('input_datetime.maddie_mealtime_days_1')[0:5])
+            or (shift == 'days' and time == states('input_datetime.maddie_mealtime_days_2')[0:5])
+            or (shift == 'days' and time == states('input_datetime.maddie_mealtime_days_3')[0:5])
+            or (shift == 'afts' and time == states('input_datetime.maddie_mealtime_afternoons_1')[0:5])
+            or (shift == 'afts' and time == states('input_datetime.maddie_mealtime_afternoons_2')[0:5])
+            or (shift == 'afts' and time == states('input_datetime.maddie_mealtime_afternoons_3')[0:5])
+            or (shift == 'wknd' and time == states('input_datetime.maddie_mealtime_weekends_1')[0:5])
+            or (shift == 'wknd' and time == states('input_datetime.maddie_mealtime_weekends_2')[0:5])
+            or (shift == 'wknd' and time == states('input_datetime.maddie_mealtime_weekends_3')[0:5]) }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.maddie_mealtime_enabled
+        state: 'on'
+
+      - condition: template
+        alias: 'Never ran or day interval reached'
+        value_template: >
+          {% set last_run = state_attr('automation.reminders_activate_maddie_mealtime','last_triggered') %}
+          {{ last_run is none or (now().date() - last_run.date()).days >= states('input_number.maddie_mealtime_day_interval')|int(0) }}
+
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.maddie_mealtime_active
+
+  ###############################################################################
+  ## Reminders - Maddie Mealtime Alert
+  ###############################################################################
+  - id: reminders_maddie_mealtime_alert
+    alias: '[Reminders] Maddie Mealtime Alert'
+    description: 'Send notification until alert turns off.'
+    trigger:
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_active
+        to: 'on'
+        from: 'off'
+    condition:
+      - condition: state
+        entity_id:
+          - input_boolean.maddie_mealtime_enabled
+          - input_boolean.schedule_alerts
+        state: 'on'
+    action:
+      - repeat:
+          sequence:
+            - service: notify.jason
+              data:
+                message: "It's time to feed the animals!"
+                data:
+                  tag: maddie_mealtime
+                  group: General
+                  channel: General
+                  importance: max
+                  ttl: 0
+                  priority: high
+                  persistent: true
+                  notification_icon: mdi:dog
+                  icon_url: !secret MADDIE_ICON
+                  ledColor: !secret HASS_COLOR
+                  color: !secret HASS_COLOR
+                  vibrationPattern: !secret GENERAL_VIBRATION
+                  clickAction: /lovelace-mobile/presence
+                  actions:
+                    - action: maddie_mealtime_done
+                      title: 'Mealtime Done'
+                      uri: /lovelace/presence
+
+            - wait_template: "{{ is_state('input_boolean.maddie_mealtime_active','off') }}"
+              timeout:
+                minutes: 5
+
+            - choose:
+                - conditions:
+                    - condition: state
+                      entity_id: input_boolean.maddie_mealtime_active
+                      state: 'on'
+                  sequence:
+                    - service: script.tts_play
+                      data:
+                        message: "Maddie!  Hey Maddie!  And Pooie Rooie too!  It's time to get some food!"
+                        quiet_play: true
+
+            - wait_template: "{{ is_state('input_boolean.maddie_mealtime_active','off') }}"
+              timeout: # wait for alert to turned off/dismissed
+                minutes: 10
+          until:
+            - condition: state
+              entity_id: input_boolean.maddie_mealtime_active
+              state: 'off'
+
+  ###############################################################################
+  ## Reminders - Clear Maddie Mealtime Notification
+  ###############################################################################
+  - id: reminders_clear_maddie_mealtime_notification
+    alias: '[Reminders] Clear Maddie Mealtime Notification'
+    description: 'Clear notification.'
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.maddie_mealtime_active
+        to: 'off'
+        from: 'on'
+
+      - platform: event
+        event_type: mobile_app_notification_cleared
+        event_data:
+          tag: maddie_mealtime
+
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: maddie_mealtime_done
+    action:
+      - service: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: maddie_mealtime

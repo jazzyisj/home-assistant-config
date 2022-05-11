@@ -13,27 +13,37 @@ disarm_alarm:
     zone:
       description: 'Alarm zone to disarm.'
       example: 'garage'
-  variables:
-    person: "{{ zone|default('hassio') }}"
-    zone: "{{ zone|default('master') }}"
   sequence:
+    - variables:
+        person: "{{ person|default('hassio') }}"
+        zone: >
+          {% set zone = zone|default('master') %}
+          {% if zone == 'all' %}
+            {% if not is_state('alarm_control_pane.master','disarmed') %} {% set zone = 'master' %}
+            {% elif not is_state('alarm_control_pane.house','disarmed') %} {% set zone = 'house' %}
+            {% elif not is_state('alarm_control_pane.garage','disarmed') %} {% set zone = 'garage' %}
+            {% else %} {% set zone = 'none' %}
+            {% endif %}
+          {% endif %}
+          {{ zone }}
+
     - condition: template
-      alias: 'Alarm zone not disarmed'
-      value_template: "{{ not is_state('alarm_control_panel.' ~ zone,'disarmed') }}"
+      alias: 'Alarm not already disarmed'
+      value_template: "{{ zone != 'none' }}"
 
     - choose:
         - conditions: "{{ person == 'temp' }}"
           sequence:
             - condition: template
-              alias: 'Alarm master zone in armed_home,armed_night,armed_away,pending, or arming state'
-              value_template: "{{ states('alarm_control_panel.master') in ['armed_home','armed_night','armed_away','pending','arming'] }}"
+              alias: 'Alarm zone in armed_home,armed_night,armed_away,pending, or arming state'
+              value_template: "{{ states('alarm_control_panel.' ~ zone) in ['armed_home','armed_night','armed_away','pending','arming'] }}"
 
             - service: input_boolean.turn_on # set override to bypass automation check
               entity_id: input_boolean.alarm_temp_override
 
             - service: alarm_control_panel.alarm_disarm
               target:
-                entity_id: 'alarm_control_panel.master'
+                entity_id: 'alarm_control_panel.{{ zone }}'
               data:
                 code: !secret ALARMO_HA #ALARMO
 

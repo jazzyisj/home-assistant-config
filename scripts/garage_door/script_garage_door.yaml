@@ -1,4 +1,46 @@
 ###############################################################################
+## Garage Door Close
+###############################################################################
+garage_door_close:
+  alias: 'Garage Door Close'
+  description: 'Close the garage door.'
+  icon: mdi:garage
+  mode: restart
+  fields:
+    person:
+      description: 'Person to notify.'
+      example: 'jason'
+  variables:
+    person: "{{ person|default('mobile') }}"
+  sequence:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.myq_connected
+              state: 'off'
+          sequence:
+            - service: script.tts_play
+              data:
+                min_volume: 50
+                quiet_play: true
+                ignore_away: true
+                message: |
+                  The garage door cloud service is not connected.
+                  The garage door cannot be closed.
+
+            - condition: template
+              value_template: "{{ person in ['jason','sheri'] }}"
+
+            - service: script.garage_door_notification
+              data:
+                error: connection
+                message: 'The garage door is not connected and cannot be closed.'
+                person: '{{ person }}'
+      default:
+        - service: cover.close_cover
+          entity_id: cover.garage_bay_door
+
+###############################################################################
 ## Garage Door Open
 ###############################################################################
 garage_door_open:
@@ -10,6 +52,8 @@ garage_door_open:
     person:
       description: 'Script called by this person.'
       example: 'jason'
+  variables:
+    person: "{{ person|default('mobile') }}"
   sequence:
     - choose:
         - conditions:
@@ -17,51 +61,32 @@ garage_door_open:
               entity_id: binary_sensor.myq_connected
               state: 'off'
           sequence:
-            - service: input_boolean.turn_on
-              entity_id: input_boolean.garage_door_open_alert
-
             - service: script.tts_play
               data:
                 min_volume: 50
                 quiet_play: true
                 ignore_away: true
-                message: 'The garage door is not connected and cannot be opened.'
+                message: |
+                  The garage door cloud service is not connected.
+                  The garage door cannot be opened.
 
-            - choose:
-                - conditions: "{{ person in ['jason','sheri'] }}"
-                  sequence:
-                    - service: 'notify.{{ person }}'
-                      data:
-                        title: 'Garage Door Alert'
-                        message: 'The garage door is not connected and cannot be opened.'
-                        data:
-                          tag: garage_door_alert
-                          group: Alert
-                          channel: Alert
-                          importance: max
-                          ttl: 0
-                          priority: high
-                          timeout: 600
-                          notification_icon: mdi:garage-alert
-                          icon_url: !secret HASSIO_ICON
-                          ledColor: !secret WARNING_COLOR
-                          color: !secret WARNING_COLOR
-                          vibrationPattern: !secret ALERT_VIBRATION
-                          clickAction: /lovelace-mobile/garage
-                          actions:
-                            - title: 'MyQ'
-                              action: URI
-                              uri: !secret MYQ_URI
+            - condition: template
+              value_template: "{{ person in ['jason','sheri'] }}"
+
+            - service: script.garage_door_notification
+              data:
+                error: connection
+                message: 'The garage door is not connected and cannot be opened.'
+                person: '{{ person }}'
 
         - conditions:
-            - condition: not
-              conditions:
+            - not:
                 - condition: state
-                  entity_id: alarm_control_panel.master
+                  entity_id: alarm_control_panel.garage
                   state: disarmed
           sequence:
             - service: input_boolean.turn_on
-              entity_id: input_boolean.garage_door_open_alert
+              entity_id: input_boolean.garage_door_active_alert
 
             - service: script.tts_play
               data:
@@ -70,9 +95,8 @@ garage_door_open:
                 ignore_away: true
                 message: 'Disarm the alarm to open the garage door.'
 
-            - wait_template: "{{ is_state('alarm_control_panel.master','disarmed') }}"
-              timeout:
-                seconds: 60
+            - wait_template: "{{ is_state('alarm_control_panel.garage','disarmed') }}"
+              timeout: 60
 
             - choose:
                 - conditions: '{{ wait.completed }}'
@@ -80,48 +104,24 @@ garage_door_open:
                     - service: cover.open_cover
                       entity_id: cover.garage_bay_door
               default:
-                - service: input_boolean.turn_off
-                  entity_id: input_boolean.garage_door_open_alert
-
                 - service: script.tts_play
                   data:
                     min_volume: 40
                     quiet_play: true
                     ignore_away: true
-                    message: 'The house alarm did not disarm.  The garage door cannot be opened.'
+                    message: 'The house alarm was not disarmed.  The garage door cannot be opened.'
 
-                - choose:
-                    - conditions: "{{ person in ['jason','sheri'] }}"
-                      sequence:
-                        - service: 'notify.{{ person }}'
-                          data:
-                            title: 'Garage Door Alert'
-                            message: 'The house alarm did not disarm.  The garage door cannot be opened.'
-                            data:
-                              tag: garage_door_alert
-                              group: Alert
-                              channel: Alert
-                              importance: max
-                              ttl: 0
-                              priority: high
-                              timeout: 600
-                              notification_icon: mdi:garage-alert
-                              icon_url: !secret GARAGE_OPEN_ICON
-                              ledColor: !secret WARNING_COLOR
-                              color: !secret WARNING_COLOR
-                              vibrationPattern: !secret ALERT_VIBRATION
-                              clickAction: /lovelace-mobile/garage
-                              actions:
-                                - title: 'Alarm'
-                                  action: URI
-                                  uri: !secret ALARM_URI
+                - condition: template
+                  value_template: "{{ person in ['jason','sheri'] }}"
 
-                                - title: 'MyQ'
-                                  action: URI
-                                  uri: !secret MYQ_URI
+                - service: script.garage_door_notification
+                  data:
+                    error: alarm
+                    message: 'The house alarm was not disarmed.  The garage door cannot be opened.'
+                    person: '{{ person }}'
 
-                                - title: 'Garage'
-                                  action: 'open_garage_{{ person }}'
+            - service: input_boolean.turn_off
+              entity_id: input_boolean.garage_door_active_alert
 
       default:
         - service: cover.open_cover
@@ -134,8 +134,7 @@ garage_door_toggle:
   alias: 'Garage Door Toggle'
   description: 'Toggle garage door.'
   icon: mdi:garage
-  mode: queued # wait for script.garage_door_open to finish
-  max: 5
+  mode: queued # wait for garage_door_open/garage_door_close to finish
   sequence:
     - choose:
         - conditions:
@@ -148,9 +147,5 @@ garage_door_toggle:
                 - unavailable # to trigger tts warning
           sequence:
             - service: script.garage_door_open
-              data:
-                person: switch
       default: # opening, open
-        - service: cover.close_cover
-          target:
-            entity_id: cover.garage_bay_door
+        - service: script.garage_door_close

@@ -1,0 +1,115 @@
+###############################################################################
+## Alarm LED
+###############################################################################
+alarm_led:
+  alias: 'Alarm LED'
+  description: 'Set led notification.'
+  mode: queued
+  fields:
+    reset:
+      description: 'Reset LED'
+      example: 'true'
+  variables:
+    reset: '{{ reset|default(false) }}'
+    entities: "{{ state_attr('group.alarm_led','entity_id') }}"
+    quiet: "{{ is_state('binary_sensor.quiet_time','on') }}"
+    alert_state: >
+      {% if is_state('alert.alarm_connected','on') %} disconnected
+      {% elif is_state('input_boolean.alarm_triggered','on') %}
+        {% if alert_state == 'triggered' %} triggered
+        {% else %} was_triggered
+        {% endif %}
+      {% elif is_state('binary_sensor.alarm_open_sensor_alert','on') %} open_sensor
+      {% elif is_state('binary_sensor.alarm_bypassed_sensor_alert','on') %} bypassed_sensor
+      {% elif is_state('binary_sensor.alarm_zone_sync','on') %} alarm_sync
+      {% elif is_state('alert.door_lock_jammed','on') %} lock_jammed
+      {% elif is_state('alert.door_lock_failed','on') %} lock_failed
+      {% else %} {{ states('alarm_control_panel.master') }}
+      {% endif %}
+    arm_mode: "{{ state_attr('alarm_control_panel.master','arm_mode') }}"
+    duration: >
+      {% if alert_state == 'arming' and arm_mode == 'armed_home' %} 62 {# 2min #}
+      {% elif alert_state == 'arming' and arm_mode == 'armed_night' %} 62 {# 2min #}
+      {% elif alert_state == 'arming' and arm_mode == 'armed_away' %} 62 {# 2min #}
+      {% elif alert_state == 'pending' %} 62 {# 2min #}
+      {% else %} 255
+      {% endif %}
+    color: >
+      {% if alert_state ==  'disconnected' %} 30
+      {% elif alert_state ==  'triggered' %} 0
+      {% elif alert_state ==  'open_sensor' %} 30
+      {% elif alert_state ==  'bypassed_sensor' %} 30
+      {% elif alert_state ==  'was_triggered' %} 0
+      {% elif alert_state ==  'lock_jammed' %} 30
+      {% elif alert_state ==  'lock_failed' %} 30
+      {% elif alert_state ==  'alarm_sync' %} 20
+      {% elif alert_state == 'arming' and arm_mode == 'armed_home' %} 150
+      {% elif alert_state == 'arming' and arm_mode == 'armed_night' %} 180
+      {% elif alert_state == 'arming' and arm_mode == 'armed_away' %} 230
+      {% elif alert_state == 'pending' %} 10
+      {% elif alert_state == 'disarmed' %} 90
+      {% elif alert_state == 'armed_home' %} 150
+      {% elif alert_state == 'armed_night' %} 180
+      {% elif alert_state == 'armed_away' %} 230
+      {% else %} blue
+      {% endif %}
+    brightness: >
+      {% if alert_state ==  'disconnected' %} {{ 2 if quiet else 7 }}
+      {% elif alert_state ==  'triggered' %} 10
+      {% elif alert_state ==  'open_sensor' %} 10
+      {% elif alert_state ==  'bypassed_sensor' %} 10
+      {% elif alert_state ==  'was_triggered' %} 10
+      {% elif alert_state ==  'lock_jammed' %} 10
+      {% elif alert_state ==  'lock_failed' %} 10
+      {% elif alert_state ==  'alarm_sync' %} {{ 2 if quiet else 4 }}
+      {% elif alert_state == 'arming' and arm_mode == 'armed_home' %} {{ 2 if quiet else 7 }}
+      {% elif alert_state == 'arming' and arm_mode == 'armed_night' %} {{ 2 if quiet else 7 }}
+      {% elif alert_state == 'arming' and arm_mode == 'armed_away' %} {{ 2 if quiet else 7 }}
+      {% elif alert_state == 'pending' %} 10
+      {% elif alert_state == 'disarmed' %} {{ 2 if quiet else 4 }}
+      {% elif alert_state == 'armed_home' %} {{ 2 if quiet else 4 }}
+      {% elif alert_state == 'armed_night' %} {{ 2 if quiet else 4 }}
+      {% elif alert_state == 'armed_away' %} {{ 2 if quiet else 4 }}
+      {% else %} 3
+      {% endif %}
+    effect: >
+      {% if alert_state ==  'disconnected' %} slow blink
+      {% elif alert_state ==  'triggered' %} fast blink
+      {% elif alert_state ==  'open_sensor' %} fast blink
+      {% elif alert_state ==  'bypassed_sensor' %} fast blink
+      {% elif alert_state ==  'was_triggered' %} solid
+      {% elif alert_state ==  'lock_jammed' %} pulse
+      {% elif alert_state ==  'lock_failed' %} pulse
+      {% elif alert_state ==  'alarm_sync' %} pulse
+      {% elif alert_state == 'arming' and arm_mode == 'armed_home' %} chase
+      {% elif alert_state == 'arming' and arm_mode == 'armed_home' %} chase
+      {% elif alert_state == 'arming' and arm_mode == 'armed_night' %} chase
+      {% elif alert_state == 'arming' and arm_mode == 'armed_away' %} chase
+      {% elif alert_state == 'pending' %} chase
+      {% elif alert_state == 'disarmed' %} solid
+      {% elif alert_state == 'armed_home' %} solid
+      {% elif alert_state == 'armed_night' %} solid
+      {% elif alert_state == 'armed_away' %} solid
+      {% else %} off
+      {% endif %}
+  sequence:
+    - choose:
+        - conditions: "{{ alert_state == 'off' and not reset }}"
+          sequence:
+            - service: script.turn_on
+              target:
+                entity_id: script.led_reset
+              data:
+                variables:
+                  entities: '{{ entities }}'
+      default:
+        - service: script.turn_on
+          target:
+            entity_id: script.inovelli_led_control
+          data:
+            variables:
+              entities: '{{ entities }}'
+              duration: '{{ duration }}'
+              color: '{{ color }}'
+              brightness: '{{ brightness }}'
+              effect: '{{ effect }}'

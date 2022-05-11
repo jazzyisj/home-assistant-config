@@ -3,34 +3,39 @@
 ###############################################################################
 media_players_off:
   alias: 'Media Players Off'
-  description: 'Turn off media, stop/turn off media players.'
+  description: 'Stop/turn off media players.'
   mode: parallel
   fields:
-    media_players:
-      description: 'Media players to turn off'
+    entity_id:
+      description: 'List of media players to turn off'
       example: 'media_player.dining_room_hub'
+    ignore_players:
+      description: 'List of media players to ignore'
+      example: "['media_player.bedroom_tv','media_player.office_tv']"
+  variables:
+    ignore_players: '{{ ignore_players|default([]) }}'
+    media_players: >
+      {% set media_players = entity_id|default(state_attr('group.media_players','entity_id')) %}
+      {{ expand(media_players)|rejectattr('entity_id','in',ignore_players)|map(attribute='entity_id')|list }}
   sequence:
-    - variables: #VAR variables in sequence to override field
-        media_players: >
-          {% set media_players = media_players|default(state_attr('group.single_media_players','entity_id')) %}
-          {% set media_players = expand(media_players)|map(attribute='entity_id')|list %}
-          {{ media_players }}
+    #IDEA bitwise_and filter https://community.home-assistant.io/t/need-test-for-bitwise-and/412986
+    - if: '{{ media_players|count > 0 }}'
+      then:
+        - variables:
+            players_off: > #BITWISE
+              {% set players = namespace(entity_id=[]) %}
+              {% for item in expand(media_players)|selectattr('state','in',['on','home','idle','playing','paused']) %}
+                {% if item.attributes.supported_features|bitwise_and(256) %}
+                  {% set players.entity_id = players.entity_id + [item.entity_id] %}
+                {% endif %}
+              {% endfor %}
+              {{ players.entity_id }}
 
-    - choose:
-        - conditions: '{{ media_players|count > 0 }}'
-          sequence:
-            - variables:
-                players_off: >
-                  {{ expand(media_players)|selectattr('attributes.support_off','eq',true)
-                      |selectattr('state','in',['on','home','idle','playing','paused','idle'])
-                      |map(attribute='entity_id')|list }}
-
-            - choose:
-                - conditions: '{{ players_off|count > 0 }}'
-                  sequence:
-                    - service: media_player.turn_off
-                      target:
-                        entity_id: '{{ players_off }}'
+        - if: '{{ players_off|count > 0 }}'
+          then:
+            - service: media_player.turn_off
+              target:
+                entity_id: '{{ players_off }}'
 
             - wait_template: >
                 {{ expand(players_off)|selectattr('state','in',['on','home','idle','playing','paused'])
@@ -39,16 +44,21 @@ media_players_off:
                 seconds: 2
 
             - variables:
-                players_stop: >
-                  {{ expand(media_players)|selectattr('state','in',['on','home','idle','playing','paused','idle'])
-                      |map(attribute='entity_id')|list }}
+                players_stop: > #BITWISE
+                  {% set players = namespace(entity_id=[]) %}
+                  {% for item in expand(media_players)|selectattr('state','in',['on','home','idle','playing','paused']) %}
+                    {% if item.attributes.supported_features|bitwise_and(4096) %}
+                      {% set players.entity_id = players.entity_id + [item.entity_id] %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ players.entity_id }}
 
-            - choose: # stop players (req for vlc, browser players)
-                - conditions: '{{ players_stop|count > 0 }}'
-                  sequence:
-                    - service: media_player.media_stop
-                      target:
-                        entity_id: '{{ players_stop }}'
+            # stop players (req for vlc, browser players)
+            - if: '{{ players_stop|count > 0 }}'
+              then:
+                - service: media_player.media_stop
+                  target:
+                    entity_id: '{{ players_stop }}'
 
     # keep script on until all players are off
     # don't include idle,standby state - spotify, vlc, browser players always idle, roku - standby

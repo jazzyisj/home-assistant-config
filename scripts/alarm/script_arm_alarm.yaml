@@ -5,6 +5,7 @@ arm_alarm:
   alias: 'Arm Alarm'
   description: 'Arm house alarm.'
   icon: mdi:alarm-bell
+  mode: parallel
   fields:
     zone:
       description: 'Alarm zone.'
@@ -18,12 +19,16 @@ arm_alarm:
     override:
       description: 'Bypass open sensors.'
       example: 'true'
+    skip_delay:
+      description: 'Skip arming delay.'
+      example: 'true'
   variables:
     zone: "{{ zone|default('master') }}"
     mode: "{{ mode|default('away') }}"
     hass_code: !secret ALARMO_HA
     code: '{{ code|default(hass_code) }}'
     override: '{{ override|default(false) }}'
+    skip_delay: '{{ skip_delay|default(false) }}'
     alarm_mode: 'armed_{{ mode }}'
   sequence:
     - condition: template
@@ -51,54 +56,108 @@ arm_alarm:
                 code: '{{ code }}'
                 force: true
                 skip_delay: true
-
       default:
         - choose:
             - conditions: "{{ zone in ['garage','master'] }}"
               sequence:
-                - wait_template: "{{ is_state('binary_sensor.garage_occupied','off') }}"
-                  timeout: 120
-
-                - service: alarmo.arm
-                  data:
-                    entity_id: "alarm_control_panel.{{ zone if wait.completed else 'master' }}"
-                    mode: '{{ mode }}'
-                    code: '{{ code }}'
-
                 - choose:
-                    - conditions: '{{ not wait.completed }}'
+                    - conditions:
+                        - condition: state
+                          entity_id: binary_sensor.garage_occupied
+                          state: 'on'
                       sequence:
-                        - service: notify.jason
-                          data:
-                            title: 'Garage Not Armed'
-                            message: 'The garage alarm could not be armed because the garage is still occupied.'
-                            data:
-                              tag: garage_alarm_occupied
-                              group: Alarm
-                              channel: Alert
-                              importance: max
-                              ttl: 0
-                              priority: high
-                              notification_icon: mdi:shield-alert
-                              icon_url: !secret ALARM_ICON
-                              ledColor: !secret SEVERE_COLOR
-                              color: !secret SEVERE_COLOR
-                              vibrationPattern: !secret ALERT_VIBRATION
-                              clickAction: /lovelace-mobile/alarm
-                              actions:
-                                - title: 'Arm Garage'
-                                  action: arm_garage_alarm
+                        - choose:
+                            - conditions: "{{ zone == 'master' }}"
+                              sequence:
+                                # arm house right away
+                                - service: alarmo.arm
+                                  data:
+                                    entity_id: alarm_control_panel.house
+                                    mode: '{{ mode }}'
+                                    code: '{{ code }}'
+                                    skip_delay: '{{ skip_delay }}'
 
-                                - title: 'Alarm'
-                                  action: URI
-                                  uri: !secret ALARM_URI
+                        # arm garage if unoccupied or house not disarmed within 5 minutes, else notify
+                        - wait_template: >
+                            {{ is_state('binary_sensor.garage_occupied','off')
+                                or is_state('alarm_control_panel.garage',alarm_mode)
+                                or is_state('alarm_control_panel.house','disarmed') }}
+                          timeout:
+                            minutes: 5
 
-                                - title: 'Cameras'
-                                  action: URI
-                                  uri: !secret LOREX_URI
+                        - choose:
+                            - conditions: >
+                                {{ is_state('binary_sensor.garage_occupied','off')
+                                    and not is_state('alarm_control_panel.garage',alarm_mode)
+                                    and not is_state('alarm_control_panel.house','disarmed') }}
+                              sequence:
+                                - service: alarmo.arm
+                                  data:
+                                    entity_id: alarm_control_panel.garage
+                                    mode: '{{ mode }}'
+                                    code: '{{ code }}'
+                                    skip_delay: '{{ skip_delay }}'
+                          default:
+                            - service: notify.jason
+                              data:
+                                title: 'Garage Not Armed'
+                                message: 'The garage alarm could not be armed because the garage is still occupied.'
+                                data:
+                                  tag: garage_alarm_occupied
+                                  group: Alarm
+                                  channel: Alert
+                                  importance: max
+                                  ttl: 0
+                                  priority: high
+                                  notification_icon: mdi:shield-alert
+                                  icon_url: !secret ALARM_ICON
+                                  ledColor: !secret SEVERE_COLOR
+                                  color: !secret SEVERE_COLOR
+                                  vibrationPattern: !secret ALERT_VIBRATION
+                                  clickAction: /lovelace-mobile/alarm
+                                  actions:
+                                    - title: 'Arm Garage'
+                                      action: arm_garage_alarm
+
+                                    - title: 'Alarm'
+                                      action: URI
+                                      uri: !secret ALARM_URI
+
+                                    - title: 'Cameras'
+                                      action: URI
+                                      uri: !secret LOREX_URI
+
+                            # arm garage anyway after a bit if master not disarmed
+                            - wait_template: >
+                                {{ is_state('binary_sensor.garage_occupied','off')
+                                    or is_state('alarm_control_panel.garage',alarm_mode)
+                                    or is_state('alarm_control_panel.house','disarmed') }}
+                              timeout:
+                                minutes: 15
+
+                            - condition: template
+                              value_template: >
+                                {{ not is_state('alarm_control_panel.garage',alarm_mode)
+                                    and not is_state('alarm_control_panel.house','disarmed') }}
+
+                            - service: alarmo.arm
+                              data:
+                                entity_id: alarm_control_panel.garage
+                                mode: '{{ mode }}'
+                                code: '{{ code }}'
+                                skip_delay: '{{ skip_delay }}'
+                                force: true
+                  default:
+                    - service: alarmo.arm
+                      data:
+                        entity_id: 'alarm_control_panel.{{ zone }}'
+                        mode: '{{ mode }}'
+                        code: '{{ code }}'
+                        skip_delay: '{{ skip_delay }}'
           default:
             - service: alarmo.arm
               data:
                 entity_id: 'alarm_control_panel.{{ zone }}'
                 mode: '{{ mode }}'
                 code: '{{ code }}'
+                skip_delay: '{{ skip_delay }}'

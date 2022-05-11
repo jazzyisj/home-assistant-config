@@ -36,6 +36,9 @@
         - Locked (Jason)
         - Locked (Sheri)
         - Locked (Dawn)
+      not_from:
+        - unknown
+        - unavailable
 
     - platform: state
       id: manual
@@ -44,11 +47,14 @@
         - sensor.front_door_lock_status
         - sensor.side_door_lock_status
       to: Locked (Manual)
+      not_from:
+        - unknown
+        - unavailable
       for: 300 # time to get into garage and leave w/o arming alarm
   condition:
     - condition: state
       entity_id:
-        - input_boolean.alarm_automation
+        - input_boolean.alarm_enabled
         - input_boolean.alarm_auto_arming
       state: 'on'
 
@@ -57,24 +63,15 @@
       state: 'off'
 
     - condition: template
-      alias: 'Lock automation is enabled if lock trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.lock_automation','on')
-            if trigger.id in ['keypad','manual'] else true }}
-
-    - condition: template
-      alias: 'Previous state not unknown if lock trigger'
-      value_template: >
-        {{ trigger.from_state.state not in ['unknown','unavailable','none']
-            if trigger.id in ['keypad','manual'] else true }}
-
-    - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
-      value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-            and is_state('input_boolean.occupancy_override','off')
+        {{ is_state('input_boolean.occupancy_override','off')
             if trigger.id in ['away','night'] else true }}
   action:
+    # wait for garage door to close (auto close when alarm armed/occupancy mode)
+    - wait_template: "{{ is_state('binary_sensor.garage_door_open','off') }}"
+      timeout: 120
+
     - choose:
         - conditions: "{{ trigger.id == 'disarmed' }}"
           sequence:
@@ -87,63 +84,28 @@
                     - service: script.arm_alarm
                       data:
                         mode: away
+                        skip_delay: true
 
-        - conditions:
-            - "{{ trigger.id == 'away' }}"
-
-            - condition: not
-              alias: 'Alarm not already armed_away'
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: armed_away
+        - conditions: "{{ trigger.id == 'away' }}"
           sequence:
             - wait_template: "{{ not is_state('alarm_control_panel.master','arming') }}"
               timeout: 120
-
-            - condition: not
-              alias: 'Alarm not already armed_away'
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: armed_away
 
             - service: script.arm_alarm
               data:
                 mode: away
 
-        - conditions:
-            - "{{ trigger.id in ['keypad','manual'] }}"
-
-            - condition: not
-              alias: 'Alarm not already armed_home'
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: armed_home
+        - conditions: "{{ trigger.id in ['keypad','manual'] }}"
           sequence:
             - wait_template: "{{ not is_state('alarm_control_panel.master','arming') }}"
               timeout: 120
 
-            - condition: not
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: armed_home
-
             - service: script.arm_alarm
               data:
                 mode: "{{ 'night' if is_state('input_select.occupancy_mode','Night') else 'home' }}"
+                skip_delay: true
 
-        - conditions:
-            - "{{ trigger.id == 'night' }}"
-
-            - condition: not
-              alias: 'Alarm not already armed_night'
-              conditions:
-                - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: armed_night
+        - conditions: "{{ trigger.id == 'night' }}"
           sequence:
             - wait_template: "{{ not is_state('alarm_control_panel.master','arming') }}"
               timeout: 120
@@ -151,3 +113,4 @@
             - service: script.arm_alarm
               data:
                 mode: night
+                skip_delay: true

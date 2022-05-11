@@ -8,23 +8,10 @@
   trigger:
     - platform: state
       entity_id: light.dining_room_rgb_light
-      to: ~
-  condition:
-    - condition: state
-      entity_id: input_boolean.startup_pending
-      state: 'off'
+      to: 'off'
   action:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: light.dining_room_rgb_light
-              state: 'on'
-          sequence:
-            - service: timer.start
-              entity_id: timer.dining_room_light
-      default:
-        - service: timer.cancel
-          entity_id: timer.dining_room_light
+    - service: timer.cancel
+      entity_id: timer.dining_room_light
 
 ###############################################################################
 ## Light - Dining Room Light Manual Control On
@@ -34,6 +21,11 @@
   description: 'Turn adaptive light manual control on.'
   max_exceeded: silent
   trigger:
+    - platform: event
+      event_type: timer.started
+      event_data:
+        entity_id: timer.dining_room_light
+
     - platform: state
       entity_id:
         - alert.work_commute_jason
@@ -53,10 +45,6 @@
       to: 'on'
       from: 'off'
   condition:
-    - condition: state
-      entity_id: input_boolean.light_automation
-      state: 'on'
-
     - condition: state
       entity_id: input_boolean.alarm_triggered
       state: 'off'
@@ -102,22 +90,17 @@
       to: 'off'
       from: 'on'
   condition:
-    - condition: state
-      entity_id: input_boolean.light_automation
-      state: 'on'
-
     - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
+        {{ is_state('input_boolean.occupancy_override','off')
             if trigger.id == 'occupancy' else true }}
 
-    - condition: template
-      alias: 'Not if night mode unless occupancy mode is trigger'
-      value_template: >
-        {{ true if trigger.id == 'occupancy'
-            else is_state('input_select.occupancy_mode','Night') }}
+    # - condition: template
+    #   alias: 'Not if night mode unless occupancy mode is trigger'
+    #   value_template: >
+    #     {{ true if trigger.id == 'occupancy'
+    #         else not is_state('input_select.occupancy_mode','Night') }}
 
     - condition: state
       entity_id:
@@ -155,8 +138,6 @@
       to:
         - Away
         - Vacation
-      for:
-        minutes: 2 # must be after away mode has run
 
     - platform: time_pattern
       minutes: '/15'
@@ -166,10 +147,7 @@
       state: 'off'
 
     - condition: state
-      entity_id:
-        - input_boolean.light_automation
-        - input_boolean.presence_automation
-        - binary_sensor.nighttime_illuminance_lights
+      entity_id: binary_sensor.nighttime_illuminance_lights
       state: 'on'
 
     - condition: state
@@ -183,10 +161,9 @@
         - Vacation
 
     - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
+        {{ is_state('input_boolean.occupancy_override','off')
             if trigger.id in ['away','night'] else true }}
   action:
     - service: automation.turn_off
@@ -198,7 +175,7 @@
         entity_id: light.dining_room_rgb_light
 
     - wait_template: "{{ is_state('light.dining_room_rgb_light','on') }}"
-      timeout: 15
+      timeout: 30
 
     - service: automation.turn_on
       target:
@@ -240,25 +217,14 @@
         - binary_sensor.scene_active
       to: 'off'
       from: 'on' # script/template reload
-
-    - platform: state
-      id: startup
-      entity_id: input_boolean.startup_pending
-      to: 'off'
   condition:
-    - condition: state
-      entity_id: input_boolean.light_automation
-      state: 'on'
-
     - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
+        {{ is_state('input_boolean.occupancy_override','off')
             if trigger.id in ['away','night'] else true }}
 
-    - condition: or
-      conditions:
+    - or:
         - condition: state
           entity_id: binary_sensor.nighttime_illuminance_lights
           state: 'on'
@@ -300,7 +266,7 @@
           {% endif %}
 
     - wait_template: "{{ is_state('light.dining_room_rgb_light','off') }}"
-      timeout: 15
+      timeout: 30
 
     - service: automation.turn_on
       target:
@@ -331,20 +297,19 @@
       from: 'on' # script/template reload
 
     - platform: state
-      id: away
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to: Night
+      for: 15 #BUGFIX allow adaptive lighting to turn off
+
+    - platform: state
+      id: occupancy
       entity_id: input_select.occupancy_mode
       to:
         - Away
         - Vacation
       for:
-        minutes: 2 # allow occupant to leave, timer cancel
-
-    - platform: state
-      id: night
-      entity_id: input_select.occupancy_mode
-      to: Night
-      for:
-        minutes: 5
+        minutes: 2 # allow timer to cancel, occupant to leave
 
     - platform: state
       id: startup
@@ -352,16 +317,14 @@
       to: 'off'
   condition:
     - condition: state
-      entity_id:
-        - light.dining_room_rgb_light
-        - input_boolean.light_automation
+      entity_id: light.dining_room_rgb_light
       state: 'on'
 
     - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-            if trigger.id in ['away','night'] else true }}
+        {{ is_state('input_boolean.occupancy_override','off')
+            if trigger.id == 'occupancy' else true }}
 
     - condition: state
       entity_id:
@@ -374,7 +337,7 @@
       value_template: >
         {{ is_state('binary_sensor.nighttime_illuminance_lights','off')
               and is_state('binary_sensor.daytime_illuminance_lights','off')
-            if trigger.id == 'scene' else true }}
+            if trigger.id in ['scene','startup'] else true }}
 
     - condition: template
       value_template: >

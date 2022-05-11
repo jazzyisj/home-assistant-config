@@ -4,19 +4,21 @@
 - id: alarm_announcements
   alias: '[Alarm] Announcements'
   description: 'House alarm TTS announcements.'
-  mode: queued
+  max_exceeded: silent
   variables:
-    mode: "{{ state_attr('alarm_control_panel.master','arm_mode')|replace('armed_','') }}"
+    mode: "{{ state_attr(trigger.entity_id,'arm_mode')|replace('armed_','') }}"
     current_alarm: "{{ states('input_text.current_alarm') }}"
+    zone: "{{ trigger.entity_id.split('.')[1] }}"
   trigger:
     - platform: state
       entity_id: alarm_control_panel.master
       to:
         - pending
         - triggered
-      for: 5 # allow current_alarm to populate
+      for: 1 # allow pending tts to finish, current_alarm to populate
 
     - platform: state
+      id: master
       entity_id: alarm_control_panel.master
       to:
         - armed_home
@@ -25,7 +27,31 @@
         - arming
 
     - platform: state
+      id: zone
+      entity_id:
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+        - arming
+
+    - platform: state
+      id: master
       entity_id: alarm_control_panel.master
+      to: disarmed
+      from:
+        - armed_home
+        - armed_away
+        - armed_night
+        - triggered
+
+    - platform: state
+      id: zone
+      entity_id:
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
       to: disarmed
       from:
         - armed_home
@@ -37,34 +63,37 @@
       entity_id: input_boolean.alarm_announcements
       state: 'on'
 
+    # don't duplicate master alarm announcement
+    - condition: template
+      value_template: "{{ iif(trigger.id == 'zone',states(trigger.entity_id) != states('alarm_control_panel.master')) }}"
+
     # don't duplicate occupancy mode announcement
-    - "{{ is_state('input_boolean.occupancy_announcements','off') if trigger.to_state.state
-      in ['disarmed','armed_home','armed_night','armed_away'] else true }}"
+    - condition: template
+      value_template: >
+        {{ is_state('input_boolean.occupancy_announcements','off')
+            if trigger.to_state.state in ['disarmed','armed_home','armed_night','armed_away'] else true }}
 
     # no announcement when temp disarm
-    - "{{ is_state('input_boolean.alarm_temp_override','off') if trigger.to_state.state == 'disarmed' else true }}"
+    - condition: template
+      value_template: >
+        {{ is_state('input_boolean.alarm_temp_override','off')
+            if trigger.to_state.state == 'disarmed' else true }}
   action:
     - choose:
-        - conditions:
-            - condition: state
-              entity_id: alarm_control_panel.master
-              state: arming
+        - conditions: "{{ is_state(trigger.entity_id,'arming') }}"
           sequence:
             - service: script.turn_on
               target:
                 entity_id: script.tts_play
               data:
                 variables:
-                  message: 'The alarm is now being armed in {{ mode }} mode.'
+                  message: "The {{ iif(zone != 'master',zone,'') }} alarm is now being armed in {{ mode }} mode."
                   ignore_away: true
 
-        - conditions:
-            - condition: state
-              entity_id: alarm_control_panel.master
-              state: pending
+        - conditions: "{{ is_state(trigger.entity_id,'pending') }}"
           sequence:
             - repeat:
-                while: "{{ is_state('alarm_control_panel.master','pending') }}"
+                while: "{{ is_state(trigger.entity_id,'pending') }}"
                 sequence:
                   - service: script.turn_on
                     target:
@@ -80,14 +109,12 @@
                           Warning! The alarm has been triggered by the {{ current_alarm }}.
                           Disarm the system or the alarm will sound.
 
-                  - wait_template: "{{ not is_state('alarm_control_panel.master','pending') }}"
+                  - wait_template: "{{ not is_state(trigger.entity_id,'pending') }}"
                     timeout: 30 # delay between announcements
-                    continue_on_timeout: false # don't play if not pending
 
         - conditions:
-            - condition: state
-              entity_id: alarm_control_panel.master
-              state: triggered
+            - condition: template
+              value_template: "{{ is_state(trigger.entity_id,'triggered') }}"
 
             - condition: state
               entity_id:
@@ -105,15 +132,12 @@
               data:
                 variables:
                   alert: true
-                  message: 'Attention!  Alarm! {{ current_alarm }}'
+                  message: 'Attention! Alarm! {{ current_alarm }}'
 
             - delay: 30 # wait for disarmed before repeating announcememt
 
             - choose: # check if disarmed
-                - conditions:
-                    - condition: state
-                      entity_id: alarm_control_panel.master
-                      state: triggered
+                - conditions: "{{ is_state(trigger.entity_id,'triggered') }}"
                   sequence:
                     - repeat:
                         sequence:
@@ -128,26 +152,26 @@
                                   Your intrusion has been detected and confirmed.
                                   The owners have been notified and the police have now been called.
 
-                          - wait_template: "{{ not is_state('alarm_control_panel.master','triggered') }}"
+                          - wait_template: "{{ not is_state(trigger.entity_id,'triggered') }}"
                             timeout: 60 # delay between announcements
 
-                        until: "{{ not is_state('alarm_control_panel.master','triggered') }}"
+                        until: "{{ not is_state(trigger.entity_id,'triggered') }}"
 
         - conditions:
-            - condition: state
-              entity_id: alarm_control_panel.master
-              state:
-                - disarmed
-                - armed_home
-                - armed_night
-                - armed_away
+            - condition: template
+              value_template: >
+                {{ states(trigger.entity_id)
+                    in ['disarmed','armed_home','armed_night','armed_away'] }}
 
             - condition: state
               entity_id: input_boolean.alarm_temp_override
               state: 'off'
 
             # disable on auto disarm when open sensor
-            - "{{ not is_state('alarm_control_panel.master','disarmed') if is_state('binary_sensor.alarm_open_sensor_alert','on') else true }}"
+            - condition: template
+              value_template: >
+                {{ not is_state(trigger.entity_id,'disarmed')
+                    if is_state('binary_sensor.alarm_open_sensor_alert','on') else true }}
           sequence:
             - service: script.turn_on
               target:
@@ -155,7 +179,7 @@
               data:
                 variables:
                   message: >
-                    {% if is_state('alarm_control_panel.master','disarmed') %} The house alarm has been disarmed.
-                    {% else %} The house alarm is now armed in {{ mode }} mode.
+                    {% if is_state(trigger.entity_id,'disarmed') %} The {{ iif(zone != 'master',zone,'') }} alarm has been disarmed.
+                    {% else %} The {{ iif(zone != 'master',zone,'') }} alarm is now armed in {{ mode }} mode.
                     {% endif %}
                   ignore_away: true

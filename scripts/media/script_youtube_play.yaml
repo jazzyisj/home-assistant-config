@@ -1,7 +1,7 @@
 ###############################################################################
 ## Youtube Play
 
-# media_content_id:
+#YOUTUBE media_content_id:
 #   playlist <- normal
 #   channel
 #   vid_channel
@@ -13,11 +13,11 @@
 #   user_artist
 
 ###############################################################################
-youtube_play:
+youtube_play: #YOUTUBE
   alias: 'Youtube Play'
-  description: 'Play Youtube media.'
+  description: 'Play youtube media.'
   icon: mdi:youtube
-  max_exceeded: error
+  mode: restart
   fields:
     playlist:
       description: 'Playlist to play on Youtube.'
@@ -29,44 +29,63 @@ youtube_play:
       description: 'Resume media play option.'
       example: 'playlist'
   variables:
-    playlist: "{{ playlist|default(states('select.youtube_playlist')) }}"
+    playlist: "{{ playlist|default(states('input_select.youtube_player_playlist')) }}"
     media_player: "{{ media_player|default(states('sensor.youtube_media_player')) }}"
-    resume: '{{ resume|default(false) }}'
+    resume: "{{ resume|default('false') }}"
     content_id: >
-      {% for item in state_attr('sensor.youtube_playlists','playlists') -%}
+      {% for item in state_attr('sensor.youtube_playlists','playlists') %}
         {% if item.name == playlist %}
-          {{ item.uri }}
+          {{- item.uri -}}
         {% endif %}
       {% endfor %}
     content_type: >
-      {% for item in state_attr('sensor.youtube_playlists','playlists') -%}
+      {% for item in state_attr('sensor.youtube_playlists','playlists') %}
         {% if item.name == playlist %}
-          {{ item.type }}
+          {{- item.type -}}
         {% endif %}
       {% endfor %}
   sequence:
-    - choose:
-        - conditions: "{{ resume in ['tts','alarm_clock'] }}"
-          sequence:
-            - service: ytube_music_player.call_method
+    - if: "{{ resume in ['tts','alarm_clock'] }}"
+      then:
+        - service: ytube_music_player.call_method
+          target:
+            entity_id: media_player.youtube
+          data:
+            command: interrupt_resume
+      else:
+        # ytube restarts automatically if speaker selection changed
+        - if: "{{ resume != 'youtube_media_player' and resume != 'media_sync' }}"
+          then:
+            - service: media_player.select_source
               target:
-                entity_id: media_player.ytube_music_player
+                entity_id: media_player.youtube
               data:
-                command: interrupt_resume
-      default:
-        - condition: template
-          alias: 'Valid content id and content type'
-          value_template: "{{ content_id != '' and content_type != '' }}"
+                source: '{{ media_player }}'
 
-        - service: media_player.select_source
-          target:
-            entity_id: media_player.ytube_music_player
-          data:
-            source: '{{ media_player }}'
+            - condition: template
+              alias: 'Valid content id and content type'
+              value_template: "{{ content_id != '' and content_type != '' }}"
 
-        - service: media_player.play_media
-          target:
-            entity_id: media_player.ytube_music_player
-          data:
-            media_content_id: '{{ content_id }}'
-            media_content_type: '{{ content_type }}'
+            - service: media_player.play_media
+              target:
+                entity_id: media_player.youtube
+              data:
+                media_content_id: '{{ content_id }}'
+                media_content_type: '{{ content_type }}'
+
+###############################################################################
+## Youtube Reset
+###############################################################################
+youtube_reset:
+  alias: 'Youtube Reset'
+  description: 'Reset youtube media.'
+  icon: mdi:youtube
+  max_exceeded: silent
+  sequence:
+    - service: script.media_stop
+      data:
+        media_type: youtube
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.youtube_failed

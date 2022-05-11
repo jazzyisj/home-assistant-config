@@ -7,7 +7,6 @@
   mode: restart
   variables:
     trigger_entity: "{{ expand(state_attr('alarm_control_panel.master','open_sensors'))|map(attribute='entity_id')|join('') }}"
-    delay: "{{ state_attr('alarm_control_panel.master','delay')|int(0) }}"
     message: >
       {{ states('input_text.current_alarm') }}
       <br>Triggered at: {{ as_local(states.alarm_control_panel.master.last_changed).strftime('%-I:%M %p')  }}
@@ -110,6 +109,8 @@
                 {% elif  trigger_entity in ['binary_sensor.back_door_lock_intrusion','binary_sensor.back_door_lock_keypad_disabled',
                   'binary_sensor.back_door_open_alert'] %}
                     camera.back_door
+                {% elif  trigger_entity in ['binary_sensor.patio_door_open_alert'] %}
+                    camera.patio_door
                 {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
                   'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
                     camera.back_house
@@ -142,7 +143,7 @@
                   'binary_sensor.back_door_open_alert'] %}
                     camera.patio_door
                 {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
-                  'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
+                  'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert','binary_sensor.patio_door_open_alert'] %}
                     camera.back_door
                 {% elif trigger_entity == 'binary_sensor.garage_sensor_motion' %}
                   camera.side_door
@@ -170,7 +171,7 @@
                 {% elif trigger_entity in ['binary_sensor.laundry_room_window_open_alert','binary_sensor.master_bathroom_window_open_alert']  %}
                   camera.patio_door
                 {% elif  trigger_entity in ['binary_sensor.back_door_lock_intrusion','binary_sensor.back_door_lock_keypad_disabled',
-                  'binary_sensor.back_door_open_alert'] %}
+                  'binary_sensor.back_door_open_alert','binary_sensor.patio_door_open_alert'] %}
                     camera.back_house
                 {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
                   'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
@@ -206,7 +207,7 @@
                 {% elif trigger_entity in ['binary_sensor.garage_door_lock_intrusion','binary_sensor.garage_door_lock_keypad_disabled',
                   'binary_sensor.kitchen_sink_window_open_alert','binary_sensor.garage_side_door_open_alert'] %}
                     camera.side_door
-                {% elif trigger_entity == 'binary_sensor.garage_sensor_motion' %}
+                {% elif trigger_entity == 'binary_sensor.garage_sensor_motion','binary_sensor.patio_door_open_alert' %}
                   camera.side_drive
                 {% endif %}
             data:
@@ -232,7 +233,7 @@
                         persistent: true
                         sticky: true
                         chronometer: true
-                        when: '{{ (now().timestamp() + delay)|int }}'
+                        when: "{{ (now().timestamp() + state_attr('alarm_control_panel.master','delay')|int(0))|int }}"
                         notification_icon: '{{ states.input_boolean.alarm_pending.attributes.icon }}'
                         icon_url: !secret ALARM_ICON
                         image: !secret ALARM_IMAGE
@@ -248,6 +249,9 @@
                           - title: 'Cameras'
                             action: URI
                             uri: !secret LOREX_URI
+
+                          - title: 'Dismiss'
+                            action: clear_pending
 
               - conditions:
                   - condition: state
@@ -282,6 +286,9 @@
                           - title: 'Cameras'
                             action: URI
                             uri: !secret LOREX_URI
+
+                          - title: 'Dismiss'
+                            action: clear_triggered
 
                   - choose:
                       - conditions:
@@ -336,42 +343,45 @@
 ###############################################################################
 ## Alarm - Clear Notifications
 ###############################################################################
-- id: alarm_clear_notifications #VERIFY
+- id: alarm_clear_notifications
   alias: '[Alarm] Clear Notifications'
   description: 'Clear alarm notifications.'
   mode: queued
   trigger:
-    - platform: state
-      entity_id:
-        - input_boolean.alarm_pending
-        - input_boolean.alarm_triggered
-      to: 'off'
-      from: 'on'
+    - platform: event
+      id: pending
+      event_type: mobile_app_notification_action
+      event_data:
+        action: clear_pending
+
+    - platform: event
+      id: triggered
+      event_type: mobile_app_notification_action
+      event_data:
+        action: clear_triggered
   action:
     - choose:
-        - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_pending' }}"
-          sequence:
-            - service: notify.jason #TEMP mobile
+        conditions: "{{ trigger.id == 'pending' }}"
+        sequence:
+          - service: notify.jason #TEMP mobile
+            data:
+              message: clear_notification
               data:
-                message: clear_notification
-                data:
-                  tag: alarm_pending
+                tag: alarm_pending
 
-        #DISABLED - conditions: "{{ trigger.entity_id == 'input_boolean.alarm_triggered' }}"
-        #   sequence:
-        #     - delay:
-        #         hours: 1 # wait before clearing notifications
+    - choose:
+        - conditions: "{{ trigger.id == 'triggered' }}"
+          sequence:
+            - repeat:
+                count: 3
+                sequence:
+                  - service: notify.jason #TEMP mobile
+                    data:
+                      message: clear_notification
+                      data:
+                        tag: 'alarm_triggered{{ repeat.index }}'
 
-        #     - repeat:
-        #         count: 3
-        #         sequence:
-        #           - service: notify.jason #TEMP mobile
-        #             data:
-        #               message: clear_notification
-        #               data:
-        #                 tag: 'alarm_triggered{{ repeat.index }}'
-
-        #           - delay: 5 # throttle notifications
+                  - delay: 5 # throttle notifications
 
     - service: input_text.set_value
       target:

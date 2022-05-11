@@ -23,10 +23,12 @@ media_players_set_volumes:
     media_type: # req for alarm_clock
       description: 'Media type if applicable.'
       example: 'radio'
-    media_players:
+    entity_id:
       description: 'Media player list.'
       example: '[media_player.dining_room_hub, media_player.bedroom_hub]'
   variables:
+    #TV no tvs - no volume attribute
+    media_players: "{{ entity_id|default(state_attr('group.single_media_players','entity_id')) }}"
     source: "{{ source|default('reset') }}"
     media_type: '{{ media_type|default(none) }}'
     media_types: >
@@ -41,10 +43,6 @@ media_players_set_volumes:
           and (is_state('binary_sensor.tts','on')
             or is_state('binary_sensor.mobile_phone_in_use','on')) }}
   sequence:
-    #TV - tvs have no volume attribute
-    - variables: #VAR variables in sequence to override field
-        media_players: "{{ media_players|default(state_attr('group.single_media_players','entity_id')) }}"
-
     # do not run if system is muted (kills mute)
     - condition: state
       entity_id: switch.system_mute
@@ -62,7 +60,7 @@ media_players_set_volumes:
             - service: script.media_players_save_volumes
               data:
                 source: phone
-                media_players: '{{ media_players }}'
+                entity_id: '{{ media_players }}'
                 volume: "{{ states('input_number.' ~ source ~ '_volume')|int(-1)/100 }}"
 
         # if source is phone/tts save current volumes to restore
@@ -71,7 +69,7 @@ media_players_set_volumes:
             - service: script.media_players_save_volumes
               data:
                 source: '{{ source[0:-4] }}' # strip '_all'
-                media_players: '{{ media_players }}'
+                entity_id: '{{ media_players }}'
 
     - choose:
         # don't save restore volumes if lowered volumes, tts, alarm_clock, or phone in use
@@ -114,6 +112,13 @@ media_players_set_volumes:
                   - condition: template
                     alias: 'Media player is not off if source is phone_off, phone_all'
                     value_template: "{{ states(player) not in ['idle','off'] if source in ['phone_all','phone_off'] else true }}"
+
+                  #WARNING (MainThread) [homeassistant.components.webostv.media_player] Error calling async_set_volume_level on entity media_player.bedroom_tv, state:off, error: WebOsTvCommandError("Not connected, can't execute command.")
+                  - condition: template
+                    alias: 'Media player is on if TV'
+                    value_template: >
+                      {{ states(player) in ['on','home','playing','paused']
+                          if is_state_attr(player,'device_class','tv') else true }}
                 sequence:
                   - variables:
                       current_volume: "{{ states('input_number.' ~ player_name ~ '_current_volume')|float(-1) }}"
@@ -136,10 +141,6 @@ media_players_set_volumes:
                             if state_attr(player,'device_class') == 'tv'
                               else states('input_number.speaker_quiet_volume')|int/100  %}
                         {{ volume * media_adjustment * volume_factor }}
-                      reset_volume: >
-                        {% set volume = states('input_number.media_default_volume')|float/100
-                            if media_type in media_types else default_volume %}
-                        {{ volume * media_adjustment * volume_factor }}
                       media_volume: >
                         {% if source in media_types %}
                           {% set volume = states('input_number.' ~ source ~ '_volume')|float(-1)/100 %}
@@ -148,9 +149,17 @@ media_players_set_volumes:
                       alarm_clock_volume: >
                         {{ states('input_number.alarm_clock_volume_' ~ state_attr('binary_sensor.alarm_clock','alarm_type'))
                             |float(-1)/100 if source == 'alarm_clock' }}
+                      reset_volume: >
+                        {% if is_state('binary_sensor.quiet_time','on') %}
+                          {% set volume = quiet_volume if current_volume > quiet_volume else current_volume
+                              if current_volume > 0 and states(player) in ['on','playing','paused'] else quiet_volume %}
+                        {% else %}
+                          {% set volume = current_volume if states(player) in ['on','playing','paused'] else default_volume %}
+                        {% endif %}
+                        {{ volume }}
                       new_volume: >
                         {% if lower_volume %}
-                          {% set lvol = 0.25 %}
+                          {% set lvol = 0.25 * media_adjustment * volume_factor %}
                           {% set volume = current_volume if current_volume < lvol else lvol %}
                         {% elif source_off %} {% set volume = source_volume %}
                         {% elif source in media_types %} {% set volume = media_volume %}
@@ -164,22 +173,12 @@ media_players_set_volumes:
                         {% endif %}
 
                         {{ 1 if volume > 1 else 0 if volume < 0 else '%0.2f'|format(volume) }}
-                  - choose:
-                      - conditions:
-                          #WARNING (MainThread) [homeassistant.components.webostv.media_player] Error calling async_set_volume_level on entity media_player.bedroom_tv, state:off, error: WebOsTvCommandError("Not connected, can't execute command.")
-                          - condition: template
-                            alias: 'Media player is on if TV'
-                            value_template: >
-                              {{ states(player) in ['on','home','playing','paused']
-                                  if state_attr(player,'device_class') else true }}
-                        sequence:
-                          - service: media_player.volume_set
-                            target:
-                              entity_id: '{{ player }}'
-                            data:
-                              volume_level: '{{ new_volume }}'
 
-    - delay: 1 # allow last volumes to set so we don't trigger automation.media_player_volume_changed
+                  - service: media_player.volume_set
+                    target:
+                      entity_id: '{{ player }}'
+                    data:
+                      volume_level: '{{ new_volume }}'
 
     # always turn save volume automation back on
     - service: automation.turn_on

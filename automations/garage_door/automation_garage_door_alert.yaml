@@ -1,0 +1,183 @@
+###############################################################################
+## Garage Door Open Alert
+###############################################################################
+- id: garage_door_extended_open_alert
+  alias: '[Garage Door] Extended Open Alert'
+  description: 'Send notification, play announcement.'
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.garage_door_open
+      to: 'on'
+      for:
+        minutes: 15
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.garage_door_active_alert
+
+    - repeat:
+        sequence:
+          - variables:
+              open_time: "{{ as_local(states.binary_sensor.garage_door_open.last_changed).strftime('%-I:%M %p') }}"
+              open_duration: >
+                {% set seconds =  now().timestamp() - states.binary_sensor.garage_door_open.last_changed.timestamp() %}
+                {% set minutes = (seconds // 60)|int(0) %}
+                {% set hours = (minutes // 60) %}
+                {% set days = (hours // 24) %}
+                {% set weeks = (days // 7) %}
+                {% set minutes = (minutes % 60) %}
+                {% set hours =  (hours % 24) %}
+                {% set days = (days % 7) %}
+
+                {% macro phrase(value, name) %}
+                  {%- set value = value %}
+                  {%- set end = 's' if value > 1 else '' %}
+                  {{- '{} {}{}'.format(value, name, end) if value|int(0) > 0 else '' }}
+                {%- endmacro %}
+                {% set text = [ phrase(weeks, 'week'), phrase(days, 'day'), phrase(hours, 'hour'), phrase(minutes, 'minute') ]|select('!=','')|list|join(', ') %}
+                {% set last_comma = text.rfind(',') %}
+                {% if last_comma != -1 %}
+                  {% set text = text[:last_comma] + ' and' + text[last_comma + 1:] %}
+                {% endif %}
+                {{ text }}
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_alerts
+                    state: 'on'
+                sequence:
+                  - service: script.garage_door_notification
+                    data:
+                      error: open
+                      message: >
+                        Garage door has been open for {{ open_duration }}.
+                        Opened at: {{ open_time }}
+                      person: "notify.{{ states('sensor.notify_service_home') }}"
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_announcements
+                    state: 'on'
+                sequence:
+                  - service: script.tts_play
+                    data:
+                      message: >
+                        The garage door was opened at {{ open_time }}.
+                        It has been open for {{ open_duration }}.
+                      quiet_play: true
+                      night_play: true
+
+          - wait_template: >
+              {{ is_state('input_boolean.garage_door_active_alert','off')
+                  or is_state('binary_sensor.garage_door_open','off') }}
+            timeout:
+              minutes: 15 # delay before repeat
+        until: >
+          {{ is_state('input_boolean.garage_door_active_alert','off')
+              or is_state('binary_sensor.garage_door_open','off') }}
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.garage_door_active_alert
+
+###############################################################################
+## Garage Door - Error
+###############################################################################
+- id: garage_door_error
+  alias: '[Garage Door] Error'
+  description: 'Notify on garage door error.'
+  mode: restart
+  variables:
+    garage_error: >
+      {% set msg = trigger.event.data.message %}
+      {% if 'cover.open_cover' in msg[0] and 'cover.garage_bay_door' in msg[0] %}
+        open
+      {% elif 'cover.close_cover' in msg[0] and 'cover.garage_bay_door' in msg[0] %}
+        close
+      {% endif %}
+  trigger:
+    - platform: event
+      event_type: system_log_event
+      event_data:
+        level: ERROR
+  condition: "{{ garage_error in ['open','close'] }}"
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.garage_door_active_alert
+    - repeat:
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_alerts
+                    state: 'on'
+                sequence:
+                  - service: script.garage_door_notification
+                    data:
+                      error: '{{ garage_error }}'
+                      message: >
+                        The garage door was not able to {{ garage_error }}!
+                        You must now {{ garage_error }} the door manually
+                        with the garage door control panel or remote button to reset the controller.
+                      person: "notify.{{ states('sensor.notify_service_home') }}"
+
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_announcements
+                    state: 'on'
+                sequence:
+                  - service: script.tts_play
+                    data:
+                      message: >
+                        Attention!
+                        The garage door was not able to {{ garage_error }}!
+                        You must now {{ garage_error }} the door manually
+                        with the garage door control panel or the garage remote button to reset the controller.
+                      quiet_play: true
+                      night_play: true
+                      save_message: true
+
+          - wait_template: >
+              {{ is_state('input_boolean.garage_door_active_alert','off')
+                  or is_state('binary_sensor.garage_door_open',iif(garage_error=='open','on','off')) }}
+            timeout:
+              minutes: 2 # delay before repeat
+        until: >
+          {{ is_state('input_boolean.garage_door_active_alert','off')
+              or is_state('binary_sensor.garage_door_open',iif(garage_error=='open','on','off')) }}
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.garage_door_active_alert
+
+###############################################################################
+## Garage Door - Clear Alert Notification
+###############################################################################
+- id: garage_door_clear_alert_notification
+  alias: '[Garage Door] Clear Alert Notification'
+  description: 'Turn off alert, clear notification.'
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.garage_door_active_alert
+      to: 'off'
+      from: 'on'
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_garage_door_alert
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.garage_door_active_alert
+
+    - service: notify.mobile
+      data:
+        message: clear_notification
+        data:
+          tag: garage_door_alert

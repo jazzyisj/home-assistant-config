@@ -1,0 +1,77 @@
+###############################################################################
+## Lock - Auto Lock House
+###############################################################################
+- id: lock_house_auto_lock_house
+  alias: '[Lock] Auto Lock House'
+  description: 'Automatically lock house locks.'
+  mode: queued
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      id: alarm
+      entity_id: alarm_control_panel.house
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+
+    - platform: state
+      id: unlock_keypad
+      entity_id:
+        - lock.back_door_lock
+        - lock.front_door_lock
+        - lock.side_door_lock
+      to: unlocked
+      for:
+        minutes: 10
+
+    - platform: state
+      id: lock_keypad
+      entity_id:
+        - sensor.back_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.side_door_lock_status
+      to:
+        - Locked (Keypad)
+        - Locked (Jason)
+        - Locked (Sheri)
+        - Locked (Dawn)
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: lock_all_locks
+  condition:
+    - condition: template
+      alias: 'Alarm enabled if alarm trigger'
+      value_template: "{{ is_state('input_boolean.alarm_enabled','on') if trigger.id == 'alarm' else true }}"
+
+    - condition: template
+      alias: 'If unlock trigger, lock is still unlocked else other locks are unlocked'
+      value_template: >
+        {{ is_state(trigger.entity_id,'unlocked') if trigger.id == 'unlock_keypad'
+            else state_attr('sensor.door_locks','unlocked')|count > 0 }}
+  action:
+    - repeat:
+        while:
+          - '{{ repeat.index < 4 }}' # try 3 times
+          - "{{ is_state(trigger.entity_id,'unlocked') if trigger.id == 'unlock_keypad' else state_attr('sensor.door_locks','unlocked')|count > 0 }}"
+        sequence:
+          - service: lock.lock
+            target:
+              entity_id: "{{ trigger.entity_id if trigger.id =='unlock_keypad' else state_attr('sensor.door_locks','unlocked') }}"
+
+          - wait_template: "{{ is_state(trigger.entity_id,'locked') if trigger.id =='unlock_keypad' else state_attr('sensor.door_locks','unlocked')|count == 0 }}"
+            timeout: 30
+
+    - choose:
+        - conditions: "{{ is_state(trigger.entity_id,'unlocked') if trigger.id =='unlock_keypad' else state_attr('sensor.door_locks','unlocked')|count > 0 }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: >
+                  {{ trigger.entity_id|replace('lock.','input_boolean.')|replace('_lock','_lock_jammed')
+                    if trigger.id =='unlock_keypad' else expand('group.door_locks')
+                        |rejectattr('entity_id','eq','lock.garage_door_lock')
+                        |selectattr('state','eq','unlocked')|map(attribute='entity_id')|list
+                        |replace('lock.','input_boolean.')|replace('_lock','_lock_jammed') }}

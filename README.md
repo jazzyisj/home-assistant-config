@@ -1,15 +1,10 @@
 # Home Assistant Configuration
 
-Home Assistant (Hassio) configuration, updated to v2022.4.3
+Home Assistant (Hassio) configuration, updated to v2022.5.3
 
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_4.png)
 
 ## TAGS USED IN CODE
-
-    #INFO - info level log tag
-    #WARNING - warning level log tag
-    #ERROR - error level log tag
-    #CRITICAL - critical level log tag
 
     #TODO - to be completed
     #VERIFY - to be verifed
@@ -22,61 +17,70 @@ Home Assistant (Hassio) configuration, updated to v2022.4.3
     #QUESTION - question I need to answer
     #DELETE - code tagged for deletion
     #DISABLED - disabled code
-    #BUG - unfixable bug in HA/component
+    #BUG - unfixable bug in HA/component/device
     #BUGFIX - workaround for bug
     #NOTE - special notes, unresolvable issue
 
+    #CONFIG - items preventing config check addon completion
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
     #LOCK_USER - new lock user code
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
     #TV - TV notes
-    #VAR - variable notes
     #RADIO - radio issues/notes - temp for streaming radio
     #SPOTIFY - spotify issues/notes
+    #ALARMO - alarmo issues/notes
     #APEX - apex graph issues
     #DARKSKY - darksky code to replace
     #NEST - Nest/Nest Protect issues
-    #BMOD - browser mode attributes missing
+    #MYQ - MyQ issues/notes
+    #MEDIA - media player mini-> hass
+    #BORDER - condition/state-switch - dead space/border
+    #SWIPE - swipe card issues/notes
     #2022.4 - v2202.4 unresolved issue
+
+    #INFO - info level log tag
+    #WARNING - warning level log tag
+    #ERROR - error level log tag
+    #CRITICAL - critical level log tag
 
 ## Entity Counts:
 
     Alarm_control_panel: 3
-    Alert: 107
-    Automation: 693
-    Binary_sensor: 449
-    Button: 58
+    Alert: 106
+    Automation: 764
+    Binary_sensor: 448
+    Button: 60
     Calendar: 11
-    Camera: 20
+    Camera: 11
     Climate: 5
     Counter: 1
     Cover: 1
-    Device_tracker: 60
+    Device_tracker: 61
     Fan: 9
-    Geo_location: 7
+    Geo_location: 69
     Group: 55
-    Input_boolean: 213
+    Input_boolean: 200
     Input_button: 1
     Input_datetime: 38
     Input_number: 191
-    Input_select: 24
+    Input_select: 26
     Input_text: 92
     Light: 44
     Lock: 4
-    Media_player: 33
-    Number: 16
+    Media_player: 29
+    Number: 15
     Person: 2
     Proximity: 2
     Remote: 1
     Scene: 9
-    Script: 74
-    Select: 114
-    Sensor: 935
+    Script: 89
+    Select: 113
+    Sensor: 936
     Sun: 1
-    Switch: 100
+    Switch: 91
     Timer: 54
-    Update: 93
+    Update: 91
     Variable: 1
     Weather: 8
     Zone: 5

@@ -1,0 +1,62 @@
+###############################################################################
+## Garage LED
+###############################################################################
+garage_led:
+  alias: 'Garage LED'
+  description: 'Set led notification.'
+  mode: queued
+  fields:
+    reset:
+      description: 'Reset LED'
+      example: 'true'
+  variables:
+    reset: '{{ reset|default(false) }}'
+    entities: "{{ state_attr('group.garage_led','entity_id') }}"
+    quiet: "{{ is_state('binary_sensor.quiet_time','on') }}"
+    alert_state: >
+      {% if is_state('alert.myq_connected','on')
+          or is_state('alert.myq_bridge_connected','on') %} offline
+      {% elif is_state('input_boolean.garage_door_active_alert','on') %} alert
+      {% elif states('cover.garage_bay_door') in ['open','opening','closing'] %} open
+      {% else %} off
+      {% endif %}
+    duration: >
+      {% if alert_state == 'offline' %} 255
+      {% elif alert_state == 'alert' %} 62
+      {% elif alert_state == 'open' %} 255
+      {% else %} 255
+      {% endif %}
+    color: >
+      {% if alert_state == 'offline' %} 25
+      {% elif alert_state == 'alert' %} 40
+      {% elif alert_state == 'open' %} 40
+      {% else %} 170
+      {% endif %}
+    brightness: "{{ 2 if quiet else (7 if alert_state != 'off' else 3) }}"
+    effect: >
+      {% if alert_state == 'offline' %} pulse
+      {% elif alert_state == 'alert' %} fast blink
+      {% elif alert_state == 'open' %} chase
+      {% else %} off
+        {% endif %}
+  sequence:
+    - choose:
+        - conditions: "{{ alert_state == 'off' and not reset }}"
+          sequence:
+            - service: script.turn_on
+              target:
+                entity_id: script.led_reset
+              data:
+                variables:
+                  entities: '{{ entities }}'
+      default:
+        - service: script.turn_on
+          target:
+            entity_id: script.inovelli_led_control
+          data:
+            variables:
+              entities: '{{ entities }}'
+              duration: '{{ duration }}'
+              color: '{{ color }}'
+              brightness: '{{ brightness }}'
+              effect: '{{ effect }}'

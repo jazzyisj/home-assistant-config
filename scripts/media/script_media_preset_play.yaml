@@ -12,22 +12,21 @@ media_preset_play:
   variables:
     media_type: "{{ states('input_select.media_preset_type_' ~ preset)|slugify }}"
   sequence:
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: switch.system_mute
-              state: 'on'
-          sequence:
-            - service: browser_mod.toast
-              data:
-                message: 'Media preset cannot not be played. System is muted.'
-      default:
-        - choose: # cancel sleep timer if active and not sleep preset
-            - conditions: "{{ preset != 'sleep' and not is_state('timer.media_preset_sleep','idle') }}"
-              sequence:
-                - service: timer.cancel
-                  target:
-                    entity_id: timer.media_preset_sleep
+    - if:
+        - condition: state
+          entity_id: switch.system_mute
+          state: 'on'
+      then:
+        - service: browser_mod.toast
+          data:
+            message: 'Media preset cannot not be played. System is muted.'
+      else:
+        # cancel sleep timer if active and not sleep preset
+        - if: "{{ preset != 'sleep' and not is_state('timer.media_preset_sleep','idle') }}"
+          then:
+            - service: timer.cancel
+              target:
+                entity_id: timer.media_preset_sleep
 
         - service: automation.turn_off
           target:
@@ -37,17 +36,33 @@ media_preset_play:
           data:
             stop_actions: false
 
-        - service: select.select_option # set media player options to preset values
-          target:
-            entity_id: 'select.{{ media_type }}_media_player'
-          data:
-            option: "{{ states('select.media_preset_speaker_' ~ preset) }}"
+        - if: "{{ media_type == 'youtube' }}" #YOUTUBE
+          then:
+            - service: input_select.select_option
+              target:
+                entity_id: input_select.youtube_player_speaker
+              data:
+                option: "{{ states('select.media_preset_speaker_' ~ preset) }}"
+          else:
+            - service: select.select_option # set media player options to preset values
+              target:
+                entity_id: 'select.{{ media_type }}_media_player'
+              data:
+                option: "{{ states('select.media_preset_speaker_' ~ preset) }}"
 
-        - service: select.select_option
-          target:
-            entity_id: 'select.{{ media_type}}_playlist'
-          data:
-            option: "{{ states('select.media_preset_' ~ media_type ~ '_' ~ preset) }}"
+        - if: "{{ media_type == 'youtube' }}" #YOUTUBE
+          then:
+            - service: input_select.select_option
+              target:
+                entity_id: input_select.youtube_player_playlist
+              data:
+                option: "{{ states('select.media_preset_' ~ media_type ~ '_' ~ preset) }}"
+          else:
+            - service: select.select_option
+              target:
+                entity_id: 'select.{{ media_type}}_playlist'
+              data:
+                option: "{{ states('select.media_preset_' ~ media_type ~ '_' ~ preset) }}"
 
         - service: input_number.set_value
           target:
@@ -70,12 +85,12 @@ media_preset_play:
           timeout: 30 # wait for media to start play
           continue_on_timeout: false # don't start timers if media doesn't play
 
-        - choose: # if sleep preset and sleep timer is idle start timer
-            - conditions: "{{ preset == 'sleep' and is_state('timer.media_preset_sleep','idle') }}"
-              sequence:
-                - service: timer.start
-                  target:
-                    entity_id: timer.media_preset_sleep
-                  data:
-                    duration:
-                      minutes: "{{ states('input_number.media_preset_sleep_time')|int(0) }}"
+        # if sleep preset and sleep timer is idle start timer
+        - if: "{{ preset == 'sleep' and is_state('timer.media_preset_sleep','idle') }}"
+          then:
+            - service: timer.start
+              target:
+                entity_id: timer.media_preset_sleep
+              data:
+                duration:
+                  minutes: "{{ states('input_number.media_preset_sleep_time')|int(0) }}"

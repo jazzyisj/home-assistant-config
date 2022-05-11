@@ -7,7 +7,6 @@
   mode: restart
   variables:
     run_delay: 15
-    arm_delay: "{{ state_attr('alarm_control_panel.master','delay')|int(0) }}"
     occupancy_changed: >
       {{ is_state('input_boolean.occupancy_announcements','on')
           and now() - states.input_select.occupancy_mode.last_changed
@@ -16,6 +15,7 @@
       {{ is_state('input_boolean.alarm_announcements','on')
           and now() - states.alarm_control_panel.master.last_changed
             < timedelta(seconds=run_delay) }}
+    zone: "{{ iif(trigger.id in ['armed','disarmed'],trigger.entity_id.split('.')[1],'master') }}"
   trigger:
     - platform: state
       id: occupancy
@@ -29,7 +29,10 @@
 
     - platform: state
       id: armed
-      entity_id: alarm_control_panel.master
+      entity_id:
+        - alarm_control_panel.master
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
       to:
         - armed_home
         - armed_night
@@ -37,7 +40,10 @@
 
     - platform: state
       id: disarmed
-      entity_id: alarm_control_panel.master
+      entity_id:
+        - alarm_control_panel.master
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
       to: disarmed
       from:
         - armed_home
@@ -53,20 +59,27 @@
             if trigger.id == 'disarmed' else true }}
 
     - condition: template
-      alias: 'Presence automation is enabled if occupancy trigger'
+      alias: 'Occupancy override is off if occupancy trigger'
       value_template: >
-        {{ is_state('input_boolean.presence_automation','on')
-              and is_state('input_boolean.occupancy_override','off')
+        {{ is_state('input_boolean.occupancy_override','off')
             if trigger.id == 'occupancy' else true }}
 
     - condition: template
-      alias: 'Alarm automation is enabled if alarm trigger'
+      alias: 'Alarm enabled if alarm trigger'
       value_template: >
-        {{ is_state('input_boolean.alarm_automation','on')
+        {{ is_state('input_boolean.alarm_enabled','on')
             if trigger.id in ['armed','disarmed'] else true }}
 
-    - condition: not
-      conditions:
+    - condition: template
+      alias: 'If not master zone, only if state not same as master'
+      value_template: >
+        {% if trigger.id in ['armed','disarmed'] %}
+          {{ iif(trigger.entity_id != 'alarm_control_panel.master',
+              states(trigger.entity_id) != states('alarm_control_panel.master'),true) }}
+        {% else %} true
+        {% endif %}
+
+    - not:
         - condition: state
           entity_id: alarm_control_panel.master
           state:
@@ -75,21 +88,16 @@
             - arming
   action:
     # allow alarm to enter arming state
-    # allow corresponding occupancy/alarm mode state to set, prevents double tts
+    # allow corresponding occupancy/alarm mode state to set, prevent double tts
     - delay: '{{ run_delay }}'
 
-    - condition: not
-      conditions:
+    - not:
         - condition: state
           entity_id: alarm_control_panel.master
           state:
             - pending
             - triggered
             - arming
-
-    - variables:
-        occupancy_mode: "{{ states('input_select.occupancy_mode') }}"
-        alarm_mode: "{{ states('sensor.master_alarm_status') }}"
 
     - choose:
         - conditions:
@@ -105,11 +113,11 @@
                 variables:
                   message: >
                     {%- if occupancy_changed -%}
-                    The house is now in {{ occupancy_mode }} mode
+                    The house is now in {{ states('input_select.occupancy_mode') }} mode
                     {%- endif %}
                     {%- if occupancy_changed and alarm_changed %}, and the{% elif occupancy_changed %}.{% elif alarm_changed %} The{% endif %}
-                    {%- if alarm_changed %} house alarm is {{ alarm_mode }}.{% endif %}
-                    {{ 'Personalized occupant automations are disabled in Guest mode.' if occupancy_mode == 'Guest' }}
+                    {%- if alarm_changed %} {{ iif(zone != 'master',zone,'') }} alarm is {{ states('sensor.master_alarm_status') }}.{% endif %}
+                    {{ 'Personalized occupant automations are disabled in Guest mode.' if states('input_select.occupancy_mode') == 'Guest' }}
                   ignore_away: true
 
     - choose:
@@ -121,18 +129,22 @@
             - service: notify.mobile
               data:
                 title: "{{ iif(is_state('input_boolean.alarm_triggered','on'),'Alarm Triggered','House Mode') }}"
-                message: >
-                  <b>Mode: {{ occupancy_mode }} | {{ alarm_mode }}</b>
+                message: > #ISSUE font color doesn't work
+                  <b>Occupancy Mode:</b> {{ states('input_select.occupancy_mode') }}
+                  <br/><b>Alarm Status:</b> {{ states('sensor.master_alarm_status') }}
                   {%- if is_state('input_boolean.alarm_triggered','on') -%}
-                    Alarm Trigger: {{ states('input_text.current_alarm') }}
-                    <br/>Disarmed By: {{ states('input_text.alarm_disarmed_by') -}}
-                  {%- else %}
+                    <br/><b>Alarm Trigger</b>: <span style="color:red">{{ states('input_text.current_alarm') }}</span>
+                    <br/><b>Disarmed By</b>: {{ states('input_text.alarm_disarmed_by') -}}
+                  {%- endif %}
+                  {%- if zone != 'master' %}
+                    <br/><b>House Alarm</b>: <span style="color:red">{{ states('sensor.house_alarm_status') }}</span>
+                    <br/><b>Garage Alarm</b>: <span style="color:red">{{ states('sensor.garage_alarm_status') }}</span>
                   {%- endif %}
                   {%- if is_state('binary_sensor.jason_home','on') -%}<br/> Jason is home. {% endif %}
                   {%- if is_state('binary_sensor.sheri_home','on') -%}<br/> Sheri is home. {% endif %}
                   {%- if is_state('input_boolean.guest_home','on') -%}<br/> A guest is home. {% endif %}
                 data:
-                  subject: 'Mode: {{ occupancy_mode }} | Alarm: {{ alarm_mode }}.'
+                  subject: "Occupancy Mode: {{ states('input_select.occupancy_mode') }}"
                   tag: occupancy_notification
                   group: General
                   channel: General

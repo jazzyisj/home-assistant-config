@@ -10,13 +10,10 @@ led_reset:
       description: 'List of one or more LED notification entities to reset.'
       example: 'light.front_porch_light'
   sequence:
-    #VAR variables in sequence to override field
     - variables:
         entities: > # convert to list
-          {% set entities = entities|default(state_attr('group.led_notify','entity_id')) %}
-          {% if entities != none and not (entities is iterable and (entities is not string and entities is not mapping)) %}
-            {% set entities = [entities] %}
-          {% endif %}
+          {% set entities = entities|default(state_attr('group.notify_led','entity_id')) %}
+          {% set entities = expand(entities)|map(attribute='entity_id')|list %}
           {{ entities }}
 
     - condition: template
@@ -27,24 +24,34 @@ led_reset:
         sequence:
           - variables:
               entity: '{{ entities[repeat.index-1] }}'
+              alert_type: > # priority order
+                {% if is_state('binary_sensor.alarm_clock_led_alert','on') and is_state_attr(entity,'alarm_clock_led',true)%} alarm_clock
+                {% elif is_state('binary_sensor.media_led_alert','on') and is_state_attr(entity,'media_led',true) %} media
+                {% elif is_state('binary_sensor.garage_led_alert','on') and is_state_attr(entity,'garage_led',true) %} garage
+                {% elif is_state('input_boolean.shower_scene','on') and is_state_attr(entity,'shower_led',true) %} shower
+                {% elif is_state('binary_sensor.reminder_led_alert','on') and is_state_attr(entity,'reminder_led',true) %} reminder
+                {% elif is_state('binary_sensor.scene_led_alert','on') and is_state_attr(entity,'scene_led',true) %} scene
+                {% elif is_state('binary_sensor.presence_led_alert','on') and is_state_attr(entity,'presence_led',true) %} presence
+                {% elif is_state('binary_sensor.weather_led_alert','on') and is_state_attr(entity,'weather_led',true) %} weather
+                {% elif is_state_attr(entity,'alarm_led',true) %} alarm
+                {% else %} off
+                {% endif %}
 
-          - service: script.turn_on
-            target:
-              entity_id: script.led_notification
-            data:
-              variables:
-                entities: '{{ entity }}'
-                reset: true
-                alert_type: > # priority order
-                  {% if is_state('binary_sensor.alarm_clock_led_alert','on') and is_state_attr(entity,'led_alarm_clock',true)%} alarm_clock
-                  {% elif is_state('binary_sensor.media_led_alert','on') and is_state_attr(entity,'led_media',true) %} media
-                  {% elif is_state('binary_sensor.garage_led_alert','on') and is_state_attr(entity,'led_garage',true) %} garage
-                  {% elif is_state('input_boolean.shower_scene','on') and is_state_attr(entity,'led_shower',true) %} shower
-                  {% elif is_state('binary_sensor.reminder_led_alert','on') and is_state_attr(entity,'led_reminder',true) %} reminder
-                  {% elif is_state('binary_sensor.scene_led_alert','on') and is_state_attr(entity,'led_scene',true) %} scene
-                  {% elif is_state('binary_sensor.presence_led_alert','on') and is_state_attr(entity,'led_presence',true) %} presence
-                  {% elif is_state('binary_sensor.weather_led_alert','on') and is_state_attr(entity,'led_weather',true) %} weather
-                  {% elif is_state_attr(entity,'led_alarm',true) %} alarm
-                  {% else %} off
-                  {% endif %}
-  #TODO WARNING (MainThread) [homeassistant.components.script.led_notification] LED Notification: Disallowed recursion detected
+          - delay:
+              milliseconds: 500
+
+          - choose:
+              - conditions: "{{ alert_type == 'off' }}"
+                sequence:
+                  - service: script.inovelli_led_control
+                    data:
+                      entities: '{{ entity }}'
+                      duration: 255
+                      color: 170
+                      brightness: 5
+                      effect: 'off'
+            default:
+              - service: 'script.{{ alert_type }}_led'
+                data:
+                  entities: '{{ entity }}'
+                  reset: true

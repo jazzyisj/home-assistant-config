@@ -29,56 +29,39 @@
         - 'on'
         - 'off'
 
-    - platform: state # quiet time/occupancy mode may have changed during while offline/disabled
-      entity_id: input_boolean.media_player_automation
-      to: 'on'
-      from: 'off'
-
-    - platform: state # always reset volumes on restart
+    # always reset volumes on restart
+    - platform: state
       entity_id: input_boolean.startup_pending
       to: 'off'
-      from: 'on'
 
-    - platform: state # may have been prevented from running during alarm event
-      entity_id: alarm_control_panel.master
-      to: disarmed
-      from: triggered
+    # may have been prevented from running during alarm event
+    - platform: state
+      entity_id: input_boolean.alarm_triggered
+      to: 'off'
   condition:
-    - condition: state
-      entity_id: input_boolean.media_player_automation
-      state: 'on'
-
     - condition: state
       entity_id: input_boolean.startup_pending
       state: 'off'
   action:
     - choose:
-        - conditions: '{{ media_types|count > 0 }}'
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.mobile_phone_in_use
+              state: 'on'
           sequence:
-            # reset all media type players
-            - repeat:
-                count: '{{ media_types|count }}'
-                sequence:
-                  - variables:
-                      media_type: '{{ media_types[repeat.index -1] }}'
-
-                  - choose:
-                      - conditions:
-                          - condition: state
-                            entity_id: binary_sensor.mobile_phone_in_use
-                            state: 'on'
-                        sequence:
-                          - service: script.media_players_save_volumes # save values to restore when phone off
-                            data:
-                              media_type: '{{ media_type }}'
-                              media_players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','entity_id') }}"
-                              source: reset
-                    default:
-                      - service: script.media_players_set_volumes # set new media volumes
-                        data:
-                          media_type: '{{ media_type }}'
-                          media_players: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','entity_id') }}"
-                          source: reset
+            - service: script.media_players_save_volumes # save values to restore when phone off
+              data:
+                entity_id: >
+                  {{ expand(media_players)|selectattr('state','in',['playing','pause','on'])
+                      |map(attribute='entity_id')|list }}
+                source: reset
+      default:
+        - service: script.media_players_set_volumes # set new media volumes
+          data:
+            entity_id: >
+              {{ expand(media_players)|selectattr('state','in',['playing','pause','on'])
+                  |map(attribute='entity_id')|list }}
+            source: reset
 
     # save new alarm_clock restore volumes if alarm clock is on to restore when alarm clock turns off
     # do this after radio - more recent values for overlapping players
@@ -91,7 +74,7 @@
             - service: script.media_players_save_volumes
               data:
                 media_type: "{{ states('select.alarm_clock_sound_' ~ state_attr('binary_sensor.alarm_clock','alarm_type')) }}"
-                media_players: "{{ state_attr('sensor.alarm_clock_media_player','entity_id') }}"
+                entity_id: "{{ state_attr('sensor.alarm_clock_media_player','entity_id') }}"
                 source: reset
 
     # save new tts volumes if tts on so they are set to new values when tts off
@@ -104,7 +87,7 @@
           sequence:
             - service: script.media_players_save_volumes
               data:
-                media_players: "{{ state_attr('sensor.tts_media_player','entity_id') }}"
+                entity_id: "{{ state_attr('sensor.tts_media_player','entity_id') }}"
                 source: reset
 
     - choose: # reset all other media player volumes
@@ -112,5 +95,5 @@
           sequence:
             - service: script.media_players_set_volumes
               data:
-                media_players: '{{ media_players }}'
+                entity_id: '{{ media_players }}'
                 source: reset

@@ -1,0 +1,60 @@
+###############################################################################
+## Lock - Garage Auto Lock
+###############################################################################
+- id: lock_garage_auto_lock
+  alias: '[Lock] Garage Auto Lock'
+  description: 'Automatically lock garage lock.'
+  mode: queued
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      id: alarm
+      entity_id: alarm_control_panel.garage
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+
+    - platform: state
+      id: lock_keypad
+      entity_id:
+        - sensor.back_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.side_door_lock_status
+      to:
+        - Locked (Keypad)
+        - Locked (Jason)
+        - Locked (Sheri)
+        - Locked (Dawn)
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: lock_all_locks
+  condition:
+    - condition: template
+      alias: 'Alarm enabled if alarm trigger'
+      value_template: "{{ is_state('input_boolean.alarm_enabled','on') if trigger.id == 'alarm' else true }}"
+
+    - condition: template
+      alias: 'A lock is unlocked'
+      value_template: "{{ state_attr('sensor.door_locks','unlocked')|count > 0 }}"
+  action:
+    - repeat:
+        while:
+          - '{{ repeat.index < 4 }}' # try 3 times
+          - "{{ is_state('lock.garage_lock','unlocked') }}"
+        sequence:
+          - service: lock.lock
+            target:
+              entity_id: lock.garage_lock
+
+          - wait_template: "{{ is_state('lock.garage_lock','locked') }}"
+            timeout: 30
+
+    - choose:
+        - conditions: "{{ is_state('lock.garage_lock','unlocked') }}"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.garage_door_lock_jammed
