@@ -166,33 +166,37 @@ fan:
           {{ 'on' if is_state_attr('climate.thermostat','fan_mode','on')
                 or state_attr('climate.thermostat','hvac_action') in ['heating','cooling'] else 'off' }}
         turn_on: # set climate fan mode to on
-          choose:
-            - conditions:
-                - not:
-                    - condition: state
-                      entity_id: climate.thermostat
-                      attribute: fan_mode
-                      state: 'on'
-              sequence:
-                - service: climate.set_fan_mode
-                  target:
+          - if:
+              - not:
+                  - condition: state
                     entity_id: climate.thermostat
-                  data:
-                    fan_mode: 'on'
+                    state:
+                      - heat
+                      - cool
+                      - heat_cool
+            then:
+              - service: script.climate_on
+
+          - delay: 5 # let climate turn on
+
+          - service: climate.set_fan_mode
+            target:
+              entity_id: climate.thermostat
+            data:
+              fan_mode: 'on'
         turn_off: # set climate fan mode to off
-          choose:
-            - conditions:
-                - not:
-                    - condition: state
-                      entity_id: climate.thermostat
-                      attribute: fan_mode
-                      state: 'off'
-              sequence:
-                service: climate.set_fan_mode
-                target:
-                  entity_id: climate.thermostat
-                data:
-                  fan_mode: 'off'
+          - if:
+              - not:
+                  - condition: state
+                    entity_id: climate.thermostat
+                    attribute: fan_mode
+                    state: 'off'
+            then:
+              service: climate.set_fan_mode
+              target:
+                entity_id: climate.thermostat
+              data:
+                fan_mode: 'off'
         speed_count: 2
 
 sensor:
@@ -202,8 +206,8 @@ sensor:
     state: 'on'
     type: time
     start: >
-      {% set start = states('button.hvac_filter_hours_reset') %}
-      {{ iif(start|lower in ['unknown','unavailable','none'],now(),start|as_datetime) }}
+      {% set start = states('button.hvac_filter_reset') %}
+      {{ iif(start in ['unknown','unavailable'],now(),start|as_datetime) }}
     end: '{{ now() }}'
 
   - platform: history_stats
@@ -424,7 +428,7 @@ alert:
     title: 'HVAC Filter Alert'
     message: >
       Filter Hours: {{ states('sensor.hvac_filter_hours')|int }}
-      <br/>Last Changed: {{ states('button.hvac_filter_hours_reset')|as_timestamp|timestamp_custom('%Y-%m-%d',true,none) }}
+      <br/>Last Reset: {{ states('button.hvac_filter_reset')|as_timestamp|timestamp_custom('%Y-%m-%d',true,none) }}
     done_message: clear_notification
     entity_id: binary_sensor.hvac_filter_alert
     state: 'on'
@@ -446,11 +450,11 @@ alert:
       vibrationPattern: !secret ALERT_VIBRATION
       clickAction: /lovelace-mobile/climate
       actions:
-        - title: 'Reset Hours'
+        - title: 'Reset Filter'
           action: call-service
           service: button.press
           service_data:
-            entity_id: button.hvac_filter_hours_reset
+            entity_id: button.hvac_filter_reset
 
   nest_connected:
     name: 'Nest Connected'

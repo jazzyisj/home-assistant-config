@@ -53,19 +53,6 @@ template:
               {{- states('input_number.rgb_green_company')|int }},
               {{- states('input_number.rgb_blue_company')|int }}]
 
-script:
-  set_light_color_company:
-    mode: restart
-    sequence:
-      - condition: template
-        value_template: "{{ states('sensor.rgb_company_scene')|lower not in ['unknown','unavailable','none'] }}"
-
-      - service: light.turn_on
-        target:
-          entity_id: light.dining_room_rgb_light
-        data:
-          rgb_color: "{{ state_attr('sensor.rgb_company_scene','rgb_color') }}"
-
 automation:
   ###############################################################################
   ## Scene - Set Light Color Company
@@ -74,14 +61,26 @@ automation:
     alias: '[Scene] Set Light Color Company'
     mode: restart
     trigger:
-      platform: state
-      entity_id: sensor.rgb_company_scene
+      - platform: state
+        entity_id: sensor.rgb_company_scene
+
+      - platform: state
+        entity_id: input_boolean.company_scene
+        to: 'on'
+        for: 5 # allow reset toggle, light scene on
     condition:
       - condition: state
         entity_id: input_boolean.company_scene
         state: 'on'
     action:
-      - service: script.set_light_color_company
+      - condition: template
+        value_template: "{{ states('sensor.rgb_company_scene') not in ['unknown','unavailable'] }}"
+
+      - service: light.turn_on
+        target:
+          entity_id: light.dining_room_rgb_light
+        data:
+          rgb_color: "{{ state_attr('sensor.rgb_company_scene','rgb_color') }}"
 
   ###############################################################################
   ## Scene - Company Scene On
@@ -95,24 +94,23 @@ automation:
         to: 'on'
         from: 'off'
     action:
-      - choose:
-          - conditions:
-              - condition: state
-                entity_id: input_select.occupancy_mode
-                state:
-                  - Night
-                  - Away
-                  - Vacation
-            sequence:
-              - service: input_boolean.turn_off
-                target:
-                  entity_id: input_boolean.company_scene
+      - if:
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            state:
+              - Night
+              - Away
+              - Vacation
+        then:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.company_scene
 
-              - service: browser_mod.toast
-                data:
-                  message: 'company scene cannot be turned on in Night or Away mode.'
-                  duration: 30000
-        default:
+          - service: browser_mod.toast
+            data:
+              message: 'company scene cannot be turned on in Night or Away mode.'
+              duration: 30000
+        else:
           - variables:
               scene_modes: "{{ ['movie_scene','chill_scene'] }}"
 
@@ -122,12 +120,11 @@ automation:
                 - variables:
                     scene_mode: '{{ scene_modes[repeat.index-1] }}'
 
-                - choose:
-                    - conditions: "{{ is_state('input_boolean.' ~ scene_mode,'on') }}"
-                      sequence:
-                        - service: input_boolean.turn_off
-                          target:
-                            entity_id: 'input_boolean.{{ scene_mode }}'
+                - if: "{{ is_state('input_boolean.' ~ scene_mode,'on') }}"
+                  then:
+                    - service: input_boolean.turn_off
+                      target:
+                        entity_id: 'input_boolean.{{ scene_mode }}'
 
           - service: script.turn_off
             target:
@@ -152,15 +149,14 @@ automation:
             target:
               entity_id: media_player.living_room_tv
 
-          - choose:
-              - conditions:
-                  - condition: state
-                    entity_id: input_boolean.media_preset_enabled_company
-                    state: 'on'
-                sequence:
-                  - service: script.media_preset_play
-                    data:
-                      preset: company
+          - if:
+              - condition: state
+                entity_id: input_boolean.media_preset_enabled_company
+                state: 'on'
+            then:
+              - service: script.media_preset_play
+                data:
+                  preset: company
 
           - service: switch.turn_on
             target:

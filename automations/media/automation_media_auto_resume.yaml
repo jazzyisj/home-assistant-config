@@ -10,7 +10,7 @@
     media_on: "{{ state_attr('binary_sensor.media_on','media_types') }}"
     media_type: >
       {% if trigger.id in ['startup','alarm_clock','tts'] %} all
-      {% else %}
+      {% elif media_types != none %}
         {% for type in media_types %}
           {% if type in trigger.id %}
             {{ type }}
@@ -137,13 +137,12 @@
         - Home
         - Guest
   action:
-    - choose:
-        - conditions: "{{ 'media_player' in trigger.id }}"
-          sequence:
-            # turn off current media players
-            - service: script.media_players_off
-              data:
-                entity_id: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','entity_id') }}"
+    - if: "{{ 'media_player' in trigger.id }}"
+      then:
+        # turn off current media players
+        - service: script.media_players_off
+          data:
+            entity_id: "{{ state_attr('sensor.' ~ media_type ~ '_media_player','entity_id') }}"
 
     - repeat:
         count: "{{ media_on|count if media_type == 'all' else 1 }}"
@@ -151,50 +150,49 @@
           - variables:
               media_type: "{{ media_on[repeat.index -1] if media_type == 'all' else media_type }}"
 
-          - choose:
-              - conditions:
-                  - condition: template
-                    alias: 'Trigger is playlist or player, or media type resume boolean is on'
-                    value_template: >
-                      {{ is_state('input_boolean.resume_' ~ media_type,'on')
-                          or 'media_player' in trigger.id
-                          or 'playlist' in trigger.id }}
+          - if:
+              - condition: template
+                alias: 'Trigger is playlist or player, or media type resume boolean is on'
+                value_template: >
+                  {{ is_state('input_boolean.resume_' ~ media_type,'on')
+                      or 'media_player' in trigger.id
+                      or 'playlist' in trigger.id }}
 
-                  - condition: template
-                    alias: 'Trigger media player is not an active alarm clock media player'
-                    value_template: >
-                      {% set media_sensor ='sensor.' ~ media_type ~ '_media_player' %}
-                      {% set alarm_player = states('sensor.alarm_clock_media_player') %}
-                      {% set alarm_group = state_attr('sensor.alarm_clock_media_player','entity_id') %}
+              - condition: template
+                alias: 'Trigger media player is not an active alarm clock media player'
+                value_template: >
+                  {% set media_sensor ='sensor.' ~ media_type ~ '_media_player' %}
+                  {% set alarm_player = states('sensor.alarm_clock_media_player') %}
+                  {% set alarm_group = state_attr('sensor.alarm_clock_media_player','entity_id') %}
 
-                      {% if is_state('binary_sensor.alarm_clock','off') %} true
-                      {% else %}
-                        {% set found = namespace(value=0) %}
-                        {% set media_player = states(media_sensor) %}
-                        {% set media_group = state_attr(media_sensor,'entity_id') %}
-                        {% if is_state_attr(media_player,'type','group') %}
-                          {% for item in media_group %}
-                            {% if is_state_attr(alarm_player,'type','group') %}
-                              {% for alarm_item in alarm_group %}
-                                {% if alarm_item == item %}{% set found.value = 1 %}{% endif %}
-                              {% endfor %}
-                            {% elif item == alarm_player %}
-                              {% set found.value = 1 %}
-                            {% endif %}
+                  {% if is_state('binary_sensor.alarm_clock','off') %} true
+                  {% else %}
+                    {% set found = namespace(value=0) %}
+                    {% set media_player = states(media_sensor) %}
+                    {% set media_group = state_attr(media_sensor,'entity_id') %}
+                    {% if is_state_attr(media_player,'type','group') %}
+                      {% for item in media_group %}
+                        {% if is_state_attr(alarm_player,'type','group') %}
+                          {% for alarm_item in alarm_group %}
+                            {% if alarm_item == item %}{% set found.value = 1 %}{% endif %}
                           {% endfor %}
-                        {% else %}
-                          {% if is_state_attr(alarm_player,'type','group') %}
-                            {% for alarm_item in alarm_group %}
-                              {% if alarm_item == media_player %}{% set found.value = 1 %}{% endif %}
-                            {% endfor %}
-                          {% elif media_player == alarm_player %}
-                            {% set found.value = 1 %}
-                          {% endif %}
+                        {% elif item == alarm_player %}
+                          {% set found.value = 1 %}
                         {% endif %}
-                        {{ found.value != 1 }}
+                      {% endfor %}
+                    {% else %}
+                      {% if is_state_attr(alarm_player,'type','group') %}
+                        {% for alarm_item in alarm_group %}
+                          {% if alarm_item == media_player %}{% set found.value = 1 %}{% endif %}
+                        {% endfor %}
+                      {% elif media_player == alarm_player %}
+                        {% set found.value = 1 %}
                       {% endif %}
-                sequence:
-                  - service: script.media_play
-                    data:
-                      media_type: '{{ media_type }}'
-                      resume: '{{ trigger.id }}'
+                    {% endif %}
+                    {{ found.value != 1 }}
+                  {% endif %}
+            then:
+              - service: script.media_play
+                data:
+                  media_type: '{{ media_type }}'
+                  resume: '{{ trigger.id }}'

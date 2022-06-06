@@ -14,132 +14,130 @@ bedtime:
     warn_time: "{{ states('input_number.bedtime_warning_time')|int }}"
     night_delay: "{{ states('input_number.night_mode_delay')|int }}"
   sequence:
-    - choose:
-        - conditions:
-            - or:
-                - condition: state
-                  entity_id: binary_sensor.someone_home
-                  state: 'off'
+    - if:
+        - or:
+            - condition: state
+              entity_id: binary_sensor.someone_home
+              state: 'off'
 
-                - not:
-                    - condition: state
-                      entity_id: input_select.occupancy_mode
-                      state:
-                        - Home
-                        - Guest
-
+            - not:
                 - condition: state
-                  entity_id: input_boolean.alarm_triggered # disarms/rearms alarm
-                  state: 'on'
-          sequence:
-            - service: browser_mod.toast
-              data:
-                message: 'Bedtime routine cannot be run.'
-                duration: 30000
-      default:
+                  entity_id: input_select.occupancy_mode
+                  state:
+                    - Home
+                    - Guest
+
+            - condition: state
+              entity_id: input_boolean.alarm_triggered # disarms/rearms alarm
+              state: 'on'
+      then:
+        - service: browser_mod.toast
+          data:
+            message: 'Bedtime routine cannot be run.'
+            duration: 30000
+      else:
         - service: script.turn_off
           target:
             entity_id:
               - script.waketime
               - script.morning_lights
 
-        - choose:
-            - conditions: '{{ warning|default(false) }}'
-              sequence:
-                - service: script.bedtime_notification
+        - if: '{{ warning|default(false) }}'
+          then:
+            - service: script.bedtime_notification
 
-                - service: script.tts_play
-                  data:
-                    quiet_play: true
-                    message: >
-                      {% set waketime = none if states('sensor.next_waketime')|lower in ['unknown','unavailable','none']
-                          else states('sensor.next_waketime')|as_datetime %}
-                      {% set nexttime = none if states('sensor.alarm_clock_next_alarm')|lower in ['unknown','unavailable','none']
-                          else states('sensor.next_waketime')|as_datetime %}
-                      {% set day_reset = today_at(states('input_datetime.day_reset')) %}
-                      {% set wake_display = state_attr('sensor.next_waketime','12hour') %}
-                      {% set source = state_attr('sensor.alarm_clock_next_alarm','source') %}
-                      {%- if is_state('input_boolean.bedtime_delayed','on') %}
-                        It's almost bedtime but you've elected to stay up late tonight.
-                        Turn the bedtime delay off if you've changed your mind and want to go to bed.
-                      {%- else %}
-                        {%- if warn_time > 0 %}
-                        Hey guys, bedtime is in {{ warn_time }} minute{{ 's' if warn_time != 1}}!
-                        Turn on the bedtime delay if you'd like to stay up a bit longer.
-                        {%- endif -%}
+            - service: script.tts_play
+              data:
+                quiet_play: true
+                message: >
+                  {% set waketime = none if states('sensor.next_waketime') in ['unknown','unavailable']
+                      else states('sensor.next_waketime')|as_datetime %}
+                  {% set nexttime = none if states('sensor.alarm_clock_next_alarm') in ['unknown','unavailable']
+                      else states('sensor.next_waketime')|as_datetime %}
+                  {% set day_reset = today_at(states('input_datetime.day_reset')) %}
+                  {% set wake_display = state_attr('sensor.next_waketime','12hour') %}
+                  {% set source = state_attr('sensor.alarm_clock_next_alarm','source') %}
+                  {%- if is_state('input_boolean.bedtime_delayed','on') %}
+                    It's almost bedtime but you've elected to stay up late tonight.
+                    Turn the bedtime delay off if you've changed your mind and want to go to bed.
+                  {%- else %}
+                    {%- if warn_time > 0 %}
+                    Hey guys, bedtime is in {{ warn_time }} minute{{ 's' if warn_time != 1}}!
+                    Turn on the bedtime delay if you'd like to stay up a bit longer.
+                    {%- endif -%}
+                  {%- endif %}
+                  {%- if is_state('binary_sensor.jason_home','on') %}
+                    {%- if is_state('binary_sensor.jason_phone_connected','off') %}
+                      Jason, your mobile phone is not connected.  Did you let the battery die?
+                    {%- elif states('sensor.jphone_battery_level') not in ['unknown','unavailable'] %}
+                      {%- set blev = states('sensor.jphone_battery_level')|int(0) %}
+                      {%- set jbatt_alert = blev < 50 and not is_state('binary_sensor.jphone_is_charging','on') %}
+                      {%- if jbatt_alert %}
+                        Jason you need to plug in your phone. Your battery level is only {{ blev }} percent. {% endif %}
+                    {%- endif %}
+                  {%- endif %}
+                  {%- if is_state('binary_sensor.sheri_home','on') %}
+                    {%- if is_state('binary_sensor.sheri_phone_connected','off') %}
+                      Sheri, your mobile phone is not connected.  Did you let the battery run out?
+                    {%- elif states('sensor.sphone_battery_level') not in ['unknown','unavailable'] %}
+                      {%- set blev = states('sensor.sphone_battery_level')|int(0) %}
+                      {%- set sbatt_alert = blev < 50 and not is_state('binary_sensor.sphone_is_charging','on') %}
+                      {%- if sbatt_alert %}
+                        Sheri! You {%- if jbatt_alert %} also {% endif -%} should plug in your phone luv. Your battery is down to {{ blev }} percent. {% endif %}
+                    {%- endif -%}
+                  {%- endif -%}
+                  {%- if waketime != none and waketime == nexttime %}
+                    Tomorrow's wake time is at {{ wake_display }} and an alarm has been set on
+                    {%- if source == 'Auto' %} the auto alarm clock
+                    {%- elif source == 'Manual' %} the manual alarm clock
+                    {%- elif source == 'Nap' %} the nap alarm clock
+                    {%- elif source == 'Jason Phone' %} Jason's mobile phone
+                    {%- elif source == 'Sheri Phone' %} Sheri's mobile phone
+                    {%- else %} the {{ source }}.
+                    {%- endif -%}
+                    {%- if source in ['Auto','Manual','Nap'] -%}.  The alarm will play on the
+                      {{ states('select.alarm_clock_media_player_' ~ source|lower) }}
+                    {% endif -%}
+                  {%- elif waketime != none %}
+                    Tomorrow's wake time will be at {{ wake_display }}, but there has been no alarm clock set.
+                  {%- elif nexttime != none %}
+                    Tomorrow's alarm clock has been set for {{ state_attr('sensor.alarm_clock_next_alarm','12hour') }} on
+                      {%- if source == 'Jason Phone' %} Jason's mobile phone
+                      {%- elif source == 'Sheri Phone' %} Sheri's mobile phone
+                      {% else %} the {{ source }}.
                       {%- endif %}
-                      {%- if is_state('binary_sensor.jason_home','on') %}
-                        {%- if is_state('binary_sensor.jason_phone_connected','off') %}
-                          Jason, your mobile phone is not connected.  Did you let the battery die?
-                        {%- elif states('sensor.jphone_battery_level')|lower not in ['unknown','unavailable','none'] %}
-                          {%- set blev = states('sensor.jphone_battery_level')|int(0) %}
-                          {%- set jbatt_alert = blev < 50 and not is_state('binary_sensor.jphone_is_charging','on') %}
-                          {%- if jbatt_alert %}
-                            Jason you need to plug in your phone. Your battery level is only {{ blev }} percent. {% endif %}
-                        {%- endif %}
-                      {%- endif %}
-                      {%- if is_state('binary_sensor.sheri_home','on') %}
-                        {%- if is_state('binary_sensor.sheri_phone_connected','off') %}
-                          Sheri, your mobile phone is not connected.  Did you let the battery run out?
-                        {%- elif states('sensor.sphone_battery_level')|lower not in ['unknown','unavailable','none'] %}
-                          {%- set blev = states('sensor.sphone_battery_level')|int(0) %}
-                          {%- set sbatt_alert = blev < 50 and not is_state('binary_sensor.sphone_is_charging','on') %}
-                          {%- if sbatt_alert %}
-                            Sheri! You {%- if jbatt_alert %} also {% endif -%} should plug in your phone luv. Your battery is down to {{ blev }} percent. {% endif %}
-                        {%- endif -%}
-                      {%- endif -%}
-                      {%- if waketime != none and waketime == nexttime %}
-                        Tomorrow's wake time is at {{ wake_display }} and an alarm has been set on
-                        {%- if source == 'Auto' %} the auto alarm clock
-                        {%- elif source == 'Manual' %} the manual alarm clock
-                        {%- elif source == 'Nap' %} the nap alarm clock
-                        {%- elif source == 'Jason Phone' %} Jason's mobile phone
-                        {%- elif source == 'Sheri Phone' %} Sheri's mobile phone
-                        {%- else %} the {{ source }}.
-                        {%- endif -%}
-                        {%- if source in ['Auto','Manual','Nap'] -%}.  The alarm will play on the
-                          {{ states('select.alarm_clock_media_player_' ~ source|lower) }}
-                        {% endif -%}
-                      {%- elif waketime != none %}
-                        Tomorrow's wake time will be at {{ wake_display }}, but there has been no alarm clock set.
-                      {%- elif nexttime != none %}
-                        Tomorrow's alarm clock has been set for {{ state_attr('sensor.alarm_clock_next_alarm','12hour') }} on
-                          {%- if source == 'Jason Phone' %} Jason's mobile phone
-                          {%- elif source == 'Sheri Phone' %} Sheri's mobile phone
-                          {% else %} the {{ source }}.
-                          {%- endif %}
-                      {%- endif %}
+                  {%- endif %}
 
-                      {%- if waketime == none
-                          or ((now() > waketime and is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_morning','off'))
-                          or (now() < waketime and is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','off'))
-                          or (now() > waketime and is_state('binary_sensor.work_tomorrow','off') and is_state('input_boolean.weekend_morning','off'))
-                          or (now() < waketime and is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','off'))
-                          or ( is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_morning','off'))) %}
-                        Just a heads up,
-                        {{- ' there is no wake time set for tomorrow, so the ' if wake_display == 'off' else ' the ' }}
-                        morning routine has been disabled. Don't forget to set the occupancy mode and disarm the house alarm in the morning!
-                      {%- endif %}
-                      The weather forecast is calling for {{ states('sensor.dark_sky_daily_summary') }}
-                      {% if now() >= day_reset and is_state_attr('sensor.next_garbage_day','display','Tomorrow')
-                            or now() < day_reset and is_state_attr('sensor.next_garbage_day','display','Today')
-                          and is_state('input_boolean.garbage_alert','on') %}
-                        Oh. And Jason, one last thing.  Did you remember to take out the garbage today?
-                      {%- endif %}
-                      {% if now() >= day_reset and is_state_attr('sensor.next_recycle_day','display','Tomorrow')
-                            or now() < day_reset and is_state_attr('sensor.next_recycle_day','display','Today')
-                          and is_state('input_boolean.recycle_alert','on') %}
-                        Oh. And Jason, one last thing .  Did you remember to take out the recycle today?
-                      {%- endif %}
-                      {% if now() >= day_reset and is_state_attr('sensor.next_yardwaste_day','display','Tomorrow')
-                            or now() < day_reset and is_state_attr('sensor.next_yardwaste_day','display','Today')
-                          and is_state('input_boolean.yardwaste_alert','on') %}
-                        Oh. And Jason, one last thing.  Did you remember to take out the yard waste today?
-                      {%- endif %}
+                  {%- if waketime == none
+                      or ((now() > waketime and is_state('binary_sensor.work_tomorrow','on') and is_state('input_boolean.workday_morning','off'))
+                      or (now() < waketime and is_state('binary_sensor.work_today','on') and is_state('input_boolean.workday_morning','off'))
+                      or (now() > waketime and is_state('binary_sensor.work_tomorrow','off') and is_state('input_boolean.weekend_morning','off'))
+                      or (now() < waketime and is_state('binary_sensor.work_today','off') and is_state('input_boolean.weekend_morning','off'))
+                      or ( is_state('binary_sensor.owner_home','off') and is_state('input_boolean.guest_morning','off'))) %}
+                    Just a heads up,
+                    {{- ' there is no wake time set for tomorrow, so the ' if wake_display == 'off' else ' the ' }}
+                    morning routine has been disabled. Don't forget to set the occupancy mode and disarm the house alarm in the morning!
+                  {%- endif %}
+                  The weather forecast is calling for {{ states('sensor.dark_sky_daily_summary') }}
+                  {% if now() >= day_reset and is_state_attr('sensor.next_garbage_day','display','Tomorrow')
+                        or now() < day_reset and is_state_attr('sensor.next_garbage_day','display','Today')
+                      and is_state('input_boolean.garbage_alert','on') %}
+                    Oh. And Jason, one last thing.  Did you remember to take out the garbage today?
+                  {%- endif %}
+                  {% if now() >= day_reset and is_state_attr('sensor.next_recycle_day','display','Tomorrow')
+                        or now() < day_reset and is_state_attr('sensor.next_recycle_day','display','Today')
+                      and is_state('input_boolean.recycle_alert','on') %}
+                    Oh. And Jason, one last thing .  Did you remember to take out the recycle today?
+                  {%- endif %}
+                  {% if now() >= day_reset and is_state_attr('sensor.next_yardwaste_day','display','Tomorrow')
+                        or now() < day_reset and is_state_attr('sensor.next_yardwaste_day','display','Today')
+                      and is_state('input_boolean.yardwaste_alert','on') %}
+                    Oh. And Jason, one last thing.  Did you remember to take out the yard waste today?
+                  {%- endif %}
 
-                - wait_template: "{{ is_state('input_boolean.bedtime_delayed','on') }}"
-                  timeout:
-                    minutes: '{{ warn_time }}'
+            - wait_template: "{{ is_state('input_boolean.bedtime_delayed','on') }}"
+              timeout:
+                minutes: '{{ warn_time }}'
 
         - condition: state
           entity_id: input_boolean.bedtime_delayed
@@ -154,27 +152,26 @@ bedtime:
             quiet_play: true
             media_player: media_player.dining_room_hub
 
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: timer.dining_room_light
-                  state: idle
+        - if:
+            - condition: state
+              entity_id: timer.dining_room_light
+              state: idle
 
-                - condition: template
-                  value_template: >
-                    {% if is_number(state_attr('light.dining_room_rgb_light','brightness'))
-                        and is_number(state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')) %}
-                      {{ state_attr('light.dining_room_rgb_light','brightness')|int
-                          < (state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')|int * 2.55)|int }}
-                    {% else %} true
-                    {% endif %}
-              sequence:
-                - service: light.turn_on
-                  target:
-                    entity_id: light.dining_room_rgb_light
-                  data:
-                    brightness: 5
-                    transition: 3
+            - condition: template
+              value_template: >
+                {% if is_number(state_attr('light.dining_room_rgb_light','brightness'))
+                    and is_number(state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')) %}
+                  {{ state_attr('light.dining_room_rgb_light','brightness')|int
+                      < (state_attr('switch.adaptive_lighting_rgb_lights','brightness_pct')|int * 2.55)|int }}
+                {% else %} true
+                {% endif %}
+          then:
+            - service: light.turn_on
+              target:
+                entity_id: light.dining_room_rgb_light
+              data:
+                brightness: 5
+                transition: 3
 
         # delay before night mode, last chance to turn bedtime delay on
         - wait_template: "{{ is_state('input_boolean.bedtime_delayed','on') }}"
@@ -199,22 +196,21 @@ bedtime:
           data:
             option: Night
 
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: input_boolean.media_preset_enabled_sleep
-                  state: 'on'
+        - if:
+            - condition: state
+              entity_id: input_boolean.media_preset_enabled_sleep
+              state: 'on'
 
-                - condition: template
-                  alias: 'Less than night mode delay + 5 minutes after bedtime'
-                  value_template: >
-                    {% set bedtime = states('sensor.bedtime_today') %}
-                    {% if bedtime|lower not in ['unknown','unavailable','none'] %}
-                      {{ now() < bedtime|as_datetime + timedelta(minutes=night_delay + 5) }}
-                    {% endif %}
-              sequence:
-                - delay: 60 # delay until after night mode/media players auto off
+            - condition: template
+              alias: 'Less than night mode delay + 5 minutes after bedtime'
+              value_template: >
+                {% set bedtime = states('sensor.bedtime_today') %}
+                {% if bedtime not in ['unknown','unavailable'] %}
+                  {{ now() < bedtime|as_datetime + timedelta(minutes=night_delay + 5) }}
+                {% endif %}
+          then:
+            - delay: 60 # delay until after night mode/media players auto off
 
-                - service: script.media_preset_play
-                  data:
-                    preset: sleep
+            - service: script.media_preset_play
+              data:
+                preset: sleep

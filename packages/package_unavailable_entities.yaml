@@ -1,6 +1,6 @@
 ###################################################################################################
 ## Package - Unavailable Entities Sensor
-## Count and list entities with a state of unavailable, unknown, or none (null)
+## Count and list entities with a state of unavailable or unknown
 ## See README for customization options.
 ## https://github.com/jazzyisj/unavailable-entities-sensor/blob/main/README.md
 ###################################################################################################
@@ -11,11 +11,11 @@ template:
   - sensor:
       - name: 'Unavailable Entities'
         unique_id: unavailable_entities
-        icon: "{{ 'mdi:alert-circle' if states('sensor.unavailable_entities')|int(0) > 0 else 'mdi:check-circle' }}"
+        icon: "{{ iif(states(this.entity_id)|int(0) > 0,'mdi:alert-circle','mdi:check-circle') }}"
         unit_of_measurement: entities
         state: >
-          {% if state_attr('sensor.unavailable_entities','entity_id') != none %}
-            {{ state_attr('sensor.unavailable_entities','entity_id')|count }}
+          {% if state_attr(this.entity_id,'entity_id') != none %}
+            {{ state_attr(this.entity_id,'entity_id')|count }}
           {% endif %}
         attributes:
           entity_id: >
@@ -36,7 +36,6 @@ template:
 #   ignored_unavailable_entities:
 #     entities:
 #       - sensor.unavailable_entities # prevent template loop warnings?
-#       - binary_sensor.updater # always unknown after restart
 
 # OPTIONAL - filter template loop warnings from the Home Assistant log.
 # logger:
@@ -48,11 +47,12 @@ template:
 automation:
   - id: unavailable_entities_notification
     alias: 'Unavailable Entities Notification'
-    description: 'Create persistent notification if there are unavailable entities, dismiss if none.'
+    description: 'Create persistent notification if unavailable entities, dismiss if none.'
     mode: restart
     trigger:
       - platform: state
         entity_id: sensor.unavailable_entities
+        attribute: entity_id
         to: ~
     condition:
       - condition: template
@@ -60,20 +60,17 @@ automation:
           {{ is_number(trigger.from_state.state)
               and is_number(trigger.to_state.state) }}
     action:
-      - choose:
-          conditions:
-            - condition: numeric_state
-              entity_id: sensor.unavailable_entities
-              below: 1
-          sequence:
-            - service: persistent_notification.dismiss
-              data:
-                notification_id: unavailable_entities
-        default:
+      - if:
+          - condition: numeric_state
+            entity_id: sensor.unavailable_entities
+            below: 1
+        then:
+          - service: persistent_notification.dismiss
+            data:
+              notification_id: unavailable_entities
+        else:
           - service: persistent_notification.create
             data:
               title: 'Unavailable Entities'
-              message: >
-                - {{ expand(state_attr('sensor.unavailable_entities','entity_id'))
-                      |map(attribute='entity_id')|join('\n- ') }}
+              message: "- {{ state_attr('sensor.unavailable_entities','entity_id')|join('\n- ') }}"
               notification_id: unavailable_entities

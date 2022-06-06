@@ -24,13 +24,12 @@ media_players_save_volumes:
       description: 'Volume to save'
       example: '0.5'
   variables:
+    media_type: '{{ media_type|default(none) }}'
+    volume: '{{ volume|default(-1) }}'
     media_players: >
-      {% set media_players = entity_id|default(state_attr('group.media_players','entity_id')) %}
+      {% set media_players = entity_id|default(state_attr('group.single_media_players','entity_id')) %}
       {% set media_players = expand(media_players)|map(attribute='entity_id')|list %}
       {{ media_players }}
-    media_type: '{{ media_type|default(none) }}'
-    media_types: "{{ state_attr('sensor.media_types','media_types') }}"
-    volume: '{{ volume|default(-1) }}'
   sequence:
     - condition: template
       value_template: '{{ media_players|count > 0 }}'
@@ -48,22 +47,23 @@ media_players_save_volumes:
                 {% else %} input_number.{{ player_name ~ '_' ~ source }}
                 {% endif %}
               default_volume: > # volume default 0.5/0.5 = 1 (no adjustment)
-                {% set volume = states('input_number.' ~ player_name ~ '_default_volume')|float(-1) %}
-                {{ volume if volume > 0 else 0.5 }}
+                {% set dv = states('input_number.' ~ player_name ~ '_default_volume')|float(-1) %}
+                {{ dv if dv > 0 else 0.5 }}
               volume_factor: >
-                {% if default_volume > 0 and is_state('input_boolean.volume_balancing','on') %}
+                {% if is_state('input_boolean.volume_balancing','on') %}
                   {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor')|float }}
                 {% else %} 1 {# no adjustment #}
                 {% endif %}
               media_adjustment: >
-                {% if media_type in media_types and is_state('input_boolean.media_type_volume_adjustments','on') %}
+                {% if media_type in state_attr('sensor.media_types','media_types')
+                    and is_state('input_boolean.media_type_volume_adjustments','on') %}
                   {% set media_type =  ('spotify' if 'spotify' in media_type else media_type) %}
                   {{ 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(-1) }}
                 {% else %} 1 {# no adjustment #}
                 {% endif %}
               # if tts and phone one, use phone vols for tts restore in case phone off before tts
               current_volume: >
-                {% if volume >= 0 %}
+                {% if volume > -1 %}
                   {{ volume * media_adjustment * volume_factor }}
                 {% elif source == 'tts' and is_state('binary_sensor.mobile_phone_in_use','on') %}
                   {{ states('input_number.' ~ player_name ~ '_phone')|float(-1) }}
@@ -71,28 +71,26 @@ media_players_save_volumes:
                   {{ states('input_number.' ~ player_name ~ '_current_volume')|float(-1) }}
                 {% endif %}
               quiet_volume: >
-                {% set volume = (states('input_number.tv_quiet_volume')|int/100)|float(-1)
+                {% set qv = (states('input_number.tv_quiet_volume')|int/100)|float(-1)
                     if state_attr(player,'device_class') == 'tv'
                       else (states('input_number.speaker_quiet_volume')|int/100)|float(-1) %}
-                {{ volume * media_adjustment * volume_factor }}
+                {{ qv * media_adjustment * volume_factor }}
               save_volume: >
                 {% if source == 'reset' %}
                   {% if is_state('binary_sensor.quiet_time','on') %}
-                    {% set volume = quiet_volume if current_volume > quiet_volume else current_volume
+                    {% set sv = quiet_volume if current_volume > quiet_volume else current_volume
                         if current_volume > 0 and states(player) in ['on','playing','paused'] else quiet_volume %}
                   {% else %}
-                    {% set volume = current_volume if states(player) in ['on','playing','paused'] else default_volume %}
+                    {% set sv = current_volume if states(player) in ['on','playing','paused'] else default_volume %}
                   {% endif %}
-                  {{ volume }}
-                {% else %} {% set volume = current_volume %}
+                {% else %} {% set sv = current_volume %}
                 {% endif %}
-                {{ 1.00 if volume > 1 else 0 if volume < 0 else '%0.2f'|format(volume)|float(-1) }}
+                {{ 1.00 if sv > 1 else 0 if sv < 0 else '%0.2f'|format(sv)|float(-1) }}
 
-          - choose:
-              - conditions: '{{ save_volume >= 0 }}'
-                sequence:
-                  - service: input_number.set_value
-                    target:
-                      entity_id: '{{ volume_entity }}'
-                    data:
-                      value: '{{ save_volume }}'
+          - if: '{{ save_volume > -1 }}'
+            then:
+              - service: input_number.set_value
+                target:
+                  entity_id: '{{ volume_entity }}'
+                data:
+                  value: '{{ save_volume }}'

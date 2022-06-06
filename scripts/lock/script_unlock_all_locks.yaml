@@ -11,54 +11,52 @@ unlock_all_locks:
       description: 'Override alarm.'
       example: 'true'
   sequence:
-    - choose:
-        - conditions:
-            - or:
-                - condition: template
-                  value_template: '{{ override|default(false) }}'
+    - if:
+        - or:
+            - condition: template
+              value_template: '{{ override|default(false) }}'
 
-                - condition: state
-                  entity_id: alarm_control_panel.house
-                  state:
-                    - disarmed
-                    - armed_home
-          sequence:
-            - choose:
-                - conditions:
-                    - condition: state
-                      entity_id: binary_sensor.door_lock_jammed
-                      state: 'on'
-                  sequence:
-                    - service: input_boolean.turn_off
-                      target:
-                        entity_id: >
-                          {{ states.input_boolean|selectattr('entity_id','search','_door_lock_jammed')
-                              |selectattr('state','eq','on')|map(attribute='entity_id')|list }}
+            - condition: state
+              entity_id: alarm_control_panel.house
+              state:
+                - disarmed
+                - armed_home
+      then:
+        - if:
+            - condition: state
+              entity_id: binary_sensor.door_lock_jammed
+              state: 'on'
+          then:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: >
+                  {{ states.input_boolean|selectattr('entity_id','search','_door_lock_jammed')
+                      |selectattr('state','eq','on')|map(attribute='entity_id')|list }}
 
-            - repeat: # try 3 times if a lock is still locked
-                while: "{{ state_attr('sensor.door_locks','locked')|count > 0 and repeat.index < 4 }}"
-                sequence:
-                  - service: lock.unlock
-                    target:
-                      entity_id: "{{ state_attr('sensor.door_locks','locked') }}"
+        - repeat: # try 3 times if a lock is still locked
+            while: "{{ state_attr('sensor.door_locks','locked')|count > 0 and repeat.index < 4 }}"
+            sequence:
+              - service: lock.unlock
+                target:
+                  entity_id: "{{ state_attr('sensor.door_locks','locked') }}"
 
-                  - wait_template: "{{ state_attr('sensor.door_locks','locked')|count == 0 }}"
-                    timeout: 30
-            - choose:
-                - conditions: "{{ state_attr('sensor.door_locks','locked')|count != 0 }}"
-                  sequence:
-                    - service: input_boolean.turn_on
-                      target: # turn on jammed boolean for any locks that didn't lock
-                        entity_id: >
-                          {{ state_attr('sensor.door_locks','locked')
-                              |replace('lock.','input_boolean.')|replace('_door_lock','_door_lock_jammed') }}
-              default:
-                - service: script.tts_play
-                  data:
-                    message: 'All entry doors are now unlocked.'
-                    quiet_play: true
-                    ignore_away: true
-      default:
+              - wait_template: "{{ state_attr('sensor.door_locks','locked')|count == 0 }}"
+                timeout: 30
+
+        - if: "{{ state_attr('sensor.door_locks','locked')|count != 0 }}"
+          then:
+            - service: input_boolean.turn_on
+              target: # turn on jammed boolean for any locks that didn't lock
+                entity_id: >
+                  {{ state_attr('sensor.door_locks','locked')
+                      |replace('lock.','input_boolean.')|replace('_door_lock','_door_lock_jammed') }}
+          else:
+            - service: script.tts_play
+              data:
+                message: 'All entry doors are now unlocked.'
+                quiet_play: true
+                ignore_away: true
+      else:
         - service: script.tts_play
           data:
             message: 'Doors cannot be unlocked while the house alarm is armed!  Disarm the alarm and try again.'

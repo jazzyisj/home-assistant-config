@@ -50,26 +50,35 @@ spotify_play:
         category: >
           {% set category = namespace(value=none) %}
           {% set categories = state_attr('sensor.spotify_categories','categories') %}
-          {% for item in categories %}
-            {% if item.name == states('select.spotify_' ~ account ~ '_playlist') %}
-              {% set category.value = item.category %}
-            {% endif %}
-          {% endfor %}
-          {{ category.value }}
-        uri: >
-          {% if category == none %}
-            {% set playlists = state_attr('sensor.playlists_sensor' if account == 'hassio'
-                else 'sensor.playlists_sensor_' ~ account,'playlists') %}
-            {% for item in playlists %}
-              {% if item.name == playlist %}
-                {{ item.uri }}
+          {% if categories != none %}
+            {% for item in categories %}
+              {% if item.name == states('select.spotify_' ~ account ~ '_playlist') %}
+                {% set category.value = item.category %}
               {% endif %}
             {% endfor %}
-          {% else %} {{ none }}
           {% endif %}
+          {{ category.value }}
+        uri: >
+          {% set uri = namespace(value=none) %}
+          {% if category == none %}
+            {% set playlists = state_attr(iif(account == 'hassio','sensor.playlists_sensor',
+                'sensor.spotify_' ~ account ~ '_playlists'),'playlists') %}
+            {% if playlists != none %}
+              {% for item in playlists %}
+                {% if item.name == playlist %}
+                  {% set uri.value = item.uri %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+          {% endif %}
+          {{ uri.value }}
+
+    # resume from playlist change / alarm clock changed playlist
     - choose:
-        # playlist change, alarm clock may have changed playlist
-        - conditions: "{{ resume in ['playlist','alarm_clock'] }}"
+        - conditions: >
+            {% if resume != false %}
+              {{ 'playlist' in resume or resume == 'alarm_clock' }}
+            {% endif %}
           sequence:
             - service: spotcast.start
               data:
@@ -81,7 +90,8 @@ spotify_play:
                 ignore_fully_played: true
                 force_playback: true
 
-        - conditions: '{{ resume != false }}' # any other resume
+        # any other resume
+        - conditions: '{{ resume != false }}'
           sequence:
             - service: spotcast.start
               data:

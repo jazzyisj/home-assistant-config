@@ -36,7 +36,6 @@ Home Assistant (Hassio) configuration, updated to v2022.5.3
     #MYQ - MyQ issues/notes
     #MEDIA - media player mini-> hass
     #BORDER - condition/state-switch - dead space/border
-    #SWIPE - swipe card issues/notes
     #2022.4 - v2202.4 unresolved issue
 
     #INFO - info level log tag
@@ -48,39 +47,39 @@ Home Assistant (Hassio) configuration, updated to v2022.5.3
 
     Alarm_control_panel: 3
     Alert: 106
-    Automation: 764
-    Binary_sensor: 448
-    Button: 60
-    Calendar: 11
+    Automation: 768
+    Binary_sensor: 430
+    Button: 64
+    Calendar: 16
     Camera: 11
     Climate: 5
     Counter: 1
-    Cover: 1
-    Device_tracker: 61
+    Cover: 2
+    Device_tracker: 67
     Fan: 9
-    Geo_location: 69
-    Group: 55
+    Geo_location: 30
+    Group: 58
     Input_boolean: 200
     Input_button: 1
     Input_datetime: 38
-    Input_number: 191
+    Input_number: 192
     Input_select: 26
-    Input_text: 92
-    Light: 44
+    Input_text: 94
+    Light: 48
     Lock: 4
-    Media_player: 29
-    Number: 15
+    Media_player: 47
+    Number: 49
     Person: 2
     Proximity: 2
     Remote: 1
     Scene: 9
-    Script: 89
-    Select: 113
-    Sensor: 936
+    Script: 88
+    Select: 117
+    Sensor: 999
     Sun: 1
-    Switch: 91
+    Switch: 129
     Timer: 54
-    Update: 91
+    Update: 94
     Variable: 1
     Weather: 8
     Zone: 5
@@ -97,6 +96,7 @@ Home Assistant (Hassio) configuration, updated to v2022.5.3
 - InfluxDB
 - Log Viewer
 - MariaDB
+- Mopidy
 - MaryTTS
 - motionEye
 - Mosquitto broker
