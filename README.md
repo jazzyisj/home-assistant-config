@@ -21,7 +21,6 @@ Home Assistant (Hassio) configuration, updated to v2022.5.3
     #BUGFIX - workaround for bug
     #NOTE - special notes, unresolvable issue
 
-    #CONFIG - items preventing config check addon completion
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
     #LOCK_USER - new lock user code
@@ -86,7 +85,6 @@ Home Assistant (Hassio) configuration, updated to v2022.5.3
 
 ## Installed Addons
 
-- Check Home Assistant configuration
 - Chrony
 - File editor
 - Frigate NVR
@@ -96,7 +94,6 @@ Home Assistant (Hassio) configuration, updated to v2022.5.3
 - InfluxDB
 - Log Viewer
 - MariaDB
-- Mopidy
 - MaryTTS
 - motionEye
 - Mosquitto broker

@@ -1,0 +1,117 @@
+###############################################################################
+## Weather EnvCan Weather Alert
+###############################################################################
+- id: weather_envcan_weather_alert
+  alias: "[Weather] EnvCan Weather Alert"
+  description: "Display weather alert on UI, play alert/announcement for severe alerts."
+  mode: restart
+  trigger:
+    - platform: state
+      id: "sensor"
+      entity_id:
+        - sensor.windsor_warnings
+        - sensor.windsor_watches
+        - sensor.windsor_statements
+        - sensor.windsor_advisories
+      to: ~
+  condition:
+    - condition: template
+      alias: "If alert sensor trigger to and from states are not equal "
+      # prevent trigger on no alert updates
+      value_template: "{{ trigger.from_state.state != trigger.to_state.state if trigger == 'sensor' else true }}"
+  action:
+    # clear alert title/severity if no active alerts
+    - if:
+        - condition: state
+          entity_id: binary_sensor.envcan_weather_alert
+          state: "off"
+      then:
+        - service: notify.mobile
+          data:
+            message: clear_notification
+            data:
+              tag: envcan_alert
+
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.previous_envcan_alert_title
+          data:
+            value: ""
+
+        - service: input_select.select_option
+          target:
+            entity_id: input_select.previous_envcan_alert_severity
+          data:
+            option: none
+      else:
+        - if:
+            - or:
+                - condition: template
+                  alias: "Current alert is more severe than previous alert"
+                  value_template: >
+                    {% set previous = states('input_select.previous_envcan_alert_severity') %}
+                    {% set current = state_attr('binary_sensor.envcan_weather_alert','severity') %}
+                    {% if current != none %}
+                      {{ (previous == 'watch' and current == 'warning')
+                            or (previous == 'advisory' and current in ['warning','watch'])
+                            or (previous == 'statement' and current in ['warning','watch','advisory'])
+                            or (previous in ['none','unknown','unavailable']
+                              and current in ['warning','watch','advisory','statement']) }}
+                    {% endif %}
+
+                - condition: template
+                  alias: "Alert title has changed and is not null"
+                  value_template: >
+                    {% set previous = states('input_text.previous_envcan_alert_title') %}
+                    {% set current = state_attr('binary_sensor.envcan_weather_alert','title') %}
+                    {{ previous != current and current != none }}
+          then:
+            - service: notify.mobile
+              data:
+                title: "{{ state_attr('binary_sensor.envcan_weather_alert','title') }}"
+                message: >
+                  {% set msg = state_attr('binary_sensor.envcan_weather_alert','description') %}
+                  {{ iif(msg == none,'',msg) }}
+                data:
+                  tag: envcan_alert
+                  group: General
+                  channel: Alert
+                  importance: max
+                  ttl: 0
+                  priority: high
+                  notification_icon: "{{ states.binary_sensor.envcan_weather_alert.attributes.icon }}"
+                  icon_url: !secret STORM_ICON
+                  ledColor: !secret WEATHER_COLOR
+                  color: !secret WEATHER_COLOR
+                  vibrationPattern: !secret ALERT_VIBRATION
+                  clickAction: !secret ENVCAN_ALERTS
+
+            - service: script.tts_play
+              data:
+                message: >
+                  {% set title = state_attr('binary_sensor.envcan_weather_alert','title') %}
+                  {% set expires = state_attr('binary_sensor.envcan_weather_alert','expires_text') %}
+                  {% set description = state_attr('binary_sensor.envcan_weather_alert','description') %}
+                  Attention!  Weather Alert!
+                  Environment Canada has issued a {{ title }} for your immediate area
+                  {%- if expires != none -%}
+                  , until {{ expires }}
+                  {%- endif %}.
+                  {% if description != none -%}
+                    {{ description.split('.')[0] }}
+                  {% endif %}
+                quiet_play: "{{ state_attr('binary_sensor.envcan_weather_alert','severity') in ['warning','watch'] }}"
+                save_message: true
+
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.previous_envcan_alert_title
+          data:
+            value: "{{ state_attr('binary_sensor.envcan_weather_alert','title') }}"
+
+        # severity attribute will always be most severe current alert
+        - service: input_select.select_option
+          target:
+            entity_id: input_select.previous_envcan_alert_severity
+          data:
+            option: "{{ state_attr('binary_sensor.envcan_weather_alert','severity') }}"

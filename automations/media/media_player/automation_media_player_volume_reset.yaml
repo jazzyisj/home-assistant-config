@@ -1,96 +1,78 @@
 ###############################################################################
 ## Media Player - Volume Reset
+#BUG #TV webOS TV's excluded - don't report volume level - volume gets set to 0
 ###############################################################################
 - id: media_player_volume_reset
-  alias: '[Media Player] Volume Reset'
-  description: 'Reset media player volumes when home mode or quiet time change.'
-  mode: restart
+  alias: "[Media Player] Volume Reset"
+  description: "Reset media player volumes when home mode or quiet time change."
+  max_exceeded: silent
   variables:
-    media_types: "{{ state_attr('binary_sensor.media_on','media_types')|default([]) }}"
-    #BUG #TV webOS TV's don't report volume level - volume gets set to 0
-    media_players: >
-      {% set media_players = state_attr('group.single_media_players','entity_id') %}
-      {% set other_players = namespace(value=[]) %}
-      {% for media_type in media_types %}
-        {% set other_players.value = other_players.value
-          + expand(state_attr('sensor.' ~ media_type ~ '_media_player','entity_id'))
-            |map(attribute='entity_id')|list %}
-      {% endfor %}
-      {{ expand(media_players)|rejectattr('entity_id','in',other_players.value)
+    active_players: >
+      {{ expand('group.single_media_players')|selectattr('state','in',['playing','pause','on'])
           |map(attribute='entity_id')|list }}
-  #NOTE also called by automation.trigger
-  trigger:
-    - platform: state # reset when quiet time turns on or off
+    inactive_players: >
+      {{ expand('group.single_media_players')|selectattr('state','in',['off','idle','home','standby'])
+          |map(attribute='entity_id')|list }}
+  trigger: # also called by automation.trigger
+    - platform: state
       entity_id: binary_sensor.quiet_time
       to:
-        - 'on'
-        - 'off'
+        - "on"
+        - "off"
       from:
-        - 'on'
-        - 'off'
-
-    # always reset volumes on restart
-    - platform: state
-      entity_id: input_boolean.startup_pending
-      to: 'off'
-
-    # may have been prevented from running during alarm event
-    - platform: state
-      entity_id: input_boolean.alarm_triggered
-      to: 'off'
+        - "on"
+        - "off"
   condition:
-    - condition: state
-      entity_id: input_boolean.startup_pending
-      state: 'off'
+    - not:
+        - condition: state
+          entity_id: group.single_media_players
+          state:
+            - unknown
+            - unavailable
   action:
     - if:
         - condition: state
           entity_id: binary_sensor.mobile_phone_in_use
-          state: 'on'
+          state: "on"
       then:
-        - service: script.media_players_save_volumes # save values to restore when phone off
+        - alias: "Store new volumes for active players to restore when phone turns off"
+          service: script.media_players_save_volumes
           data:
-            entity_id: >
-              {{ expand(media_players)|selectattr('state','in',['playing','pause','on'])
-                  |map(attribute='entity_id')|list }}
+            entity_id: "{{ active_players }}"
             source: reset
       else:
-        - service: script.media_players_set_volumes # set new media volumes
+        - alias: "Set new volumes for active players"
+          service: script.media_players_set_volumes
           data:
-            entity_id: >
-              {{ expand(media_players)|selectattr('state','in',['playing','pause','on'])
-                  |map(attribute='entity_id')|list }}
+            entity_id: "{{ active_players }}"
             source: reset
 
-    # save new alarm_clock restore volumes if alarm clock is on to restore when alarm clock turns off
-    # do this after radio - more recent values for overlapping players
     - if:
         - condition: state
           entity_id: binary_sensor.alarm_clock
-          state: 'on'
+          state: "on"
       then:
-        - service: script.media_players_save_volumes
+        - alias: "Store new volumes for alarm clock players to restore when alarm clock turns off"
+          service: script.media_players_save_volumes
           data:
-            media_type: "{{ states('select.alarm_clock_sound_' ~ state_attr('binary_sensor.alarm_clock','alarm_type')) }}"
             entity_id: "{{ state_attr('sensor.alarm_clock_media_player','entity_id') }}"
             source: reset
 
-    # save new tts volumes if tts on so they are set to new values when tts off
-    # do after alarm clock - more recent values for overlapping players
     - if:
         - condition: state
-          entity_id: binary_sensor.tts
-          state: 'on'
+          entity_id: input_boolean.tts
+          state: "on"
       then:
-        - service: script.media_players_save_volumes
+        - alias: "Store new volumes for tts players to restore when tts finished"
+          service: script.media_players_save_volumes
           data:
             entity_id: "{{ state_attr('sensor.tts_media_player','entity_id') }}"
             source: reset
 
-    # reset all other media player volumes
-    - if: '{{ media_players|count > 0 }}'
+    - if: "{{ inactive_players|count > 0 }}"
       then:
-        - service: script.media_players_set_volumes
+        - alias: "Set new volumes for inactive players"
+          service: script.media_players_set_volumes
           data:
-            entity_id: '{{ media_players }}'
+            entity_id: "{{ inactive_players }}"
             source: reset

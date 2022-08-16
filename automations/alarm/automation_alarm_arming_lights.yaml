@@ -2,19 +2,23 @@
 # Alarm - Arming Lights
 ###############################################################################
 - id: alarm_arming_lights
-  alias: '[Alarm] Arming Lights'
-  description: 'House alarm arming lighting.'
-  max_exceeded: silent
+  alias: "[Alarm] Arming Lights"
+  description: "House alarm arming lighting."
   trigger:
     - platform: state
-      entity_id:
-        - alarm_control_panel.master
-        - alarm_control_panel.house
+      entity_id: alarm_control_panel.house
       to: arming
   condition:
     - condition: state
-      entity_id: binary_sensor.nighttime_illuminance_lights
-      state: 'on'
+      entity_id:
+        - binary_sensor.daytime_illuminance_lights
+        - binary_sensor.nighttime_illuminance_lights
+      match: any
+      state: "on"
+
+    - condition: state
+      entity_id: binary_sensor.someone_home
+      state: "on"
 
     - condition: template
       value_template: "{{ is_state_attr(trigger.entity_id,'arm_mode','armed_away') }}"
@@ -33,32 +37,28 @@
             state: "{{ states('light.dining_room_potlights') }}"
             brightness: "{{ state_attr('light.dining_room_potlights','brightness')|int(0) }}"
 
-    - delay: 1 # wait for scene to save
+    - service: light.turn_on
+      target:
+        entity_id:
+          - light.side_entrance_light
+          - light.kitchen_potlights
+          - light.dining_room_potlights
 
-    - if: >
-        {{ is_state('binary_sensor.nighttime_illuminance_lights','on')
-            and is_state('binary_sensor.someone_home','on') }}
+    - wait_template: "{{ not is_state(trigger.entity_id,'arming') }}"
+      timeout: "{{ state_attr(trigger.entity_id,'delay')|int(0) }}"
+
+    - if: "{{ states('input_select.occupancy_mode') in ['Home','Guest'] }}"
       then:
-        - service: light.turn_on
-          target:
-            entity_id: light.side_entrance_light
-
-        - service: light.turn_on
-          target:
-            entity_id: light.kitchen_potlights
-
-        - service: light.turn_on
-          target:
-            entity_id: light.dining_room_potlights
-
-        - wait_template: "{{ is_state(trigger.entity_id,'disarmed') }}"
-          timeout: "{{ state_attr(trigger.entity_id,'delay')|int(0) + 60 }}"
-
-        - condition: "{{ states('input_select.occupancy_mode') in ['Home','Guest'] }}"
-
         - service: script.turn_on
           target:
             entity_id: script.activate_light_scene
           data:
             variables:
               scene: alarm_arming_lights_restore
+      else:
+        - service: light.turn_off
+          target:
+            entity_id:
+              - light.side_entrance_light
+              - light.kitchen_potlights
+              - light.dining_room_potlights

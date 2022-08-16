@@ -1,10 +1,9 @@
 ###############################################################################
 ## Media Player Save Volumes
-## #NOTE single players only, group volumes are determined by individual media players
 ###############################################################################
 media_players_save_volumes:
-  alias: 'Media Players Save Volumes'
-  description: 'Save media player volumes.'
+  alias: "Media Players Save Volumes"
+  description: "Save media player volumes."
   icon: mdi:play-box-multiple-outline
   mode: queued
   max: 5
@@ -12,38 +11,33 @@ media_players_save_volumes:
     stored_traces: 20
   fields:
     source:
-      description: 'Source calling this script.'
-      example: 'tts'
-    media_type: # only used for reset
-      description: 'Media type if applicable.'
-      example: 'radio'
+      description: "Source calling this script."
+      example: "tts"
     entity_id:
-      description: 'List of media players.'
-      example: 'media_player.dining_room_hub, media_player.bedroom_hub'
+      description: "List of media players."
+      example: "[media_player.dining_room_hub, media_player.bedroom_hub]"
     volume:
-      description: 'Volume to save'
-      example: '0.5'
+      description: "Volume to save"
+      example: "0.5"
   variables:
-    media_type: '{{ media_type|default(none) }}'
-    volume: '{{ volume|default(-1) }}'
-    media_players: >
-      {% set media_players = entity_id|default(state_attr('group.single_media_players','entity_id')) %}
-      {% set media_players = expand(media_players)|map(attribute='entity_id')|list %}
-      {{ media_players }}
+    volume: "{{ volume|default(-1) }}"
+    media_players: "{{ entity_id|default(state_attr('group.single_media_players','entity_id')) }}"
   sequence:
     - condition: template
-      value_template: '{{ media_players|count > 0 }}'
+      value_template: "{{ media_players|count > 0 }}"
 
     - repeat:
-        while: '{{ repeat.index <= media_players|count }}'
+        while: "{{ repeat.index <= media_players|count }}"
         sequence:
           - variables:
-              player: '{{ media_players[repeat.index-1] }}'
-              player_name: "{{ player.split('.')[1] }}"
+              player: "{{ media_players[repeat.index-1] }}"
+              player_name: "{{ player.split('.')[1]|replace('mass_','') }}" #MASS
               # if tts and phone one, use phone vols for tts restore in case phone off before tts
               volume_entity: >
-                {% if source == 'reset' and is_state('binary_sensor.mobile_phone_in_use','on') %} input_number.{{ player_name ~ '_phone' }}
-                {% elif source == 'reset' %} input_number.{{ player_name ~ '_current_volume' }}
+                {% if source == 'reset' %}
+                  {% if is_state('binary_sensor.mobile_phone_in_use','on') %} input_number.{{ player_name ~ '_phone' }}
+                  {% else %} input_number.{{ player_name ~ '_current_volume' }}
+                  {% endif %}
                 {% else %} input_number.{{ player_name ~ '_' ~ source }}
                 {% endif %}
               default_volume: > # volume default 0.5/0.5 = 1 (no adjustment)
@@ -54,17 +48,10 @@ media_players_save_volumes:
                   {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor')|float }}
                 {% else %} 1 {# no adjustment #}
                 {% endif %}
-              media_adjustment: >
-                {% if media_type in state_attr('sensor.media_types','media_types')
-                    and is_state('input_boolean.media_type_volume_adjustments','on') %}
-                  {% set media_type =  ('spotify' if 'spotify' in media_type else media_type) %}
-                  {{ 1 + states('input_number.' ~ media_type ~ '_volume_adjustment')|float(-1) }}
-                {% else %} 1 {# no adjustment #}
-                {% endif %}
-              # if tts and phone one, use phone vols for tts restore in case phone off before tts
+              # if tts and phone on, use phone saved vol for tts restore vol in case phone off before tts
               current_volume: >
                 {% if volume > -1 %}
-                  {{ volume * media_adjustment * volume_factor }}
+                  {{ volume }}
                 {% elif source == 'tts' and is_state('binary_sensor.mobile_phone_in_use','on') %}
                   {{ states('input_number.' ~ player_name ~ '_phone')|float(-1) }}
                 {% else %}
@@ -74,7 +61,7 @@ media_players_save_volumes:
                 {% set qv = (states('input_number.tv_quiet_volume')|int/100)|float(-1)
                     if state_attr(player,'device_class') == 'tv'
                       else (states('input_number.speaker_quiet_volume')|int/100)|float(-1) %}
-                {{ qv * media_adjustment * volume_factor }}
+                {{ qv * volume_factor }}
               save_volume: >
                 {% if source == 'reset' %}
                   {% if is_state('binary_sensor.quiet_time','on') %}
@@ -87,10 +74,17 @@ media_players_save_volumes:
                 {% endif %}
                 {{ 1.00 if sv > 1 else 0 if sv < 0 else '%0.2f'|format(sv)|float(-1) }}
 
-          - if: '{{ save_volume > -1 }}'
+          # single players only (group volumes are determined by single media players)
+          - if: "{{ player in state_attr('group.single_media_players','entity_id') and save_volume > -1 }}"
             then:
               - service: input_number.set_value
                 target:
-                  entity_id: '{{ volume_entity }}'
+                  entity_id: "{{ volume_entity }}"
                 data:
-                  value: '{{ save_volume }}'
+                  value: "{{ save_volume }}"
+            else:
+              - service: system_log.write
+                data:
+                  logger: "{{ this.entity_id }}"
+                  level: error
+                  message: "Invalid media player [{{ player }}] or save volume [{{ save_volume }}]."
