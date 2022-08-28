@@ -89,19 +89,14 @@ Home Assistant (Hassio) configuration, updated to v2022.8.7
 
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
-    #LOCK_USER - new lock user code
+    #LOCK_USER - lock user code
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
     #TV - TV notes
-    #RADIO - radio issues/notes - temp for streaming radio
-    #SPOTIFY - spotify issues/notes
     #ALARMO - alarmo issues/notes
     #APEX - apex graph issues
     #DARKSKY - darksky code to replace
     #NEST - Nest/Nest Protect issues
-    #MYQ - MyQ issues/notes
-    #MEDIA - media player mini-> hass
     #BORDER - condition/state-switch - dead space/border
-    #2022.4 - v2202.4 unresolved issue
 
     #INFO - info level log tag
     #WARNING - warning level log tag
