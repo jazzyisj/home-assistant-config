@@ -6,18 +6,11 @@
   description: "Turn off announcement boolean, restore media player volumes."
   mode: queued
   variables:
-    # don't turn of/reset volumes on alarm_clock players, volumes are set on alarm clock resume
-    #TODO media players doesn't account for alert/manually set tts player
-    media_players: >
-      {{ expand(state_attr('sensor.tts_media_player','entity_id'))
+    tts_players: >
+      {{ expand(states('input_text.tts_active_players').split(','))
           |rejectattr('entity_id','in',state_attr('sensor.alarm_clock_media_player','entity_id'))
-          |rejectattr('attributes.device_class','eq','tv')
           |map(attribute='entity_id')|list }}
-    tts_media_players: >
-      {{ expand(state_attr('sensor.tts_media_player','entity_id'))
-        |selectattr('state','in',['playing','paused','idle'])|map(attribute='entity_id')|list }}
     mass_players: "{{ expand(states('input_text.tts_restore_mass').split(','))|map(attribute='entity_id')|list }}"
-
   trigger:
     - platform: state
       entity_id: script.tts_play
@@ -26,7 +19,7 @@
       for: 2 # allow any queued instance to start
 
     - platform: state
-      entity_id: binary_sensor.tts
+      entity_id: input_boolean.tts
       to: "on"
       for:
         seconds: 300 # this time value is longest announcement queue will run
@@ -39,24 +32,13 @@
       entity_id: input_boolean.tts_muted
       state: "off"
   action:
-    - if:
-        - condition: state
-          entity_id: switch.system_mute # volumes will reset when mute turned off
-          state: "off"
-
-        - "{{ media_players|count > 0 }}"
-      then:
-        - service: script.media_players_set_volumes
-          data:
-            entity_id: "{{ media_players }}"
-            source: tts_off
-
+    # turn off tts players not used by mass
     - choose:
-        - conditions: "{{ tts_media_players|count > 0 }}"
+        - conditions: "{{ tts_players|count > 0 }}"
           sequence:
             - service: script.media_players_off
               data:
-                entity_id: "{{ tts_media_players }}"
+                entity_id: "{{ tts_players }}"
                 ignore_players: "{{ mass_players }}"
 
     - if:
@@ -74,17 +56,35 @@
       target:
         entity_id: input_boolean.tts
 
-    - repeat:
-        for_each: "{{ mass_players }}"
-        sequence:
-          - service: mass.queue_command
-            target:
-              entity_id: "{{ mass_players[repeat.index-1] }}"
-            data:
-              command: snapshot_restore
+    - if: "{{ is_state('input_boolean.resume_mass','on') }}"
+      then:
+        - repeat:
+            for_each: "{{ mass_players }}"
+            sequence:
+              - service: mass.queue_command
+                continue_on_error: true
+                target:
+                  entity_id: "{{ mass_players[repeat.index-1] }}"
+                data:
+                  command: snapshot_restore
 
-    - service: input_text.set_value
-      target:
-        entity_id: input_text.tts_restore_mass
-      data:
-        value: ""
+        - service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.resume_mass
+
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.tts_restore_mass
+          data:
+            value: ""
+
+    - if:
+        - condition: state
+          entity_id: switch.system_mute # volumes will reset when mute turned off
+          state: "off"
+
+        - "{{ tts_players|count > 0 }}"
+      then:
+        - service: script.media_player_set_volumes
+          data:
+            source: tts_off

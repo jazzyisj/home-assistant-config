@@ -25,17 +25,29 @@ alarm_clock_play:
       {{ expand(state_attr('group.alarm_clock_media_players','entity_id'))
           |selectattr('name','eq',player_name)|map(attribute='entity_id')|join('') }}
     media_players: >
-      {{ state_attr('sensor.' ~ media_player.split('.')[1],'entity_id')
-          if is_state_attr(media_player,'type','group') else [media_player] }}
+      {{ state_attr(media_player,'group_members')
+          if is_state_attr(media_player,'is_group',true) else [media_player] }}
     playlist: "{{ states('select.alarm_clock_sound_' ~ alarm_type) }}"
     volume: "{{ states('input_number.alarm_clock_volume_' ~ alarm_type)|float('unknown') }}"
+    #NOTE if alarm triggers on startup before playlist sensor are populated media_type in alarm_clock_play defaults to a sound
+    # becuase the playlist select has not been populated and playlist will be null - default to digital here
+    media_url:
+      alarmclocksoundsdigitalmp3 #> #MASS
+      # {% if playlist == 'Rooster' %} {{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/rooster.mp3' }}
+      # {% elif playlist == 'Loud' %} {{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/loud.mp3' }}
+      # {% elif playlist == 'Pager' %} {{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/pager.mp3' }}
+      # {% elif playlist == 'Digital' %} {{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/digital.mp3' }}
+      # {% elif playlist == 'Gentle' %} {{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/gentle.mp3' }}
+      # {% else %} {{ states('input_text.base_url') ~ '/local/alarm_clock_sounds/digital.mp3' }}
+      # {% endif %}
+
   sequence:
     - if:
         - condition: template
           alias: "Alarm type is valid"
           value_template: "{{ alarm_type in alarm_types }}"
       then:
-        # only run if other alarm type is not on
+        # only run if another alarm type is not on
         - if: >
             {% set found = namespace(value=0) %}
             {% for type in alarm_types %}
@@ -51,9 +63,7 @@ alarm_clock_play:
 
             - service: input_boolean.turn_off
               target:
-                entity_id:
-                  - input_boolean.alarm_clock_failed
-                  - input_boolean.resume_alarm_clock
+                entity_id: input_boolean.alarm_clock_failed
 
             - if: >
                 {{ is_state('switch.alarm_clock_snooze','on')
@@ -73,7 +83,7 @@ alarm_clock_play:
 
             - if: "{{ first_run }}"
               then: # save media player volumes before conditions so values are set for alarm_clock_stop
-                - service: script.media_players_save_volumes
+                - service: script.media_player_save_volumes
                   data:
                     entity_id: "{{ media_players }}"
                     source: alarm_clock
@@ -120,18 +130,11 @@ alarm_clock_play:
             - if:
                 - condition: template
                   alias: "Media player or speaker group media player not available"
+                  #TODO what if group player unavail but not members
                   value_template: >
-                    {% if is_state_attr(media_player,'type','group') %}
-                      {% set found = namespace(value=0) %}
-                      {% for item in media_players %}
-                        {% if states(item)|lower in ['unknown','unavailable','none'] %}
-                          {% set found.value = 1 %}
-                        {% endif %}
-                      {% endfor %}
-                      {{ found.value|int(0) == 1}}
-                    {% else %}
-                      {{ states(media_player)|lower in ['unknown','unavailable','none'] }}
-                    {% endif %}
+                    {{ expand(media_players)
+                      |selectattr('state','in',['unknown','unavailable'])
+                      |map(attribute='entity_id')|list|count > 0 }}
               then:
                 - service: input_boolean.turn_on
                   target:
@@ -141,7 +144,7 @@ alarm_clock_play:
                     players_stop: > #BITWISE
                       {% set players = namespace(entity_id=[]) %}
                       {% for item in expand(state_attr('sensor.alarm_clock_media_player','entity_id'))
-                          |selectattr('state','eq','playing') %}
+                          |selectattr('state','in',['playing','paused','buffering','on']) %}
                         {% if item.attributes.supported_features|bitwise_and(4096) %}
                           {% set players.entity_id = players.entity_id + [item.entity_id] %}
                         {% endif %}
@@ -153,6 +156,34 @@ alarm_clock_play:
                     entity_id: &alarm_automations
                       - automation.alarm_clock_media_player_turned_off
                       - automation.alarm_clock_snooze_on
+
+                # mass_players: >
+                #   {% set kill_players = namespace(entity_id=[]) %}
+                #   {% set mass_players = expand(states('input_text.tts_restore_mass'))|map(attribute='entity_id')|list
+                #       if states('input_text.tts_restore_mass') != '' else states.media_player
+                #         |selectattr('attributes.group_members','defined')
+                #         |selectattr('state','in',['playing','paused','buffering','on'])|list  %}
+                #   {% if mass_players|count > 0 %}
+                #     {% for player in expand(mass_players) %}
+                #       {% set hass_player = player.entity_id|replace('mass_','') %}
+                #       {% if hass_player == states('sensor.tts_media_player') %}
+                #         {% set kill_players.entity_id = kill_players.entity_id + [player.entity_id] %}
+                #       {% elif hass_player in state_attr(player.entity_id,'active_queue') %}
+                #         {% set kill_players.entity_id = kill_players.entity_id + [player.entity_id] %}
+                #       {% endif %}
+                #     {% endfor %}
+                #   {% endif %}
+                #   {{ kill_players.entity_id|unique|list }}
+
+                #TODO if mass is on - what happens when ran after snooze off?
+                #  - repeat:
+                #     for_each: "{{ mass_players }}"
+                #     sequence:
+                #       - service: mass.queue_command
+                #         target:
+                #           entity_id: "{{ mass_players[repeat.index-1] }}"
+                #         data:
+                #           command: snapshot_create
 
                 # if the alarm clock media player is playing stop it so we don't get a volume jump
                 - if: "{{ players_stop|count > 0 }}"
@@ -167,6 +198,8 @@ alarm_clock_play:
                   data:
                     volume_level: 0
 
+                - delay: 1 # allow volumes to set
+
                 - wait_template: "{{ not is_state(media_player,'playing') }}"
                   timeout: # wait for alarm clock media players to stop if to avoid volume jump, players auto off
                     seconds: 15
@@ -175,15 +208,17 @@ alarm_clock_play:
                   target:
                     entity_id: *alarm_automations
 
-                - service: script.turn_on
+                - service: mass.queue_command
                   target:
-                    entity_id: script.alarm_clock_sound_play
+                    entity_id: "{{ media_player }}"
                   data:
-                    variables:
-                      media_player: "{{ media_player }}"
-                      playlist: "{{ playlist }}"
+                    command: play_media
+                    #TODO failing with sound - mass media player not turning on
+                    uri: spotify:playlist:37i9dQZF1DXb57FjYWz00c #"{{ media_url }}"
+                    enqueue_mode: play
+                    repeat_mode: one
 
-                - delay: 15 # if not delay always fails
+                # - delay: 15 # if not delay always fails
 
                 - wait_template: "{{ is_state(media_player,'playing') }}"
                   timeout: 15
@@ -202,7 +237,7 @@ alarm_clock_play:
                     #BLOOP set volume after play starts to avoid google bloop
                     - service: script.turn_on
                       target:
-                        entity_id: script.media_players_set_volumes
+                        entity_id: script.media_player_set_volumes
                       data:
                         variables:
                           entity_id: "{{ media_players }}"

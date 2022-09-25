@@ -3,20 +3,24 @@
 ###############################################################################
 mass_players_off:
   alias: "Mass Players Off"
-  description: "Turn off mass media players."
+  description: "Turn off mass media source players."
   mode: restart
+  fields:
+    entity_id:
+      description: "MASS player entity ids."
+      example: "media_player.mass_dining_room_hub"
   variables:
     media_players: >
-      {% set mass_players = states.media_player
+      {% set mass_players = entity_id|default(states.media_player
           |selectattr('attributes.app_id','defined')
           |selectattr('attributes.app_id','eq','mass')
-          |map(attribute='entity_id')|list %}
+          |map(attribute='entity_id')|list) %}
       {% set source_players = states.media_player
           |selectattr('attributes.source_entity_id','defined')
           |selectattr('attributes.source_entity_id','in',mass_players|replace('mass_',''))
           |map(attribute='attributes.source_entity_id')|list %}
       {% set players = namespace(entity_id=[]) %}
-      {% for item in expand(mass_players + source_players)|selectattr('state','in',['on','idle','playing','paused']) %}
+      {% for item in expand(source_players)|selectattr('state','in',['playing','paused','buffering','on','idle']) %}
         {% if item.attributes.supported_features|bitwise_and(4096) %}
           {% set players.entity_id = players.entity_id + [item.entity_id] %}
         {% endif %}
@@ -47,8 +51,7 @@ media_players_off:
     ignore_players: "{{ ignore_players|default([]) }}"
     media_players: >
       {% set media_players = entity_id|default(state_attr('group.media_players','entity_id')) %}
-      {{ expand(media_players)|rejectattr('entity_id','eq','media_player.living_room_tv')
-          |rejectattr('entity_id','in',ignore_players)|map(attribute='entity_id')|list }}
+      {{ expand(media_players)|rejectattr('entity_id','in',ignore_players)|map(attribute='entity_id')|list }}
   sequence:
     #BITWISE bitwise_and filter https://community.home-assistant.io/t/need-test-for-bitwise-and/412986
     - if: "{{ media_players|count > 0 }}"
@@ -58,7 +61,7 @@ media_players_off:
             #WARNING (SyncWorker_0) [pychromecast.controllers] STOP command requested but no session is active.
             players_off: > #BITWISE
               {% set players = namespace(entity_id=[]) %}
-              {% for item in expand(media_players)|selectattr('state','in',['on','idle','playing','paused']) %}
+              {% for item in expand(media_players)|selectattr('state','in',['playing','paused','buffering','on','idle']) %}
                 {% if item.attributes.supported_features|bitwise_and(256) %}
                   {% set players.entity_id = players.entity_id + [item.entity_id] %}
                 {% endif %}
@@ -72,7 +75,7 @@ media_players_off:
                 entity_id: "{{ players_off }}"
 
             - wait_template: >
-                {{ expand(players_off)|selectattr('state','in',['on','idle','playing','paused'])
+                {{ expand(players_off)|selectattr('state','in',['playing','paused','buffering','on','idle'])
                     |map(attribute='entity_id')|list|count == 0 }}
               timeout: # let players turn off
                 seconds: 2
@@ -80,7 +83,7 @@ media_players_off:
             - variables:
                 players_stop: > #BITWISE
                   {% set players = namespace(entity_id=[]) %}
-                  {% for item in expand(media_players)|selectattr('state','in',['on','idle','playing','paused']) %}
+                  {% for item in expand(media_players)|selectattr('state','in',['playing','paused','buffering','on','idle','standby']) %}
                     {% if item.attributes.supported_features|bitwise_and(4096) %}
                       {% set players.entity_id = players.entity_id + [item.entity_id] %}
                     {% endif %}
@@ -95,8 +98,8 @@ media_players_off:
                     entity_id: "{{ players_stop }}"
 
     # keep script on until all players are off
-    # don't include idle,standby state - vlc, browser players always idle, roku - standby
+    # don't include idle/standby state - vlc, browser players always idle, roku - standby
     - wait_template: >
-        {{ expand(media_players)|selectattr('state','in',['on','playing','paused'])
+        {{ expand(media_players)|selectattr('state','in',['playing','paused','buffering','on'])
             |map(attribute='entity_id')|list|count == 0 }}
       timeout: 10

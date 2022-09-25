@@ -7,36 +7,24 @@
   max_exceeded: silent
   trigger:
     - platform: state
+      entity_id: !include /config/include/media_player_entities_single.yaml
       to:
         - "off"
         - idle
         - unavailable
         - unknown
-      entity_id: !include /config/include/media_player_entities_single.yaml
       for:
-        seconds: 3 # delay so state changes betomeen snooze/loops don't shut alarm off
+        seconds: 3 # delay to avoid trigger between snooze/play
   condition:
     - condition: template
-      alias: "Alarm clock is on and trigger is alarm_clock media player or in the alarm clock speaker group"
-      # sensor.alarm_clock_media_player only populated if and alarm clock switch is on
-      # no binary_sensor.alarm_clock - prevents trigger with test play
-      value_template: >
-        {% set alarm = states('sensor.alarm_clock_media_player') %}
-        {% if is_state_attr(alarm,'type','group') %}
-          {% if alarm == trigger.entity_id %}{% set found.value = 1 %}
-          {% else %}
-            {% set found = namespace(value=0) %}
-            {% set alarm_group = state_attr('sensor.alarm_clock_media_player','entity_id') %}
-            {% for item in alarm_group %}{% if item == trigger.entity_id %}{% set found.value = 1 %}{% endif %}{% endfor %}
-          {% endif %}
-          {{ found.value|int(0) == 1 }}
-        {% else %}
-          {{ alarm == trigger.entity_id }}
-        {% endif %}
+      alias: "Trigger is an active alarm_clock media player"
+      value_template: > #MASS
+        {% set player = trigger.entity_id.split('.')[0] ~ '.mass_' ~ trigger.entity_id.split('.')[1] %}
+        {{ iif(is_state('binary_sensor.alarm_clock','on'),
+            player in state_attr('sensor.alarm_clock_media_player','entity_id'),false) }}
 
     - condition: state
       entity_id:
-        - input_boolean.resume_alarm_clock # prevent alarm turning off with tts
         - input_boolean.tts
         - script.alarm_clock_play
         - script.alarm_clock_stop
@@ -48,6 +36,6 @@
           target:
             entity_id: input_boolean.alarm_clock_failed
       else:
-        - service: script.alarm_clock_stop # stays here until script done, alarm clock will be off
+        - service: script.alarm_clock_stop
           data:
             alarm_type: "{{ state_attr('binary_sensor.alarm_clock','alarm_type') }}"

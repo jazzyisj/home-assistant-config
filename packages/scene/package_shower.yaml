@@ -71,14 +71,11 @@ automation:
 
               - if:
                   - condition: template
-                    alias: "Bathroom speaker already playing something"
-                    value_template: > #MASS media playing?
-                      {{ states('media_player.mass_bathroom_speaker') in ['playing','paused'] }}
+                    alias: "Bathroom speaker already playing media"
+                    value_template: >
+                      {{ 'media_player.mass_bathroom_speaker'
+                          in state_attr('binary_sensor.mass_media','entity_id') }}
                 then:
-                  # wait until media resumes if tts
-                  - wait_template: "{{ is_state('media_player.mass_bathroom_speaker','playing') }}"
-                    timeout: 30
-
                   - service: media_player.volume_set
                     target:
                       entity_id: media_player.mass_bathroom_speaker
@@ -143,35 +140,32 @@ automation:
           - condition: template
             alias: "TTS on and bathroom speaker in tts media players"
             value_template: >
-              {{ (is_state('input_boolean.tts','on')
-                  and 'media_player.mass_bathroom_speaker' in state_attr('sensor.tts_media_player','entity_id')) }}
+              {{ is_state('input_boolean.tts','on')
+                  and 'media_player.bathroom_speaker' in state_attr('sensor.tts_media_player','entity_id') }}
         then:
-          # set bathroom speaker tts restore volumes to media volume for appropriate post tts shower off volume levels
+          # set bathroom speaker to default volume for post tts volume level
           - service: input_number.set_value
             alias: "Set bathroom speaker restore volume to media volume"
             target:
               entity_id: input_number.bathroom_speaker_tts
-            data: #MASS - set to default media player value
-              value: "{{ states('input_number.' ~ media_type ~ '_volume')|float(-1)/100 }}" # - set to default volume
+            data:
+              value: "{{ states('input_number.bathroom_speaker_default_volume')|float(-1) }}"
 
-          # wait until media resumes if tts
           - wait_template: "{{ is_state('input_boolean.tts','off') }}"
-            timeout: 30
+            timeout: 120
 
       - if:
           - condition: template
-            alias: "Bathroom speaker is active media speaker."
-            value_template: > #MASS - if bathroom_speaker only one on
-              {{ 'media_player.mass_bathroom_speaker' }}
+            alias: "Bathroom speaker is only active media speaker."
+            value_template: > # if bathroom_speaker only active mass player
+              {% set mass_players = state_attr('binary_sensor.mass_media','entity_id') %}
+              {{ 'media_player.mass_bathroom_speaker' in mass_players and mass_players|count == 1 }}
         then:
           - service: script.media_players_off
-            data: # turns of both reg and mass players
-              entity_id: >
-                {{ states.media_player
-                  |selectattr('name','eq','Bathroom Speaker')
-                  |map(attribute='entity_id')|list }}
-        else:
-          - service: script.media_players_set_volumes
             data:
-              entity_id: media_player.mass_bathroom_speaker
-              source: "{{ media_type }}" #MASS - set to default media player value
+              entity_id: media_player.bathroom_speaker
+        else:
+          - service: script.media_player_set_volumes
+            data:
+              entity_id: media_player.bathroom_speaker
+              source: reset #VERIFY

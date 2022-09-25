@@ -1,46 +1,47 @@
 # Home Assistant Configuration
 
-Home Assistant (Hassio) configuration, updated to v2022.8.7
+Home Assistant Configuration, updated to v2022.9
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_8.png)
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_8_v2.png)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_dark.png)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_light.png)
 
 ## Entity Counts:
 
     Alarm_control_panel: 3
     Alert: 98
-    Automation: 754
-    Binary_sensor: 415
+    Automation: 755
+    Binary_sensor: 443
     Button: 66
     Calendar: 16
-    Camera: 20
+    Camera: 24
     Climate: 5
     Counter: 1
     Cover: 1
-    Device_tracker: 60
+    Device_tracker: 63
     Fan: 9
-    Group: 48
+    Group: 50
     Input_boolean: 175
     Input_button: 1
     Input_datetime: 38
     Input_number: 188
     Input_select: 10
-    Input_text: 52
-    Light: 43
+    Input_text: 54
+    Light: 47
     Lock: 4
-    Media_player: 42
-    Number: 80
+    Media_player: 44
+    Number: 67
     Person: 2
     Proximity: 2
     Remote: 1
-    Scene: 9
-    Script: 75
-    Select: 157
-    Sensor: 940
+    Scene: 10
+    Schedule: 1
+    Script: 78
+    Select: 121
+    Sensor: 974
     Sun: 1
-    Switch: 139
+    Switch: 126
     Timer: 54
-    Update: 88
+    Update: 122
     Variable: 1
     Weather: 8
     Zone: 7
@@ -97,6 +98,7 @@ Home Assistant (Hassio) configuration, updated to v2022.8.7
     #DARKSKY - darksky code to replace
     #NEST - Nest/Nest Protect issues
     #BORDER - condition/state-switch - dead space/border
+    #MASS - Music Assistant issues/notes
 
     #INFO - info level log tag
     #WARNING - warning level log tag
