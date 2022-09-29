@@ -4,12 +4,12 @@
 - id: hass_kiosk_screen_on
   alias: "[Hass] Kiosk Screen On"
   description: "Turn kiosk screen on and adjust brightness."
-  mode: restart
+  max_exceeded: silent
   variables:
-    brightness_pct: >
-      {% if is_state('input_select.occupancy_mode','Night') %} 25
-      {% elif is_state('binary_sensor.quiet_time','on') %} 50
-      {% else %} 100
+    brightness: >
+      {% if is_state('input_select.occupancy_mode','Night') %} 50
+      {% elif is_state('binary_sensor.quiet_time','on') %} 125
+      {% else %} 255
       {% endif %}
   trigger:
     - platform: state
@@ -26,7 +26,7 @@
 
     - platform: state
       id: motion
-      entity_id: binary_sensor.kiosk_motion #VERIFY
+      entity_id: binary_sensor.kiosk_motion
       to: "on"
       from: "off"
 
@@ -46,25 +46,21 @@
         - binary_sensor.someone_home
         - binary_sensor.kiosk_connected
       state: "on"
-
-    - condition: template
-      alias: "Current brightness not equal to set value"
-      value_template: "{{ states('number.fire_tablet_screen_brightness')|int(0) != brightness_pct }}"
-
-    - condition: template
-      value_template: >
-        {{ is_state('switch.fire_tablet_screen','off')
-          if trigger.id == 'motion' else true }}
   action:
-    - service: switch.turn_on
-      target:
-        entity_id: switch.fire_tablet_screen
+    - if: "{{ state_attr('light.kiosk_internal_screen','brightness')|int(0) != brightness }}"
+      then:
+        - service: light.turn_on
+          target:
+            entity_id: light.kiosk_internal_screen
+          data:
+            brightness: "{{ brightness }}"
 
-    - service: number.set_value
-      target:
-        entity_id: number.fire_tablet_screen_brightness
-      data:
-        value: "{{ brightness_pct }}"
+    #VERIFY visibility sensor not reliable
+    - if: "{{ is_state('sensor.kiosk_internal_browser_visibility','hidden') }}"
+      then:
+        - service: button.press
+          target:
+            entity_id: button.fire_tablet_bring_to_foreground
 
 ###############################################################################
 ## Hass - Kiosk Screen Off
@@ -78,6 +74,7 @@
       entity_id: input_select.occupancy_mode
       to:
         - Away
+        - Night
         - Vacation
       for:
         minutes: 5
@@ -95,9 +92,8 @@
       state: "on"
 
     - condition: template
-      value_template: >
-        {{ is_state('input_select.occupancy_mode','Night')
-          if trigger.id == 'motion' else true }}
+      alias: "Occupancy mode is Night, Away, or Vacation"
+      value_template: "{{ states('input_select.occupancy_mode') in ['Night','Away','Vacation'] }}"
   action:
     - service: switch.turn_off
       target:

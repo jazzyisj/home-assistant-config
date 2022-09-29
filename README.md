@@ -86,8 +86,9 @@ Home Assistant Configuration, updated to v2022.9
     #DISABLED - disabled code
     #BUG - unfixable bug in HA/component/device
     #BUGFIX - workaround for bug
-    #NOTE - special notes, unresolvable issue
 
+    #NOTIFY - sheri notifications disabled
+    #UPDATE - waiting for update entities
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
     #LOCK_USER - lock user code
@@ -96,7 +97,6 @@ Home Assistant Configuration, updated to v2022.9
     #ALARMO - alarmo issues/notes
     #APEX - apex graph issues
     #DARKSKY - darksky code to replace
-    #NEST - Nest/Nest Protect issues
     #BORDER - condition/state-switch - dead space/border
     #MASS - Music Assistant issues/notes
 
