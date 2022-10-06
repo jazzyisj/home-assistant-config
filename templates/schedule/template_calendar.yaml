@@ -1,38 +1,74 @@
 ###############################################################################
 ## Templates - Calendar
 ###############################################################################
-- binary_sensor:
-    # if any calendar connected, google calendar is connected
+- button:
+    - name: "Update Calendar"
+      unique_id: udpate_calendar
+      icon: mdi:calendar
+      press:
+        - service: homeassistant.update_entity
+          data:
+            entity_id:
+              - calendar.days1
+              - calendar.days2
+              - calendar.afternoons1
+              - calendar.afternoons2
+              - calendar.work_holiday
+              - calendar.garbage
+              - calendar.recycle
+              - calendar.yardwaste
+              - calendar.work_layoff
+              - calendar.work_vacation_jason
+              - calendar.work_vacation_sheri
+
+        - service: browser_mod.notification
+          data:
+            message: "Updating calendars."
+            duration: 30000
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: calendar.work_calendar
+      from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      entity_id: calendar.work_calendar
+      to:
+        - unknown
+        - unavailable
+  binary_sensor:
     - name: "Google Calendar Connected"
       unique_id: google_calendar_connected
       icon: mdi:calendar
       device_class: connectivity
       state: >
-        {% set bad_states = ['unknown','unavailable'] %}
-        {{ states('calendar.days1') not in bad_states
-            or states('calendar.days2') not in bad_states
-            or states('calendar.afternoons1') not in bad_states
-            or states('calendar.afternoons2') not in bad_states
-            or states('calendar.work_holiday') not in bad_states
-            or states('calendar.work_vacation_jason') not in bad_states
-            or states('calendar.work_vacation_sheri') not in bad_states
-            or states('calendar.garbage') not in bad_states
-            or states('calendar.recycle') not in bad_states
-            or states('calendar.yardwaste') not in bad_states }}
+        {{ expand(integration_entities('google'))
+            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
 
+- binary_sensor:
     - name: "Google Calendar Connected Alert"
       unique_id: google_calendar_connected_alert
       icon: mdi:calendar
+      device_class: problem
+      delay_on: 60
       state: >
         {{ is_state('binary_sensor.google_calendar_connected','off')
             and is_state('input_boolean.schedule_alerts','on') }}
 
-    - name: "Calendar Alert"
-      unique_id: calendar_alert
+    - name: "Calendar Empty Alert"
+      unique_id: calendar_empty_alert
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
         {{ false if entities == none or is_state('input_boolean.schedule_alerts','off') else entities|count > 0 }}
-      attributes: # vacation/layoff calendars not included - often empty
+      attributes: # vacation/layoff calendars not included - usually empty
         entity_id: >
           {{ states.calendar|selectattr('attributes.start_time','eq',null)
               |rejectattr('entity_id','in',['calendar.work_vacation_jason','calendar.work_vacation_sheri','calendar.work_layoff'])
@@ -88,8 +124,7 @@
           {% elif next == states('sensor.next_yardwaste_day') %} yardwaste
           {% endif %}
 
-    #MIDNIGHT add day_reset to prevent alerts night before #VERIFY
-    # as_local to add tz
+    #MIDNIGHT add day_reset to prevent alerts night before, as_local to add tz
     - name: "Next Garbage Day"
       unique_id: next_garbage_day
       icon: mdi:trash-can
@@ -102,17 +137,15 @@
         {% endif %}
       attributes:
         display: >
-          {% if state_attr('calendar.garbage','start_time') != none %}
-            {% set start = state_attr('calendar.garbage','start_time')|as_datetime|as_local %}
-            {% if is_state('calendar.garbage','on') %} Today
+          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+            {% set start = states(this.entity_id)|as_datetime %}
+            {% if now() > start %} Today
             {% elif start - now() < timedelta(days=1) %} Tomorrow
             {% else %} {{ start.strftime('%a, %b %d') }}
             {% endif %}
-          {% else %} unknown
           {% endif %}
 
-    # add day_reset to prevent alerts night before
-    # as_local to add tz
+    # add day_reset to prevent alerts night before, as_local to add tz
     - name: "Next Recycle Day"
       unique_id: next_recycle_day
       icon: mdi:recycle
@@ -125,17 +158,15 @@
         {% endif %}
       attributes:
         display: >
-          {% if state_attr('calendar.recycle','start_time') != none %}
-            {% set start = state_attr('calendar.recycle','start_time')|as_datetime|as_local %}
-            {% if is_state('calendar.recycle','on') %} Today
+          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+            {% set start = states(this.entity_id)|as_datetime %}
+            {% if now() > start %} Today
             {% elif start - now() < timedelta(days=1) %} Tomorrow
             {% else %} {{ start.strftime('%a, %b %d') }}
             {% endif %}
-          {% else %} unknown
           {% endif %}
 
-    # add day_reset to prevent alerts night before
-    # as_local to add tz
+    # add day_reset to prevent alerts night before, as_local to add tz
     - name: "Next Yardwaste Day"
       unique_id: next_yardwaste_day
       icon: mdi:pine-tree
@@ -148,16 +179,15 @@
         {% endif %}
       attributes:
         display: >
-          {% if state_attr('calendar.yardwaste','start_time') != none %}
-            {% set start = state_attr('calendar.yardwaste','start_time')|as_datetime|as_local %}
-            {% if is_state('calendar.yardwaste','on') %} Today
+          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+            {% set start = states(this.entity_id)|as_datetime %}
+            {% if now() > start %} Today
             {% elif start - now() < timedelta(days=1) %} Tomorrow
             {% else %} {{ start.strftime('%a, %b %d') }}
             {% endif %}
-          {% else %} unknown
           {% endif %}
         warning: >
-          {% if state_attr('calendar.yardwaste','start_time') != none %}
-            {% set start = state_attr('calendar.yardwaste','start_time')|as_datetime|as_local %}
+          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+            {% set start = states(this.entity_id)|as_datetime %}
             {{ start - now() < timedelta(days=3) and start - now() > timedelta(days=1) }}
           {% endif %}

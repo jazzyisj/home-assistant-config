@@ -1,4 +1,39 @@
 ###############################################################################
+## Hass - Kiosk Screen Reset
+###############################################################################
+- id: hass_kiosk_screen_reset
+  alias: "[Hass] Kiosk Screen Reset"
+  description: "Toggle screen to reset MQTT screen sensor."
+  trigger:
+    - platform: homeassistant
+      id: startup
+      event: start
+
+    - platform: state
+      entity_id: binary_sensor.kiosk_screen
+      to: unknown #VERIFY
+  condition:
+    - condition: state
+      entity_id: binary_sensor.kiosk_online
+      state: "on"
+  action:
+    - if: "{{ trigger.id == 'startup' }}"
+      then:
+        - delay:
+            minutes: 5
+
+    # toggle screen switch to populate MQTT screen on sensor
+    - service: switch.turn_off
+      continue_on_error: true
+      target:
+        entity_id: switch.fire_tablet_screen
+
+    - service: switch.turn_on
+      continue_on_error: true
+      target:
+        entity_id: switch.fire_tablet_screen
+
+###############################################################################
 ## Hass - Kiosk Screen On
 ###############################################################################
 - id: hass_kiosk_screen_on
@@ -20,47 +55,40 @@
         - Night
 
     - platform: state
-      entity_id: binary_sensor.kiosk_connected
-      to: "on"
-      from: "off"
-
-    - platform: state
-      id: motion
-      entity_id: binary_sensor.kiosk_motion
-      to: "on"
-      from: "off"
-
-    - platform: state
       entity_id:
-        - input_boolean.alarm_triggered
-        - binary_sensor.quiet_time
+        - binary_sensor.kiosk_online
+        - binary_sensor.kiosk_motion
+      to: "on"
+
+    - platform: state
+      entity_id: binary_sensor.quiet_time
       to:
         - "on"
         - "off"
-      from:
-        - "on"
-        - "off"
+
+    - platform: state
+      entity_id: input_boolean.alarm_triggered
+      to: "on"
   condition:
     - condition: state
-      entity_id:
-        - binary_sensor.someone_home
-        - binary_sensor.kiosk_connected
+      entity_id: binary_sensor.kiosk_online
       state: "on"
   action:
-    - if: "{{ state_attr('light.kiosk_internal_screen','brightness')|int(0) != brightness }}"
+    - if: "{{ states('number.fire_tablet_screen_brightness')|int(0) != brightness }}"
       then:
-        - service: light.turn_on
+        - service: switch.turn_on
           target:
-            entity_id: light.kiosk_internal_screen
-          data:
-            brightness: "{{ brightness }}"
+            entity_id: switch.fire_tablet_screen
 
-    #VERIFY visibility sensor not reliable
-    - if: "{{ is_state('sensor.kiosk_internal_browser_visibility','hidden') }}"
-      then:
-        - service: button.press
+        - service: number.set_value
           target:
-            entity_id: button.fire_tablet_bring_to_foreground
+            entity_id: number.fire_tablet_screen_brightness
+          data:
+            value: "{{ brightness }}"
+
+    - service: button.press
+      target:
+        entity_id: button.fire_tablet_bring_to_foreground
 
 ###############################################################################
 ## Hass - Kiosk Screen Off
@@ -74,7 +102,6 @@
       entity_id: input_select.occupancy_mode
       to:
         - Away
-        - Night
         - Vacation
       for:
         minutes: 5
@@ -88,12 +115,12 @@
         minutes: 5
   condition:
     - condition: state
-      entity_id: binary_sensor.kiosk_connected
+      entity_id: binary_sensor.kiosk_online
       state: "on"
 
     - condition: template
-      alias: "Occupancy mode is Night, Away, or Vacation"
-      value_template: "{{ states('input_select.occupancy_mode') in ['Night','Away','Vacation'] }}"
+      alias: "Occupancy mode is Away, or Vacation"
+      value_template: "{{ states('input_select.occupancy_mode') in ['Away','Vacation'] }}"
   action:
     - service: switch.turn_off
       target:

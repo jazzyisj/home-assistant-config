@@ -19,27 +19,29 @@ media_player_set_volumes:
     source:
       description: "Source calling this script."
       example: "tts_off"
+    force_reset:
+      description: "Force volume reset."
+      example: "true"
     entity_id:
       description: "Media player list."
       example: "[media_player.dining_room_hub, media_player.bedroom_hub]"
     volume:
       description: "Volume level."
       example: "40"
-    force_reset:
-      description: "Force default volume."
-      example: "true"
   variables:
-    #TV no tvs - no volume attribute
-    media_players: >
-      {% set entities = entity_id|default(state_attr('group.single_media_players','entity_id')) %}
+    media_players: > #TV exclude TV's (no volume attribute)
+      {% set entities = entity_id|default(expand('group.single_media_players')
+          |selectattr('attributes.device_class','defined')
+          |rejectattr('attributes.device_class','eq','tv')
+          |map(attribute='entity_id')|list) %}
       {% if entity_id is string %}
         {% set entities = [entities] %}
       {% endif %}
       {{ entities }}
     source: "{{ source|default('reset') }}"
+    force_reset: "{{ force_reset|default(false) }}"
     source_off: "{{ source[0:-4] == '_off' }}"
     volume: "{{ volume|default(-1) }}"
-    force_reset: "{{ force_reset|default(false) }}"
   sequence:
     # do not run if system is muted (kills mute)
     - condition: state
@@ -119,8 +121,8 @@ media_player_set_volumes:
                       {% set volume = quiet_volume if current_volume > quiet_volume else current_volume
                           if current_volume > 0 and states(player) in ['playing','paused','buffering','on'] else quiet_volume %}
                     {% else %}
-                      {% set volume = current_volume if states(player) in ['playing','paused','buffering','on']
-                          and not force_reset else default_volume %}
+                      {% set volume = iif(states(player) in ['playing','paused','buffering','on']
+                          and not force_reset, current_volume, default_volume) %}
                     {% endif %}
                     {{ volume }}
                   new_volume: >

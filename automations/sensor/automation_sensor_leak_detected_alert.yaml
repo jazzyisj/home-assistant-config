@@ -1,0 +1,75 @@
+###############################################################################
+## Sensor - Leak Detected Alert
+###############################################################################
+- id: sensor_leak_detected_alert
+  alias: "[Sensor] Leak Detected Alert"
+  description: "Play announcement when alert turns on."
+  trigger:
+    - platform: state
+      entity_id: alert.leak_detected
+      to: "on"
+  action:
+    - repeat:
+        sequence:
+          - service: script.turn_on
+            continue_on_error: true
+            target:
+              entity_id: script.tts_play
+            data:
+              variables:
+                message: >
+                  {%- set entities = expand(state_attr('binary_sensor.leak_detected_alert','entity_id')) -%}
+                  {%- set names = entities|map(attribute='name')|join(', ') -%}
+                  {%- set clist = ', and ' if names.split(', ')|count > 2 else ' and ' -%}
+                  {%- set qty = entities|count -%}
+                  {%- set plural = 'sensors' if qty > 1 else 'sensor' -%}
+                  Attention! Moisture has been detected by the
+                  {{ clist.join(names.rsplit(', ', 1)) }} {{ plural }}!
+                alert: true
+                save_message: true
+
+          - wait_template: "{{ not is_state('alert.leak_detected','on') }}"
+            timeout:
+              minutes: 5
+
+        until:
+          - not:
+              - condition: state
+                entity_id: alert.leak_detected
+                state: "on"
+
+###############################################################################
+## Sensor - Pause Leak Detected Alert
+###############################################################################
+- id: sensor_pause_leak_detected_alert
+  alias: "[Sensor] Pause Leak Detected Alert"
+  description: "Pause alert."
+  max_exceeded: silent
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: pause_leak_detected_alert
+  action:
+    - service: alert.turn_off
+      entity_id: alert.leak_detected
+
+###############################################################################
+## Sensor - Clear Leak Detected Notifications
+###############################################################################
+- id: sensor_clear_leak_detected_notifications
+  alias: "[Sensor] Clear Leak Detected Notifications"
+  description: "Clear notifications."
+  trigger:
+    - platform: state
+      entity_id: alert.leak_detected
+      to: "off"
+  condition: >
+    {{ now() - states.automation.sensor_pause_leak_detected_alert.attributes.last_triggered
+        > timedelta(seconds=30) }}
+  action:
+    - service: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: leak_detected

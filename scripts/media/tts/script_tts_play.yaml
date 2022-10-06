@@ -269,12 +269,9 @@ tts_play:
           data:
             stop_actions: false
 
-        # not if alert - media players turn off
-        - if: "{{ not alert }}"
-          then:
-            - service: script.media_player_set_volumes
-              data:
-                source: tts_all # lower active media player volumes for tts
+        - service: script.media_player_set_volumes
+          data:
+            source: tts_all # lower active media player volumes for tts
 
         #BLOOP set tts player volumes to 0 before media play avoid google bloops
         - service: media_player.volume_set
@@ -305,7 +302,7 @@ tts_play:
               target:
                 entity_id: media_player.fire_tablet
               data:
-                volume_level: 0.75
+                volume_level: 0.25
 
         #BLOOP wait until all tts tts players are idle state
         - wait_template: "{{ expand(media_players)|selectattr('state','ne','idle')|list|count == 0 }}"
@@ -317,9 +314,43 @@ tts_play:
 
         # filter out muted media players so we don't unmute (players must be on for is_volume_muted)
         - variables:
-            media_players: >
+            muted_players: >
               {{ expand(media_players)|selectattr('attributes.is_volume_muted','defined')
-                |selectattr('attributes.is_volume_muted','eq',false)|map(attribute='entity_id')|list }}
+                    |selectattr('attributes.is_volume_muted','eq',true)|map(attribute='entity_id')|list
+                  + expand(media_players)|rejectattr('attributes.is_volume_muted','defined')
+                    |map(attribute='entity_id')|list }}
+
+        # must set volume here per message for override volumes/alert
+        - service: media_player.volume_set
+          target:
+            entity_id: "{{ media_players }}"
+          data:
+            volume_level: "{{ volume }}"
+
+        # volume exceptions - skip if alert (use alert volume)
+        - if: "{{ not alert }}"
+          then:
+            # set volume for garage speaker (override set volume)
+            - if: "{{ 'media_player.garage_speaker' in media_players }}"
+              then:
+                - service: media_player.volume_set
+                  target:
+                    entity_id: media_player.garage_speaker
+                  data:
+                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time','off'),0.8,0.5) }}"
+
+            # increase bathroom speaker volume if shower script is on
+            - if: >
+                {{ 'media_player.bathroom_speaker' in media_players
+                      and is_state('input_boolean.shower_scene','on') }}
+              then:
+                - service: media_player.volume_set
+                  target:
+                    entity_id: media_player.bathroom_speaker
+                  data:
+                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time','off'),0.9,0.6) }}"
+
+        - delay: 1 # allow volumes to set
 
         # play tts message
         - if: "{{ tts_service == 'tts.cloud_say' }}"
@@ -353,36 +384,6 @@ tts_play:
                 entity_id: "{{ media_player }}"
               data:
                 message: "{{ message }}"
-
-        # must set volume here per message for override volume/alert
-        - service: media_player.volume_set
-          target:
-            entity_id: "{{ media_players }}"
-          data:
-            volume_level: "{{ volume }}"
-
-        # volume exceptions - skip if alert (use alert volume)
-        - if: "{{ not alert }}"
-          then:
-            # set volume for garage speaker (override set volume)
-            - if: "{{ 'media_player.garage_speaker' in media_players }}"
-              then:
-                - service: media_player.volume_set
-                  target:
-                    entity_id: media_player.garage_speaker
-                  data:
-                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time','off'),0.8,0.5) }}"
-
-            # increase bathroom speaker volume if shower script is on
-            - if: >
-                {{ 'media_player.bathroom_speaker' in media_players
-                      and is_state('input_boolean.shower_scene','on') }}
-              then:
-                - service: media_player.volume_set
-                  target:
-                    entity_id: media_player.bathroom_speaker
-                  data:
-                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time','off'),0.9,0.6) }}"
 
         - wait_template: "{{ is_state(media_player,'playing') }}"
           timeout: 30

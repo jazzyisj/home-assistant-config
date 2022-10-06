@@ -1,43 +1,208 @@
 ###############################################################################
 ## Templates - Hass
 ###############################################################################
-- binary_sensor:
-    - name: "Alert Disabled"
-      unique_id: alert_disabled
-      icon: mdi:alert
-      device_class: problem
-      state: >
-        {{ states.alert|selectattr('attributes.category','defined')
-            |selectattr('attributes.category','in',['system','hass','network'])
-            |selectattr('state','eq','off')|list|count > 0 }}
+- trigger:
+    - platform: homeassistant
+      event: start
 
-    - name: "Integrations Connected"
-      unique_id: integrations_connected
-      icon: "{{ iif(is_state(this.entity_id,'on'),'mdi:api','mdi:api-off') }}"
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: binary_sensor.fire_tablet_kiosk_mode
+      from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      entity_id: binary_sensor.fire_tablet_kiosk_mode
+      to:
+        - unknown
+        - unavailable
+  binary_sensor:
+    # no alert (covered by kiosk offline)
+    - name: "Fully Kiosk Connected"
+      unique_id: fully_kiosk_connected
+      icon: mdi:monitor-dashboard
       device_class: connectivity
-      state: "{{ is_state('group.integration_connected_sensors','on') }}"
-
-    - name: "Integration Connected Alert"
-      unique_id: integration_connected_alert
-      device_class: problem
-      delay_on: 900
       state: >
-        {{ is_state('binary_sensor.integrations_connected','off')
+        {{ expand(integration_entities('fully_kiosk'))
+            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: sensor.jazzyisj_home_assistant_config_latest_commit
+      from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      entity_id: sensor.jazzyisj_home_assistant_config_latest_commit
+      to:
+        - unknown
+        - unavailable
+  binary_sensor:
+    - name: "Github Connected"
+      unique_id: github_connected
+      icon: mdi:monitor-dashboard
+      device_class: connectivity
+      state: >
+        {{ expand(integration_entities('github'))
+            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: binary_sensor.hassio
+      from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      entity_id: binary_sensor.hassio
+      to:
+        - unknown
+        - unavailable
+  binary_sensor:
+    - name: "Uptime Robot Connected"
+      unique_id: uptime_robot_connected
+      icon: mdi:sort-clock-descending
+      device_class: connectivity
+      state: >
+        {{ expand(integration_entities('uptimerobot'))
+            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: sensor.time
+  sensor:
+    - name: "Unavailable Sensors"
+      unique_id: unavailable_sensors
+      icon: "{{ iif(states(this.entity_id)|int(0) > 0,'mdi:alert-circle','mdi:check-circle') }}"
+      unit_of_measurement: entities
+      state: >
+        {% set entities = state_attr(this.entity_id,'entity_id') %}
+        {% if entities != none %} {{ entities|count }} {% endif %}
+      attributes:
+        entity_id: >
+          {% set ignore_seconds = 60 %}
+          {% set ignored = state_attr('group.ignored_unavailable_entities','entity_id') %}
+          {% set ignore_ts = (now().timestamp() - ignore_seconds)|as_datetime %}
+          {% set browser_mod = expand(integration_entities('browser_mod'))|map(attribute='entity_id')|list %}
+          {% set gdacs = expand(integration_entities('gdacs'))|map(attribute='entity_id')|list %}
+          {% set github = expand(integration_entities('github'))|map(attribute='entity_id')|list %}
+          {% set glances = expand(integration_entities('glances'))|map(attribute='entity_id')|list %}
+          {% set hassio = expand(integration_entities('hassio'))|map(attribute='entity_id')|list %}
+          {% set openuv = expand(integration_entities('openuv'))|map(attribute='entity_id')|list %}
+          {% set utility_meter = expand(integration_entities('utility_meter'))|map(attribute='entity_id')|list %}
+          {% set waqi = expand(integration_entities('waqi'))|map(attribute='entity_id')|list %}
+          {% set entities = states|rejectattr('domain','in',['group','geo_location'])
+              |rejectattr('entity_id','in',browser_mod)
+              |rejectattr('entity_id','in',gdacs)
+              |rejectattr('entity_id','in',github)
+              |rejectattr('entity_id','in',glances)
+              |rejectattr('entity_id','in',hassio)
+              |rejectattr('entity_id','in',openuv)
+              |rejectattr('entity_id','in',utility_meter)
+              |rejectattr('entity_id','in',waqi)
+              |rejectattr('entity_id','search','jlaptop_chrome')
+              |rejectattr('entity_id','search','jlaptop_edge')
+              |rejectattr('entity_id','search','jwork_chrome')
+              |rejectattr('entity_id','search','jphone_app')
+              |rejectattr('entity_id','search','sphone_app')
+              |rejectattr('entity_id','search','jason_laptop_media_player')
+              |rejectattr('entity_id','search','jason_phone_media_player')
+              |rejectattr('entity_id','search','sheri_phone_media_player')
+              |rejectattr('entity_id','search','_timers')
+              |rejectattr('entity_id','search','_alarms')
+              |rejectattr('entity_id','search','sensor.daily_energy_consumption')
+              |rejectattr('entity_id','search','_do_not_disturb')
+              |rejectattr('entity_id','search','_alarm_volume')
+              |rejectattr('entity_id','search','_next_alarm')
+              |rejectattr('last_changed','ge',ignore_ts)
+              |selectattr('state','in',['unavailable','unknown']) %}
+          {% if ignored != none %}
+            {% set entities =  entities|rejectattr('entity_id','in',ignored) %}
+          {% endif %}
+          {{ entities|map(attribute='entity_id')|list }}
+
+- binary_sensor:
+    - name: "Github Connected Alert"
+      unique_id: github_connected_alert
+      icon: mdi:monitor-dashboard
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.github_connected','off')
             and is_state('input_boolean.hass_alerts','on') }}
 
-    - name: "Kiosk Connected"
-      unique_id: kiosk_connected
+    - name: "Uptime Robot Connected Alert"
+      unique_id: uptime_robot_connected_alert
+      icon: mdi:sort-clock-descending
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.uptime_robot_connected','off')
+            and is_state('input_boolean.hass_alerts','on') }}
+
+    - name: "Integration Offline"
+      unique_id: integration_offline
+      icon: "{{ iif(is_state(this.entity_id,'on'),'mdi:api','mdi:api-off') }}"
+      device_class: connectivity
+      state: >
+        {% set entities = state_attr(this.entity_id,'entity_id') %}
+        {{ false if entities == none else entities|count > 0 }}
+      attributes:
+        entity_id: >
+          {{ expand('group.integration_connected_sensors')
+              |selectattr('state','eq','off')|map(attribute='entity_id')|list }}
+
+    - name: "Integration Offline Alert"
+      unique_id: integration_offline_alert
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.integration_offline','on')
+            and is_state('input_boolean.hass_alerts','on') }}
+
+    - name: "Kiosk Online"
+      unique_id: kiosk_online
       icon: mdi:tablet-dashboard
       device_class: connectivity
       state: >
         {{ is_state('device_tracker.kiosk_tablet','home')
-            and is_state('binary_sensor.fire_tablet_device_admin','on')
-            and is_state('binary_sensor.kiosk_internal_browser_fullykiosk','on') }}
+            and is_state('binary_sensor.fully_kiosk_connected','on')
+            and not states('sensor.kiosk_internal_browser_user') in ['unknown','unavailable'] }}
+
+    - name: "Kiosk Offline Alert"
+      unique_id: kiosk_offline_alert
+      icon: mdi:tablet-dashboard
+      device_class: problem
+      delay_on: 300
+      state: >
+        {{ is_state('binary_sensor.kiosk_online','off')
+            and is_state('input_boolean.hass_alerts','on') }}
 
     - name: "Update Available Alert"
       unique_id: update_available_alert
       icon: mdi:alert
-      device_class: update
       state: >
         {% if is_state('input_boolean.hass_alerts','on') %}
           {{ states('sensor.updates_available')|int(-1) > 0
@@ -45,25 +210,10 @@
         {% else %} false
         {% endif %}
 
-    - name: "Uptime Robot Connected"
-      unique_id: uptime_robot_connected
-      icon: mdi:sort-clock-descending
-      device_class: connectivity
-      state: "{{ states('sensor.hassio') in ['up','pause'] }}"
-
-    - name: "Uptime Robot Connected Alert"
-      unique_id: uptime_robot_connected_alert
-      icon: mdi:sort-clock-descending
-      device_class: problem
-      delay_on: 300
-      state: >
-        {{ is_state('binary_sensor.uptime_robot_connected','off')
-            and is_state('input_boolean.hass_alerts','on') }}
-
     - name: "Remote UI Alert"
       unique_id: remote_ui_alert
       device_class: problem
-      delay_on: 300 # prevent trigger on shutdown
+      delay_on: 60
       state: >
         {{ is_state('binary_sensor.remote_ui','off')
             and is_state('input_boolean.hass_alerts','on') }}
@@ -107,6 +257,15 @@
           {% endfor %}
           {{ low_batteries.value }}
 
+    - name: "Alert Disabled"
+      unique_id: alert_disabled
+      icon: mdi:alert
+      device_class: problem
+      state: >
+        {{ states.alert|selectattr('attributes.category','defined')
+            |selectattr('attributes.category','in',['system','hass','network'])
+            |selectattr('state','eq','off')|list|count > 0 }}
+
     - name: "HASS LED Alert"
       unique_id: hass_led_alert
       state: >
@@ -146,7 +305,7 @@
 
         {% elif is_state('sensor.zwave_status','severe')
             or is_state('sensor.hass_files_status','severe')
-            or is_state('binary_sensor.integrations_connected','off')
+            or is_state('binary_sensor.integration_offline','on')
             or is_state('binary_sensor.remote_ui','off')
             or is_state('alert.unknown_browser','on') %} severe
 
@@ -294,57 +453,6 @@
               |selectattr('attributes.authorized','ne',true)
               |rejectattr('state','in',['unknown','unavailable'])
               |map(attribute='entity_id')|list }}
-
-    - name: "Unavailable Sensors"
-      unique_id: unavailable_sensors
-      icon: "{{ iif(states(this.entity_id)|int(0) > 0,'mdi:alert-circle','mdi:check-circle') }}"
-      unit_of_measurement: entities
-      state: >
-        {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {% if entities != none %} {{ entities|count }} {% endif %}
-      attributes:
-        entity_id:
-          "{{ [] }}" #>
-          # {% set ignore_seconds = 60 %}
-          # {% set ignored = state_attr('group.ignored_unavailable_entities','entity_id') %}
-          # {% set ignore_ts = (now().timestamp() - ignore_seconds)|as_datetime %}
-          # {% set browser_mod = expand(integration_entities('browser_mod'))|map(attribute='entity_id')|list %}
-          # {% set gdacs = expand(integration_entities('gdacs'))|map(attribute='entity_id')|list %}
-          # {% set github = expand(integration_entities('github'))|map(attribute='entity_id')|list %}
-          # {% set glances = expand(integration_entities('glances'))|map(attribute='entity_id')|list %}
-          # {% set hassio = expand(integration_entities('hassio'))|map(attribute='entity_id')|list %}
-          # {% set openuv = expand(integration_entities('openuv'))|map(attribute='entity_id')|list %}
-          # {% set utility_meter = expand(integration_entities('utility_meter'))|map(attribute='entity_id')|list %}
-          # {% set waqi = expand(integration_entities('waqi'))|map(attribute='entity_id')|list %}
-          # {% set entities = states|rejectattr('domain','in',['group','geo_location'])
-          #     |rejectattr('entity_id','in',browser_mod)
-          #     |rejectattr('entity_id','in',gdacs)
-          #     |rejectattr('entity_id','in',github)
-          #     |rejectattr('entity_id','in',glances)
-          #     |rejectattr('entity_id','in',hassio)
-          #     |rejectattr('entity_id','in',openuv)
-          #     |rejectattr('entity_id','in',utility_meter)
-          #     |rejectattr('entity_id','in',waqi)
-          #     |rejectattr('entity_id','search','jlaptop_chrome')
-          #     |rejectattr('entity_id','search','jlaptop_edge')
-          #     |rejectattr('entity_id','search','jwork_chrome')
-          #     |rejectattr('entity_id','search','jphone_app')
-          #     |rejectattr('entity_id','search','sphone_app')
-          #     |rejectattr('entity_id','search','jason_laptop_media_player')
-          #     |rejectattr('entity_id','search','jason_phone_media_player')
-          #     |rejectattr('entity_id','search','sheri_phone_media_player')
-          #     |rejectattr('entity_id','search','_timers')
-          #     |rejectattr('entity_id','search','_alarms')
-          #     |rejectattr('entity_id','search','sensor.daily_energy_consumption')
-          #     |rejectattr('entity_id','search','_do_not_disturb')
-          #     |rejectattr('entity_id','search','_alarm_volume')
-          #     |rejectattr('entity_id','search','_next_alarm')
-          #     |rejectattr('last_changed','ge',ignore_ts)
-          #     |selectattr('state','in',['unavailable','unknown']) %}
-          # {% if ignored != none %}
-          #   {% set entities =  entities|rejectattr('entity_id','in',ignored) %}
-          # {% endif %}
-          # {{ entities|map(attribute='entity_id')|list }}
 
     - name: "HASS Addon Memory Percent"
       unique_id: hass_addon_memory_percent
