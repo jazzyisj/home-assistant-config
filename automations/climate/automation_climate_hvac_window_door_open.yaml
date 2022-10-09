@@ -18,28 +18,6 @@
 
     - repeat:
         sequence:
-          - service: script.turn_on
-            continue_on_error: true
-            target:
-              entity_id: script.tts_play
-            data:
-              variables:
-                message: >
-                  {%- set msg = namespace(value='') %}
-                  {%- set entities =  expand(state_attr('binary_sensor.hvac_window_door_open_alert','entity_id')) %}
-                  {%- set qty = entities|count %}
-                  {%- for item in entities -%}
-                      {%- if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif -%}
-                      {%- set msg.value = msg.value ~ item.name|replace(' Open Alert','') -%}
-                  {%- endfor %}
-                  {%- set clist = ', and ' if msg.value.split(', ')|count > 2 else ' and ' -%}
-                  {%- set plural = ' are' if qty|int(0) > 1 else ' is' -%}
-                  Attention! The thermostat has been turned off.
-                  The {{ clist.join(msg.value.rsplit(', ',1)) ~ plural }} open!
-                quiet_play: true
-                night_play: true
-                save_message: true
-
           - wait_template: "{{ not is_state('alert.hvac_window_door_open','on') or not is_state('climate.thermostat','off') }}"
             timeout: # wait to check if alert turns off/is paused or hvac has been turned back on
               minutes: 15
@@ -66,10 +44,6 @@
                 then:
                   - service: alert.turn_on # restarts automation
                     entity_id: alert.hvac_window_door_open
-            else:
-              - wait_template: "{{ is_state('alert.hvac_window_door_open','idle') }}"
-                timeout: # wait before replay tts
-                  minutes: 30
         until:
           - condition: state
             entity_id: alert.hvac_window_door_open
@@ -81,37 +55,3 @@
         entity_id: climate.thermostat
       data:
         hvac_mode: "{{ states('input_select.hvac_mode') }}"
-
-###############################################################################
-## Climate - Pause HVAC Window Door Open Alert
-###############################################################################
-- id: climate_pause_hvac_window_door_open_alert
-  alias: "[Climate] Pause HVAC Window Door Open Alert"
-  description: "Pause alert."
-  max_exceeded: silent
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: pause_hvac_window_door_open_alert
-  action:
-    - service: alert.turn_off
-      entity_id: alert.hvac_window_door_open
-
-###############################################################################
-## Climate - Clear HVAC Window Door Open Notifications
-###############################################################################
-- id: climate_clear_hvac_window_door_open_notifications
-  alias: "[Climate] Clear HVAC Window Door Open Notifications"
-  description: "Clear notifications."
-  trigger:
-    - platform: state
-      entity_id: alert.hvac_window_door_open
-      to: "off"
-  condition: "{{ now() - states.automation.climate_pause_hvac_window_door_open_alert.attributes.last_triggered > timedelta(seconds=30) }}"
-  action:
-    - service: notify.jason
-      data:
-        message: clear_notification
-        data:
-          tag: hvac_window_door_open

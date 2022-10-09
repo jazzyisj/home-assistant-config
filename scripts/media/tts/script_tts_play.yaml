@@ -58,9 +58,6 @@ tts_play:
     - service: browser_mod.notification
       data:
         duration: 30000
-        action_text: "DISMISS"
-        action: navigate
-        navigation_path: /
         message: "{{ message }}"
 
     - or:
@@ -158,14 +155,6 @@ tts_play:
             {% endfor %}
           {% endif %}
           {{ mass_queues.entity_id|unique|list }}
-        stop_players: > #BITWISE
-          {% set players = namespace(entity_id=[]) %}
-          {% for item in expand(media_players)|selectattr('state','in',['playing','paused','buffering','on','home']) %}
-            {% if item.attributes.supported_features|bitwise_and(4096) %}
-              {% set players.entity_id = players.entity_id + [item.entity_id] %}
-            {% endif %}
-          {% endfor %}
-          {{ players.entity_id }}
 
     - if: "{{ mute_tts }}"
       then:
@@ -223,12 +212,22 @@ tts_play:
           target:
             entity_id: input_boolean.tts
 
+        # filter out muted media players so we don't unmute (player must be on for is_volume_muted)
+        - variables:
+            muted_players: >
+              {{ expand(media_players)|selectattr('attributes.is_volume_muted','defined')
+                    |selectattr('attributes.is_volume_muted','eq',true)|map(attribute='entity_id')|list }}
+            media_players: >
+              {{ expand(media_players)|rejectattr('entity_id','in',muted_players)|map(attribute='entity_id')|list }}
+
         # store active tts players for tts queue finished
         - service: input_text.set_value
           target:
             entity_id: input_text.tts_active_players
           data:
             value: "{{ media_players|join(',') }}"
+
+        #IDEA media player announce - this not necessary?
 
         #MASS media playing on tts player, turn on resume boolean
         - if: >
@@ -283,6 +282,16 @@ tts_play:
           data:
             volume_level: 0
 
+        - variables:
+            stop_players: > #BITWISE
+              {% set players = namespace(entity_id=[]) %}
+              {% for item in expand(media_players)|selectattr('state','in',['playing','paused','buffering','on','home']) %}
+                {% if item.attributes.supported_features|bitwise_and(4096) %}
+                  {% set players.entity_id = players.entity_id + [item.entity_id] %}
+                {% endif %}
+              {% endfor %}
+              {{ players.entity_id }}
+
         #BLOOP tts players must be stopped - prevent volume jump
         - if: "{{ stop_players|count > 0 }}"
           then:
@@ -315,14 +324,6 @@ tts_play:
           target:
             entity_id: automation.media_player_save_volume
 
-        # filter out muted media players so we don't unmute (players must be on for is_volume_muted)
-        - variables:
-            muted_players: >
-              {{ expand(media_players)|selectattr('attributes.is_volume_muted','defined')
-                    |selectattr('attributes.is_volume_muted','eq',true)|map(attribute='entity_id')|list
-                  + expand(media_players)|rejectattr('attributes.is_volume_muted','defined')
-                    |map(attribute='entity_id')|list }}
-
         # must set volume here per message for override volumes/alert
         - service: media_player.volume_set
           target:
@@ -337,6 +338,7 @@ tts_play:
             - if: "{{ 'media_player.garage_speaker' in media_players }}"
               then:
                 - service: media_player.volume_set
+                  enabled: false #TODO speaker in house
                   target:
                     entity_id: media_player.garage_speaker
                   data:

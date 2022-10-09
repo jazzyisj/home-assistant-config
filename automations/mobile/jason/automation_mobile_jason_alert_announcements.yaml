@@ -1,0 +1,103 @@
+###############################################################################
+## Mobile - Jason Alert Announcements
+###############################################################################
+- id: mobile_jason_alert_announcements
+  alias: "[Mobile] Jason Alert Announcements"
+  description: "Play alert tts announcement."
+  mode: parallel
+  variables:
+    message: >
+      {% set t = trigger.entity_id %}
+      {% if t == 'alert.jason_phone_wifi_off' %}
+        Jason, your phone wifi is off.
+      {% elif t == 'alert.jason_phone_wifi_disconnected' %}
+        Jason, your phone wifi has not connected to the home network.
+      {% elif t == 'alert.jason_phone_ringer_off' %}
+        Jason, your phone ringer is off.
+      {% elif t == 'alert.jason_phone_offline' %}
+        Jason, your mobile phone went offline at
+        {{ as_local(states.binary_sensor.jason_phone_connected.last_changed).strftime('%-I:%M %p') }}
+      {% elif t == 'alert.jason_phone_bluetooth_off' %}
+        Jason, your phone bluetooth is off.
+      {% elif t == 'alert.jason_phone_bluetooth_disconnected' %}
+        Jason, your phone bluetooth is disconnected from Home Assistant.
+      {% elif t == 'alert.jason_phone_bluetooth_device' %}
+        Jason, get your shit together.
+        {% if is_state('binary_sensor.jason_phone_headphones_connected','on') %}
+          Your headphones are connected to your phone!
+        {% elif is_state('binary_sensor.jason_phone_jeep_connected','on') %}
+          Your phone is still connected to the Jeep uconnect!
+        {% endif %}
+      {% elif t == 'alert.jason_phone_battery_low' %}
+          Pay attention Jason!  You've let your phone battery get down to
+          {{ states('sensor.jphone_battery_level') }}%. Plug the friggin thing in!
+      {% elif t == 'alert.jason_phone_high_accuracy' %}
+          Jason, your phone high accuracy mode is on.
+      {% endif %}
+  trigger:
+    - platform: state
+      entity_id: &alerts
+        - alert.jason_phone_wifi_off
+        - alert.jason_phone_wifi_disconnected
+        - alert.jason_phone_ringer_off
+        - alert.jason_phone_offline
+        - alert.jason_phone_bluetooth_off
+        - alert.jason_phone_bluetooth_disconnected
+        - alert.jason_phone_bluetooth_device
+        - alert.jason_phone_battery_low
+        - alert.jason_phone_high_accuracy
+      to: "on"
+      for:
+        minutes: 15
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to: Home
+      from: Night
+      for:
+        minutes: 30
+
+    - platform: state
+      id: occupancy
+      entity_id: binary_sensor.jason_home
+      to: "on"
+      from: "off"
+      for:
+        minutes: 15
+  condition:
+    - condition: state
+      entity_id: *alerts
+      state: "on"
+      match: any
+
+    - condition: state
+      entity_id: binary_sensor.jason_home
+      state: "on"
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state: Home
+
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: "{{ iif(trigger.id == 'occupancy',is_state('input_boolean.occupancy_override','off'),true) }}"
+  action:
+    - repeat:
+        sequence:
+          - service: script.turn_on
+            continue_on_error: true
+            target:
+              entity_id: script.tts_play
+            data:
+              variables:
+                message: "{{ message }}"
+                quiet_play: true
+
+          - wait_template: "{{ not is_state(trigger.entity_id,'on') }}"
+            timeout:
+              hours: 1
+
+        until:
+          - condition: template
+            value_template: "{{ not is_state(trigger.entity_id,'on') }}"
