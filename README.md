@@ -1,6 +1,6 @@
 # Home Assistant Configuration
 
-Home Assistant Configuration, updated to v2022.9
+Home Assistant Configuration, updated to v2022.10.5
 
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_dark.png)
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_light.png)
@@ -8,43 +8,43 @@ Home Assistant Configuration, updated to v2022.9
 ## Entity Counts:
 
     Alarm_control_panel: 3
-    Alert: 98
-    Automation: 755
-    Binary_sensor: 443
-    Button: 66
+    Alert: 113
+    Automation: 604
+    Binary_sensor: 475
+    Button: 62
     Calendar: 16
-    Camera: 24
+    Camera: 21
     Climate: 5
     Counter: 1
     Cover: 1
-    Device_tracker: 63
+    Device_tracker: 62
     Fan: 9
-    Group: 50
-    Input_boolean: 175
-    Input_button: 1
+    Group: 51
+    Input_boolean: 179
+    Input_button: 2
     Input_datetime: 38
-    Input_number: 188
+    Input_number: 190
     Input_select: 10
-    Input_text: 54
-    Light: 47
+    Input_text: 69
+    Light: 48
     Lock: 4
-    Media_player: 44
-    Number: 67
+    Media_player: 46
+    Number: 85
     Person: 2
     Proximity: 2
     Remote: 1
-    Scene: 10
+    Scene: 9
     Schedule: 1
-    Script: 78
-    Select: 121
-    Sensor: 974
+    Script: 79
+    Select: 160
+    Sensor: 982
     Sun: 1
-    Switch: 126
+    Switch: 144
     Timer: 54
-    Update: 122
+    Update: 128
     Variable: 1
     Weather: 8
-    Zone: 7
+    Zone: 10
 
 ## Installed Addons
 
