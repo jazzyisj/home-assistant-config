@@ -1,0 +1,55 @@
+###############################################################################
+## Lock Door Locks
+###############################################################################
+lock_door_locks:
+  alias: "Lock Door Locks"
+  description: "Lock door locks."
+  icon: mdi:lock
+  mode: queued
+  fields:
+    entity_id:
+      description: "Door locks to lock."
+      example: "lock.side_door_lock"
+    code:
+      description: "Door unlock code."
+      example: "1111"
+  variables:
+    entity_id: "{{ entity_id|default(expand('group.door_locks')|map(attribute='entity_id')|list) }}"
+    code: "{{ code|default(none) }}"
+  sequence:
+    - repeat: # try 3 times if unlocked locks
+        while: >
+          {{ expand(entity_id)|selectattr('state','eq','unlocked')
+              |map(attribute='entity_id')|list|count > 0 and repeat.index < 4 }}
+        sequence:
+          - if: "{{ code != none }}"
+            then:
+              - service: lock.lock
+                target:
+                  entity_id: >
+                    {{ expand(entity_id)|selectattr('state','eq','unlocked')
+                        |map(attribute='entity_id')|list }}
+                data:
+                  code: "{{ code }}"
+            else:
+              - service: lock.lock
+                target:
+                  entity_id: >
+                    {{ expand(entity_id)|selectattr('state','eq','unlocked')
+                        |map(attribute='entity_id')|list }}
+
+          - wait_template: >
+              {{ expand(entity_id)|selectattr('state','eq','unlocked')
+                  |map(attribute='entity_id')|list|count == 0 }}
+            timeout: 30
+
+    - if: >
+        {{ expand(entity_id)|selectattr('state','in',['unlocked','unknown','unavailable'])
+            |map(attribute='entity_id')|list|count != 0 }}
+      then:
+        - service: input_boolean.turn_on
+          target: # turn on malfunction boolean for any locks that didn't lock
+            entity_id: >
+              {{ expand(entity_id)|selectattr('state','in',['unlocked','unknown','unavailable'])
+                  |map(attribute='entity_id')|list|replace('lock.','input_boolean.')
+                  |replace('_door_lock','_door_lock_malfunction') }}

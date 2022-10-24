@@ -1,0 +1,68 @@
+###############################################################################
+## Fan - Ceiling Fans Auto Off
+###############################################################################
+- id: fan_ceiling_fans_auto_off
+  alias: "[Fan] Ceiling Fans Auto Off"
+  description: "Turn ceiling fans off."
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id:
+        - fan.bedroom_fan
+        - fan.office_fan
+      for:
+        hours: 8
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Away
+        - Vacation
+      for:
+        minutes: 1 # allow timer to cancel
+
+    - platform: state
+      id: schedule
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+        - input_boolean.fan_schedule
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+  condition:
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: "{{ iif(trigger.id == 'occupancy',is_state('input_boolean.occupancy_override','off'),true) }}"
+
+    - condition: state
+      alias: "HVAC fan or fan schedule is not on"
+      entity_id:
+        - binary_sensor.hvac_fan
+        - binary_sensor.schedule_fan
+      state: "off"
+  action:
+    # prevent triggering device in use timers
+    - service: automation.turn_off
+      target:
+        entity_id: automation.fan_in_use_timer
+      data:
+        stop_actions: false
+
+    - repeat:
+        for_each:
+          - fan.bedroom_fan
+          - fan.office_fan
+        sequence:
+          - if: "{{ is_state(repeat.item,'on') and is_state('timer.' ~ repeat.item.split('.')[1],'idle') }}"
+            then:
+              - service: fan.turn_off
+                target:
+                  entity_id: "{{ repeat.item }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.fan_in_use_timer

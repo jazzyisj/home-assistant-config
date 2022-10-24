@@ -105,36 +105,19 @@
           {% set ignore_seconds = 60 %}
           {% set ignored = state_attr('group.ignored_unavailable_entities','entity_id') %}
           {% set ignore_ts = (now().timestamp() - ignore_seconds)|as_datetime %}
-          {% set browser_mod = expand(integration_entities('browser_mod'))|map(attribute='entity_id')|list %}
-          {% set gdacs = expand(integration_entities('gdacs'))|map(attribute='entity_id')|list %}
-          {% set github = expand(integration_entities('github'))|map(attribute='entity_id')|list %}
-          {% set glances = expand(integration_entities('glances'))|map(attribute='entity_id')|list %}
-          {% set hassio = expand(integration_entities('hassio'))|map(attribute='entity_id')|list %}
-          {% set openuv = expand(integration_entities('openuv'))|map(attribute='entity_id')|list %}
-          {% set utility_meter = expand(integration_entities('utility_meter'))|map(attribute='entity_id')|list %}
-          {% set waqi = expand(integration_entities('waqi'))|map(attribute='entity_id')|list %}
           {% set entities = states|rejectattr('domain','in',['group','geo_location'])
-              |rejectattr('entity_id','in',browser_mod)
-              |rejectattr('entity_id','in',gdacs)
-              |rejectattr('entity_id','in',github)
-              |rejectattr('entity_id','in',glances)
-              |rejectattr('entity_id','in',hassio)
-              |rejectattr('entity_id','in',openuv)
-              |rejectattr('entity_id','in',utility_meter)
-              |rejectattr('entity_id','in',waqi)
-              |rejectattr('entity_id','search','jlaptop_chrome')
-              |rejectattr('entity_id','search','jlaptop_edge')
-              |rejectattr('entity_id','search','jwork_chrome')
-              |rejectattr('entity_id','search','jphone_app')
-              |rejectattr('entity_id','search','sphone_app')
-              |rejectattr('entity_id','search','jason_laptop_media_player')
-              |rejectattr('entity_id','search','jason_phone_media_player')
-              |rejectattr('entity_id','search','sheri_phone_media_player')
-              |rejectattr('entity_id','search','_timers')
-              |rejectattr('entity_id','search','_alarms')
+              |rejectattr('entity_id','in',expand(integration_entities('browser_mod'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('gdacs'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('github'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('glances'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('hassio'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('openuv'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('utility_meter'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','in',expand(integration_entities('waqi'))|map(attribute='entity_id')|list)
+              |rejectattr('entity_id','search','jlaptop_chrome|jlaptop_edge|jwork_chrome|jphone_app|sphone_app')
+              |rejectattr('entity_id','search','jason_laptop_media_player|jason_phone_media_player|sheri_phone_media_player')
+              |rejectattr('entity_id','search','_timers|_alarms|_do_not_disturb|_alarm_volume')
               |rejectattr('entity_id','search','sensor.daily_energy_consumption')
-              |rejectattr('entity_id','search','_do_not_disturb')
-              |rejectattr('entity_id','search','_alarm_volume')
               |rejectattr('entity_id','search','_next_alarm')
               |rejectattr('last_changed','ge',ignore_ts)
               |selectattr('state','in',['unavailable','unknown']) %}
@@ -177,7 +160,7 @@
     - name: "Integration Offline Alert"
       unique_id: integration_offline_alert
       device_class: problem
-      delay_on: 60
+      delay_on: 300
       state: >
         {{ is_state('binary_sensor.integration_offline','on')
             and is_state('input_boolean.hass_alerts','on') }}
@@ -200,6 +183,15 @@
         {{ is_state('binary_sensor.kiosk_online','off')
             and is_state('input_boolean.hass_alerts','on') }}
 
+    - name: "Backup Alert"
+      unique_id: backup_alert
+      icon: mdi:cloud-upload-outline
+      state: >
+        {% if is_state('input_boolean.hass_alerts','on') %}
+          {{ states('sensor.backup_size_status') in ['severe','critical','error']
+              or is_state('binary_sensor.home_assistant_google_drive_backup_running','off') }}
+        {% endif %}
+
     - name: "Update Available Alert"
       unique_id: update_available_alert
       icon: mdi:alert
@@ -207,7 +199,6 @@
         {% if is_state('input_boolean.hass_alerts','on') %}
           {{ states('sensor.updates_available')|int(-1) > 0
               or is_state('group.other_update_entities','on') }} {#UPDATE until update entites #}
-        {% else %} false
         {% endif %}
 
     - name: "Remote UI Alert"
@@ -221,7 +212,7 @@
     - name: "Unavailable Sensor Alert"
       unique_id: unavailable_sensor_alert
       device_class: problem
-      delay_on: 900
+      delay_on: 300
       state: >
         {{ states('sensor.unavailable_sensors')|int(-1) > 0
             and is_state('input_boolean.hass_alerts','on') }}
@@ -241,7 +232,6 @@
         {% set entities = state_attr(this.entity_id,'entity_id') %}
         {% if entities != none %}
           {{ entities|count > 0 and is_state('input_boolean.system_alerts','on') }}
-        {% else %} false
         {% endif %}
       attributes:
         entity_id: >
@@ -261,10 +251,7 @@
       unique_id: alert_disabled
       icon: mdi:alert
       device_class: problem
-      state: >
-        {{ states.alert|selectattr('attributes.category','defined')
-            |selectattr('attributes.category','in',['system','hass','network'])
-            |selectattr('state','eq','off')|list|count > 0 }}
+      state: "{{ states.alert|selectattr('state','eq','off')|list|count > 0 }}"
 
     - name: "HASS LED Alert"
       unique_id: hass_led_alert
@@ -327,10 +314,10 @@
       state: >
         {% set size = states('sensor.hassio_db')|int(-1) %}
         {% if size == -1 %} error
-        {% elif size < 2500 %} ok
-        {% elif size < 5000 %} minor
-        {% elif size < 7500 %} warning
-        {% elif size < 10000 %} severe
+        {% elif size < 5000 %} ok
+        {% elif size < 6000 %} minor
+        {% elif size < 7000 %} warning
+        {% elif size < 8000 %} severe
         {% else %} critical
         {% endif %}
 
@@ -410,7 +397,7 @@
         {% elif is_state('sensor.hass_db_size_status','warning')
           or is_state('sensor.backup_size_status','warning')
           or is_state('sensor.hass_log_size_status','warning')
-          or is_state('sensor.alarm_snapshots_size_status','crwarningitical')
+          or is_state('sensor.alarm_snapshots_size_status','warning')
           or is_state('sensor.tts_size_status','warning') %} warning
 
         {% elif is_state('sensor.hass_db_size_status','minor')

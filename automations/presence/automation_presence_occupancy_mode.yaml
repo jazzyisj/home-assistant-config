@@ -66,17 +66,19 @@
                   target:
                     entity_id: input_boolean.occupancy_override
               else:
-                - service: timer.cancel # cancel light timers, ignore timed lights so they don't turn off
+                # don't turn off dining room light, bathroom lights
+                - service: timer.cancel
                   target:
                     entity_id: >
                       {% set timed_lights = states.timer
                           |selectattr('attributes.timed_light','defined')
-                          |selectattr('attributes.timed_light','eq','light')
+                          |selectattr('attributes.timed_light','eq',true)
                           |map(attribute='entity_id')|list %}
                       {{ states.timer
                           |selectattr('attributes.type','defined')
                           |selectattr('attributes.type','eq','light')
-                          |rejectattr('entity_id','in',timed_lights)
+                          |rejectattr('entity_id','in',['timer.dining_room_light'
+                            ,'timer.bathroom_vanity_light','timer.bathroom_shower_light'])
                           |map(attribute='entity_id')|list }}
 
                 - service: homeassistant.turn_off
@@ -159,22 +161,11 @@
       event_data:
         action: set_away_mode
   action:
-    - choose:
-        - conditions: "{{ trigger.event.data['action'] == 'set_home_mode' }}"
-          sequence:
-            - service: input_select.select_option
-              target:
-                entity_id: input_select.occupancy_mode
-              data:
-                option: Home
-
-        - conditions: "{{ trigger.event.data['action'] == 'set_away_mode' }}"
-          sequence:
-            - service: input_select.select_option
-              target:
-                entity_id: input_select.occupancy_mode
-              data:
-                option: Away
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: "{{ (trigger.event.data['action'])[4:-5]|title }}"
 
 ###############################################################################
 ## Presence - Occupancy Mode Reset
@@ -193,15 +184,18 @@
       target:
         entity_id: input_select.occupancy_mode
       data:
-        # set waketime +1 day if bedtime > waketime (still "yesterday" before day_reset)
+        # set waketime +1 day if bedtime < day_reset (still "yesterday")
         option: >
           {% set waketime = states('sensor.waketime_today')|as_datetime
             if states('sensor.waketime_today') not in ['unknown','unavailable'] else none %}
           {% set bedtime = states('sensor.delayed_bedtime')|as_datetime
             if states('sensor.delayed_bedtime') not in ['unknown','unavailable'] else none %}
+
           {% if bedtime != none and waketime != none %}
-            {% set waketime = waketime + timedelta(days=1) if bedtime > waketime else waketime %}
+            {% set day_reset = today_at(states('input_datetime.day_reset')) %}
+            {% set waketime = waketime + timedelta(days=1) if bedtime < day_reset else waketime %}
           {% endif %}
+
           {% if is_state('binary_sensor.someone_home','off') %}
             {{ 'Vacation' if is_state('input_select.occupancy_mode','Vacation') else 'Away' }}
           {% elif bedtime == none or waketime == none %}

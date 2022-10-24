@@ -2,8 +2,8 @@
 ## Lock - Auto Unlock
 ###############################################################################
 - id: lock_auto_unlock
-  alias: '[Lock] Auto Unlock'
-  description: 'Automatically unlock locks.'
+  alias: "[Lock] Auto Unlock"
+  description: "Automatically unlock locks."
   mode: queued
   variables:
     person: >
@@ -11,6 +11,7 @@
       {% if action in ['disarm_alarm_jason','open_garage_jason'] %} jason
       {% elif action in ['disarm_alarm_sheri','open_garage_sheri'] %} sheri
       {% endif %}
+    locks: "{{ ['lock.side_door_lock', 'lock.back_door_lock'] }}"
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
@@ -32,56 +33,26 @@
       event_data:
         action: open_garage_sheri
   condition: >
-    {{ expand(['lock.side_door_lock','lock_back_door_lock'])
-        |selectattr('state','eq','locked')|map(attribute='entity_id')|list|count > 0 }}
+    {{ expand(locks)|selectattr('state','eq','locked')
+        |map(attribute='entity_id')|list|count > 0 }}
   action:
     - wait_template: "{{ is_state('alarm_control_panel.master','disarmed') }}"
       timeout: 90
       continue_on_timeout: false
 
-    - repeat:
-        while:
-          - condition: template
-            value_template: '{{ repeat.index < 4 }}'
+    - choose:
+        - conditions: "{{ person == 'jason' }}"
+          sequence:
+            - service: script.unlock_door_locks
+              target:
+                entity_id: "{{ locks }}"
+              data:
+                code: !secret LOCK_JASON #LOCK_USER
 
-          - condition: template
-            value_template: >
-              {{ expand(['lock.side_door_lock','lock_back_door_lock'])
-                  |selectattr('state','eq','locked')|map(attribute='entity_id')|list|count > 0 }}
-        sequence:
-          - variables:
-              locks: >
-                {{ expand(['lock.side_door_lock','lock_back_door_lock'])
-                    |selectattr('state','eq','locked')|map(attribute='entity_id')|list }}
-          - choose:
-              - conditions: "{{ person == 'jason' }}"
-                sequence:
-                  - service: lock.unlock
-                    target:
-                      entity_id: '{{ locks }}'
-                    data:
-                      code: !secret LOCK_JASON #LOCK_USER
-
-              - conditions: "{{ person == 'sheri' }}"
-                sequence:
-                  - service: lock.unlock
-                    target:
-                      entity_id: '{{ locks }}'
-                    data:
-                      code: !secret LOCK_SHERI #LOCK_USER
-
-          - wait_template: >
-              {{ expand(['lock.side_door_lock','lock_back_door_lock'])
-                  |selectattr('state','eq','locked')|map(attribute='entity_id')|list|count == 0 }}
-            timeout: 10
-
-    - variables:
-        locks: >
-          {{ expand(['lock.side_door_lock','lock_back_door_lock'])
-                |selectattr('state','eq','locked')|map(attribute='entity_id')|list }}
-
-    - if: '{{ locks|count > 0 }}'
-      then:
-        - service: input_boolean.turn_on
-          target:
-            entity_id: "{{ locks|replace('lock.','input_boolean.')|replace('_lock','_lock_jammed') }}"
+        - conditions: "{{ person == 'sheri' }}"
+          sequence:
+            - service: script.unlock_door_locks
+              target:
+                entity_id: "{{ locks }}"
+              data:
+                code: !secret LOCK_SHERI #LOCK_USER
