@@ -87,7 +87,6 @@ Home Assistant Configuration, updated to v2022.10.5
     #BUG - unfixable bug in HA/component/device
     #BUGFIX - workaround for bug
 
-    #NOTIFY - sheri notifications disabled
     #UPDATE - waiting for update entities
     #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes

@@ -93,13 +93,13 @@
     - platform: state
       entity_id: sensor.time
   sensor:
-    - name: "Unavailable Sensors"
-      unique_id: unavailable_sensors
-      icon: "{{ iif(states(this.entity_id)|int(0) > 0,'mdi:alert-circle','mdi:check-circle') }}"
+    - name: "Unavailable Entities"
+      unique_id: unavailable_entities
+      icon: "{{ iif(states(this.entity_id)|int(-1) > 0,'mdi:alert-circle','mdi:check-circle') }}"
       unit_of_measurement: entities
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {% if entities != none %} {{ entities|count }} {% endif %}
+        {{ entities|count if entities != none else none }}
       attributes:
         entity_id: >
           {% set ignore_seconds = 60 %}
@@ -114,16 +114,14 @@
               |rejectattr('entity_id','in',expand(integration_entities('openuv'))|map(attribute='entity_id')|list)
               |rejectattr('entity_id','in',expand(integration_entities('utility_meter'))|map(attribute='entity_id')|list)
               |rejectattr('entity_id','in',expand(integration_entities('waqi'))|map(attribute='entity_id')|list)
-              |rejectattr('entity_id','search','jlaptop_chrome|jlaptop_edge|jwork_chrome|jphone_app|sphone_app')
-              |rejectattr('entity_id','search','jason_laptop_media_player|jason_phone_media_player|sheri_phone_media_player')
+              |rejectattr('entity_id','search','jlaptop_chrome|jlaptop_edge|jwork_chrome|jphone_app')
+              |rejectattr('entity_id','search','jason_laptop_media_player|jason_phone_media_player')
               |rejectattr('entity_id','search','_timers|_alarms|_do_not_disturb|_alarm_volume')
               |rejectattr('entity_id','search','sensor.daily_energy_consumption')
               |rejectattr('entity_id','search','_next_alarm')
               |rejectattr('last_changed','ge',ignore_ts)
               |selectattr('state','in',['unavailable','unknown']) %}
-          {% if ignored != none %}
-            {% set entities =  entities|rejectattr('entity_id','in',ignored) %}
-          {% endif %}
+          {% set entities =  entities|rejectattr('entity_id','in',ignored) if ignored != none else entities %}
           {{ entities|map(attribute='entity_id')|list }}
 
 - binary_sensor:
@@ -145,24 +143,12 @@
         {{ is_state('binary_sensor.uptime_robot_connected','off')
             and is_state('input_boolean.hass_alerts','on') }}
 
-    - name: "Integration Offline"
-      unique_id: integration_offline
-      icon: "{{ iif(is_state(this.entity_id,'on'),'mdi:api','mdi:api-off') }}"
-      device_class: connectivity
-      state: >
-        {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ false if entities == none else entities|count > 0 }}
-      attributes:
-        entity_id: >
-          {{ expand('group.integration_connected_sensors')
-              |selectattr('state','eq','off')|map(attribute='entity_id')|list }}
-
-    - name: "Integration Offline Alert"
-      unique_id: integration_offline_alert
+    - name: "Offline Integrations Alert"
+      unique_id: offline_integrations_alert
       device_class: problem
       delay_on: 300
       state: >
-        {{ is_state('binary_sensor.integration_offline','on')
+        {{ states('sensor.offline_integrations')|int(-1) > 0
             and is_state('input_boolean.hass_alerts','on') }}
 
     - name: "Kiosk Online"
@@ -192,14 +178,29 @@
               or is_state('binary_sensor.home_assistant_google_drive_backup_running','off') }}
         {% endif %}
 
-    - name: "Update Available Alert"
-      unique_id: update_available_alert
+    - name: "Available Updates Alert"
+      unique_id: available_updates_alert
       icon: mdi:alert
       state: >
         {% if is_state('input_boolean.hass_alerts','on') %}
-          {{ states('sensor.updates_available')|int(-1) > 0
+          {{ states('sensor.available_updates')|int(-1) > 0
               or is_state('group.other_update_entities','on') }} {#UPDATE until update entites #}
         {% endif %}
+
+    - name: "Unavailable Entities Alert"
+      unique_id: unavailable_entities_alert
+      device_class: problem
+      delay_on: 300
+      state: >
+        {{ states('sensor.unavailable_entities')|int(-1) > 0
+            and is_state('input_boolean.hass_alerts','on') }}
+
+    - name: "Unknown Browsers Alert"
+      unique_id: unknown_browsers_alert
+      device_class: problem
+      state: >
+        {{ states('sensor.unknown_browsers')|int(-1) > 0
+            and is_state('input_boolean.hass_alerts','on') }}
 
     - name: "Remote UI Alert"
       unique_id: remote_ui_alert
@@ -209,30 +210,14 @@
         {{ is_state('binary_sensor.remote_ui','off')
             and is_state('input_boolean.hass_alerts','on') }}
 
-    - name: "Unavailable Sensor Alert"
-      unique_id: unavailable_sensor_alert
-      device_class: problem
-      delay_on: 300
-      state: >
-        {{ states('sensor.unavailable_sensors')|int(-1) > 0
-            and is_state('input_boolean.hass_alerts','on') }}
-
-    - name: "Unknown Browser Alert"
-      unique_id: unknown_browser_alert
-      device_class: problem
-      state: >
-        {{ states('sensor.unknown_browsers')|int(-1) > 0
-            and is_state('input_boolean.hass_alerts','on') }}
-
     - name: "Low Battery Alert"
       unique_id: low_battery_alert
       icon: "{{ iif(is_state(this.entity_id,'on'),'mdi:battery-alert','mdi:battery-90') }}"
       device_class: battery
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {% if entities != none %}
-          {{ entities|count > 0 and is_state('input_boolean.system_alerts','on') }}
-        {% endif %}
+        {{ entities|count > 0 and is_state('input_boolean.system_alerts','on')
+            if entities != none else none }}
       attributes:
         entity_id: >
           {% set low_batteries = namespace(value=[]) %}
@@ -256,12 +241,10 @@
     - name: "HASS LED Alert"
       unique_id: hass_led_alert
       state: >
-        {% set startup = false %}
         {% set uptime = states('sensor.uptime')|as_datetime
-          if states('sensor.uptime') not in ['unknown','unavailable'] else none %}
-        {% if uptime != none %}
-          {% set startup = now() - uptime < timedelta(minutes=5) %}
-        {% endif %}
+            if states('sensor.uptime') not in ['unknown','unavailable'] else none %}
+        {% set startup = now() - uptime < timedelta(minutes=5)
+            if uptime != none else false %}
         {{ startup or states('sensor.hass_status') in ['extreme','severe'] }}
 
 - sensor:
@@ -270,14 +253,24 @@
       unique_id: dummy
       state: " "
 
-    - name: "Updates Available"
-      unique_id: updates_available
-      icon: "{{ iif(states('sensor.updates_available')|int(-1) > 0,'mdi:cloud-upload','mdi:cloud-check') }}"
+    - name: "Offline Integrations"
+      unique_id: offline_integrations
+      icon: "{{ iif(states(this.entity_id) == '0','mdi:api','mdi:api-off') }}"
+      unit_of_measurement: integrations
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {% if entities != none %} {{ entities|count }}
-        {% else %} {{ entities }}
-        {% endif %}
+        {{ entities|count if entities != none else entities }}
+      attributes:
+        entity_id: >
+          {{ expand('group.integration_connected_sensors')
+              |selectattr('state','eq','off')|map(attribute='entity_id')|list }}
+
+    - name: "Available Updates"
+      unique_id: available_updates
+      icon: "{{ iif(states('sensor.available_updates')|int(-1) > 0,'mdi:cloud-upload','mdi:cloud-check') }}"
+      state: >
+        {% set entities = state_attr(this.entity_id,'entity_id') %}
+        {{ entities|count if entities != none else entities }}
       attributes:
         entity_id: >
           {{ states.update|selectattr('state','eq','on')|map(attribute='entity_id')|list
@@ -292,9 +285,9 @@
 
         {% elif is_state('sensor.zwave_status','severe')
             or is_state('sensor.hass_files_status','severe')
-            or is_state('binary_sensor.integration_offline','on')
+            or states('sensor.offline_integrations')|int(-1) > 0
             or is_state('binary_sensor.remote_ui','off')
-            or is_state('alert.unknown_browser','on') %} severe
+            or is_state('alert.unknown_browsers','on') %} severe
 
         {% elif is_state('sensor.zwave_status','warning')
             or is_state('sensor.hass_files_status','warning')
@@ -303,8 +296,8 @@
 
         {% elif is_state('sensor.zwave_status','minor')
             or is_state('sensor.hass_files_status','minor')
-            or is_state('alert.unavailable_sensor','on')
-            or is_state('alert.update_available','on') %} minor
+            or is_state('alert.unavailable_entities','on')
+            or is_state('alert.available_updates','on') %} minor
         {% else %} ok
         {% endif %}
 
@@ -326,17 +319,18 @@
       unique_id: backup_size_status
       icon: mdi:backup-restore
       state: >
-        {% set size = state_attr('sensor.backup_state','size_in_home_assistant') %}
-        {% if size != none %}
-          {% set size = size[:-2]|float(-1) %}
-          {% set unit = state_attr('sensor.backup_state','size_in_home_assistant')[-2:] %}
-        {% endif %}
-        {% if not is_number(size) or size == -1 %} error
-        {% elif size < 10 or unit != 'GB'%} ok
-        {% elif size < 15 %} minor
-        {% elif size < 20 %} warning
-        {% elif size < 25 %} severe
-        {% else %} critical
+        {% set state = state_attr('sensor.backup_state','size_in_home_assistant') %}
+        {% if state != none %}
+          {% set size = state[:-2]|float(-1) %}
+          {% set unit = state[-2:] %}
+          {% if not is_number(size) or size == -1 %} error
+          {% elif size < 10 or unit != 'GB'%} ok
+          {% elif size < 15 %} minor
+          {% elif size < 20 %} warning
+          {% elif size < 25 %} severe
+          {% else %} critical
+          {% endif %}
+        {% else %} {{ none }}
         {% endif %}
 
     - name: "Hass Log Size Status"
@@ -414,9 +408,7 @@
       icon: mdi:monitor-cellphone
       state: >
         {% set entities = state_attr('sensor.connected_browsers','entity_id') %}
-        {% if entities != none %} {{ entities|count }}
-        {% else %} {{ entities }}
-        {% endif %}
+        {{ entities|count if entities != none else entities }}
       attributes:
         entity_id: >
           {{ states.sensor
@@ -430,9 +422,7 @@
       unit_of_measurement: browsers
       state: >
         {% set entities = state_attr('sensor.unknown_browsers','entity_id') %}
-        {% if entities != none %} {{ entities|count }}
-        {% else %} {{ entities }}
-        {% endif %}
+        {{ entities|count if entities != none else entities }}
       attributes:
         entity_id: >
           {{ states.sensor|selectattr('entity_id','search','_browser_user')
