@@ -5,7 +5,7 @@
   alias: "[Hass] Alert Notification"
   description: "Send notification for hass alert."
   mode: queued
-  max: 25 #VERIFY
+  max: 20
   variables:
     tag: "{{ trigger.entity_id.split('.')[1] }}"
   trigger:
@@ -13,18 +13,27 @@
       entity_id:
         - sensor.unavailable_entities
         - sensor.offline_integrations
-        - binary_sensor.unavailable_media_player
+        - sensor.unavailable_media_players
         - sensor.available_updates
         - sensor.unknown_browsers
         - sensor.unknown_devices
       attribute: entity_id
       to: ~
+      for: 30 # throttle alerts
+  condition:
+    - condition: state
+      entity_id: input_boolean.hass_alerts
+      state: "on"
   action:
     - if: >
         {{ states(trigger.entity_id)|int(-1) > 0 }}
       then:
+        - wait_template: "{{ is_state('alert.' ~ tag,'on') or states(trigger.entity_id)|int(-1) < 1 }}"
+          timeout: 3600
+          continue_on_timeout: false
+
         - condition: template
-          value_template: "{{ not is_state('alert.' ~ tag,'off') }}"
+          value_template: "{{ is_state('alert.' ~ tag,'on') }}"
 
         - service: notify.jason
           data:
@@ -50,6 +59,9 @@
                 - title: "Pause Alert"
                   action: "pause_alert_{{ tag }}"
       else:
+        - condition: template
+          value_template: "{{ states(trigger.from_state.state)|int(-1) > 0 }}"
+
         - service: notify.jason
           data:
             message: clear_notification

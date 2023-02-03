@@ -18,6 +18,10 @@ window.customCards = window.customCards || [];
 
 class MultilineEntityCard extends LitElement {
 
+    handleTap(e) {
+        handleClick(this, this._hass, this.config, this.config.tap_action, this.config.entity);
+   }
+
   static get properties() {
     return {
       config: {},
@@ -75,22 +79,36 @@ class MultilineEntityCard extends LitElement {
         `;
       }
 
-      if (this.config.entity.indexOf("input_datetime.") == 0) {
-        var hasDate = this._hass.states[this.config.entity]['attributes']['has_date'];
-        var hasTime = this._hass.states[this.config.entity]['attributes']['has_time'];
+    //check if value is valid date object
+    if (Date.parse(this.showValue) > 0) {
 
-        //default to just parsing time object
-        var today = new Date().toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric" })
+        //entity is an input_datetime helper
+        if (this.config.entity.indexOf("input_datetime.") == 0) {
+            var hasDate = this._hass.states[this.config.entity]['attributes']['has_date'];
+            var hasTime = this._hass.states[this.config.entity]['attributes']['has_time'];
 
-        var value = new Date(today + " " + this.showValue).toLocaleTimeString('en-GB')
+            //default to just parsing time object
+            var today = new Date().toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric" })
 
-        if (hasDate) {
-            //parse only date object if has_date is true
-            var value = new Date(this.showValue).toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric" })
-            //parse datetime object if has_date & has_time are true
-            if (hasTime) {
-              var value = new Date(this.showValue).toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+            var value = new Date(today + " " + this.showValue).toLocaleTimeString('en-GB')
+
+            if (hasDate) {
+                //parse only date object if has_date is true
+                var value = new Date(this.showValue).toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric" })
+                //parse datetime object if has_date & has_time are true
+                if (hasTime) {
+                var value = new Date(this.showValue).toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+                }
             }
+        } else {
+            let isTimeHas = /:/.test(this.showValue)
+
+            var value = new Date(this.showValue).toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric" })
+
+            if (isTimeHas) {
+                var value = new Date(this.showValue).toLocaleDateString('en-GB', { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+            }
+
         }
 
         this.showValue = value
@@ -111,7 +129,7 @@ class MultilineEntityCard extends LitElement {
 
 
       return html`
-        <ha-card @click="${this._handleClick}">
+        <ha-card @click=${(e) => this.handleTap(e)}>
         <div class="header">
           <div class="name">
           ${this.config.show_name == false ?
@@ -153,10 +171,6 @@ class MultilineEntityCard extends LitElement {
       return t.content;
     };
 
-    _handleClick() {
-      fireEvent(this, "hass-more-info", { entityId: this.config.entity });
-    }
-
     static get styles() {
       return css`
       ha-card {
@@ -192,6 +206,44 @@ class MultilineEntityCard extends LitElement {
       `;
     }
 
+}
+
+const handleClick = (node, hass, config, tapAction, entity) => {
+    let e;
+    // eslint-disable-next-line default-case
+  if (tapAction != undefined) {
+    switch (tapAction.action) {
+      case 'more-info':
+        if (tapAction.data != undefined && tapAction.data.target != undefined && tapAction.data.target.entity_id != undefined) {
+          entity = { entityId: tapAction.data.target.entity_id };
+        } else {
+          entity = { entityId: entity || config.entity };
+        }
+
+        fireEvent(node, "hass-more-info", entity);
+        break;
+      case 'navigate':
+        if (!tapAction.navigation_path) return;
+        // eslint-disable-next-line no-restricted-globals
+        history.pushState(null, '', tapAction.navigation_path);
+        e = new Event('location-changed', { composed: true });
+        e.detail = { replace: false };
+        window.dispatchEvent(e);
+        break;
+
+      case 'call-service':
+        if (!tapAction.service) return;
+        // eslint-disable-next-line no-case-declarations
+        const [domain, service] = tapAction.service.split('.', 2);
+        // eslint-disable-next-line no-case-declarations
+        const serviceData = { ...tapAction.data.target };
+
+        hass.callService(domain, service, serviceData);
+    }
+  } else {
+    fireEvent(node, "hass-more-info", { entityId: entity || config.entity });
   }
+
+  };
 
   customElements.define('multiline-entity-card', MultilineEntityCard);
