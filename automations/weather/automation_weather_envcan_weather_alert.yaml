@@ -5,6 +5,13 @@
   alias: "[Weather] EnvCan Weather Alert"
   description: "Display weather alert on UI, play alert/announcement for severe alerts."
   mode: restart
+  variables:
+    current: >
+      {% set current = state_attr('binary_sensor.envcan_weather_alert','severity') %}
+      {{ iif(current != none,current,'') }}
+    title: >
+      {% set title = state_attr('binary_sensor.envcan_weather_alert','title') %}
+      {{ iif(title != none,title,'') }}
   trigger:
     - platform: state
       entity_id:
@@ -18,7 +25,6 @@
       alias: "Sensor to and from states are not the same"
       value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
   action:
-    # clear alert title/severity if no active alerts
     - if:
         - condition: state
           entity_id: binary_sensor.envcan_weather_alert
@@ -30,6 +36,7 @@
             data:
               tag: envcan_alert
 
+        # clear alert title/severity - no active alerts
         - service: input_text.set_value
           target:
             entity_id: input_text.previous_envcan_alert_title
@@ -48,24 +55,20 @@
                   alias: "Current alert is more severe than previous alert"
                   value_template: >
                     {% set previous = states('input_select.previous_envcan_alert_severity') %}
-                    {% set current = state_attr('binary_sensor.envcan_weather_alert','severity') %}
                     {{ (previous == 'watch' and current == 'warning')
                           or (previous == 'advisory' and current in ['warning','watch'])
                           or (previous == 'statement' and current in ['warning','watch','advisory'])
                           or (previous in ['none','unknown','unavailable']
                             and current in ['warning','watch','advisory','statement'])
-                        if current != none else false }}
+                        if current != '' else false }}
 
                 - condition: template
                   alias: "Alert title has changed and is not null"
-                  value_template: >
-                    {% set previous = states('input_text.previous_envcan_alert_title') %}
-                    {% set current = state_attr('binary_sensor.envcan_weather_alert','title') %}
-                    {{ previous != current and current != none }}
+                  value_template: "{{ title not in ['',states('input_text.previous_envcan_alert_title')] }}"
           then:
             - service: notify.mobile
               data:
-                title: "{{ state_attr('binary_sensor.envcan_weather_alert','title') }}"
+                title: "{{ iif(title != '',title,'Weather Alert') }}"
                 message: >
                   {% set msg = state_attr('binary_sensor.envcan_weather_alert','description') %}
                   {{ iif(msg == none,'',msg) }}
@@ -91,7 +94,6 @@
               data:
                 variables:
                   message: >
-                    {% set title = state_attr('binary_sensor.envcan_weather_alert','title') %}
                     {% set expires = state_attr('binary_sensor.envcan_weather_alert','expires_text') %}
                     {% set description = state_attr('binary_sensor.envcan_weather_alert','description') %}
                     Attention!  Weather Alert!
@@ -102,18 +104,18 @@
                     {% if description != none -%}
                       {{ description.split('.')[0] }}
                     {% endif %}
-                  quiet_play: "{{ state_attr('binary_sensor.envcan_weather_alert','severity') in ['warning','watch'] }}"
+                  quiet_play: "{{ current in ['warning','watch'] }}"
                   save_message: true
 
         - service: input_text.set_value
           target:
             entity_id: input_text.previous_envcan_alert_title
           data:
-            value: "{{ state_attr('binary_sensor.envcan_weather_alert','title') }}"
+            value: "{{ title }}"
 
         # severity attribute will always be most severe current alert
         - service: input_select.select_option
           target:
             entity_id: input_select.previous_envcan_alert_severity
           data:
-            option: "{{ state_attr('binary_sensor.envcan_weather_alert','severity') }}"
+            option: "{{ current }}"
