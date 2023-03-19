@@ -1,0 +1,86 @@
+###############################################################################
+## Camera - Front Drive Object Detected
+###############################################################################
+- id: camera_front_drive_object_detected
+  alias: "[Camera] Front Drive Object Detected"
+  description: "Object detected notification."
+  max_exceeded: silent
+  variables:
+    object: "{{ trigger.payload_json['after']['label'] }}"
+    id: "{{ trigger.payload_json['after']['id'] }}"
+    time: "{{ trigger.payload_json['after']['start_time']|int }}"
+  trigger:
+    - platform: mqtt
+      topic: frigate/events
+  condition:
+    - condition: template
+      value_template: >
+        {{ true if this.attributes.last_triggered == none
+            else now() - this.attributes.last_triggered > timedelta(minutes=5) }}
+
+    - condition: state
+      entity_id: input_boolean.camera_notifications
+      state: "on"
+
+    - condition: template
+      value_template: "{{ trigger.payload_json['after']['camera'] == 'front_drive_frigate' }}"
+  action:
+    - if:
+        - condition: state
+          entity_id: binary_sensor.camera_object_tts_notifications
+          state: "on"
+      then:
+        - service: script.turn_on
+          continue_on_error: true
+          target:
+            entity_id: script.tts_play
+          data:
+            variables:
+              media_player: media_player.kiosk_internal
+              min_volume: 60
+              quiet_play: true
+              night_play: true
+              tts_service: tts.cloud_say
+              gender: male
+              language: en-GB
+              message: "There is a {{ object }} on the front drive!"
+
+    - if: "{{ is_state('script.cast_front_drive_camera','off') }}"
+      then:
+        - enabled: false
+          service: script.turn_on
+          continue_on_error: true
+          target:
+            entity_id: "script.cast_front_drive_camera"
+
+        - service: notify.jason
+          data:
+            title: "Front drive Camera"
+            message: "A {{ object }} was detected @ {{ now().timestamp()|timestamp_custom('%-I:%M %p') }}."
+            data:
+              tag: "{{ id }}"
+              group: Alarm
+              channel: Alert
+              importance: max
+              ttl: 0
+              priority: high
+              visibility: public
+              when: "{{ time }}"
+              notification_icon: mdi:cctv
+              icon_url: !secret ALARM_ICON
+              image: "{{ states('input_text.base_url') }}/api/frigate/notifications/{{ id }}/thumbnail.jpg?format=android"
+              ledColor: !secret WARNING_COLOR
+              color: !secret WARNING_COLOR
+              vibrationPattern: !secret ALERT_VIBRATION
+              clickAction: /ccab4aaf_frigate-fa/dashboard
+              actions:
+                - title: "Alarm"
+                  action: URI
+                  uri: !secret ALARM_URI
+
+                - title: "Cameras"
+                  action: URI
+                  uri: !secret LOREX_URI
+
+                - title: "Alerts Off"
+                  action: turn_off_camera_alerts

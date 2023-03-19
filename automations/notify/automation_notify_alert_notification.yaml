@@ -1,0 +1,223 @@
+###############################################################################
+## Notify - Alert Persistent Notification
+###############################################################################
+- id: notify_alert_persistent_notification
+  alias: "[Notify] Alert Persistent Notification"
+  description: "Create persistent notification for alert."
+  mode: parallel
+  variables:
+    alert_id: "{{ trigger.entity_id.split('.')[1] }}"
+    message: >
+      {% set t = trigger.entity_id %}
+        {% if t == 'alert.calendar_empty' %}
+        {% set calendars = state_attr('binary_sensor.calendar_empty_alert','entity_id') %}
+        {%- if calendars != none %}
+          {%- for item in calendars %}
+            {%- if not loop.first %}<br>{% endif %}
+            The {{ item }} calendar is empty or not connected.
+          {%- endfor %}
+        {%- endif -%}
+      {% endif %}
+  trigger:
+    - platform: state
+      entity_id:
+        - alert.calendar_empty
+      to: "on"
+      from: idle
+  action:
+    - service: persistent_notification.create
+      data:
+        title: "{{ alert_id|replace('_',' ')|title }}"
+        message: "{{ message }}"
+        notification_id: "{{ alert_id }}"
+
+###############################################################################
+## Notify - Alert Persistent Notification Cleared
+###############################################################################
+- id: notify_alert_persistent_notification_cleared
+  alias: "[Notify] Alert Persistent Notification Cleared"
+  description: "Clear mobile notifications when persistent notification cleared."
+  mode: parallel
+  trigger:
+    #BUG from_state of a dismissed persistent notifcations is null, must use state_changed event
+    - platform: event
+      id: notification
+      event_type: state_changed
+      event_data:
+        entity_id: persistent_notification.calendar_empty
+
+    - platform: event
+      id: notification
+      event_type: state_changed
+      event_data:
+        entity_id: persistent_notification.fireplace_emergency_on
+  condition: #BUGFIX conditions required as workaround for null persistent notification state
+    - "{{ not is_state('persistent_notification.' ~ trigger.event.data['entity_id'],'notifying') }}"
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.notify_alert_mobile_notification_cleared
+      data:
+        stop_actions: false
+
+    - service: notify.jason
+      continue_on_error: true
+      data:
+        message: clear_notification
+        data:
+          tag: "{{ trigger.event.data['entity_id'].split('.')[1] }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.notify_alert_mobile_notification_cleared
+
+###############################################################################
+## Notify - Alert Mobile Notification Cleared
+###############################################################################
+- id: notify_alert_mobile_notification_cleared
+  alias: "[Notify] Alert Mobile Notification Cleared"
+  description: "Clear mobile notifications when cleared on another device."
+  mode: parallel
+  variables:
+    device: >
+      {% if trigger.event.data['device_id'] == '76e9ca84117424ee' %} mobile_app_jtablet
+      {% elif trigger.event.data['device_id'] == 'e1953623009e7ae0' %} mobile_app_jphone
+      {% else %} {{ none }}
+      {% endif %}
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_cleared
+  condition:
+    - "{{ device != none }}"
+    - "{{ trigger.event.data['tag'] != none }}" #VERIFY
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: automation.notify_alert_mobile_notification_cleared
+      data:
+        stop_actions: false
+
+    - service: "notify.{{ device }}"
+      continue_on_error: true
+      data:
+        message: clear_notification
+        data:
+          tag: "{{ trigger.event.data['tag'] }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.notify_alert_mobile_notification_cleared
+
+###############################################################################
+## Notify - Clear Alert Notification
+###############################################################################
+- id: notify_clear_alert_notification
+  alias: "[Notify] Clear Alert Notification"
+  description: "Clear notification when alert turns off or paused."
+  mode: parallel
+  max: 25 # allow for multiple alert state changes at once
+  trigger:
+    - platform: state
+      id: mobile
+      entity_id:
+        - alert.alarm_clock_presence
+        - alert.camera_offline
+        - alert.jason_phone_battery_low
+        - alert.jason_phone_bluetooth_disconnected
+        - alert.jason_phone_bluetooth_device
+        - alert.jason_phone_bluetooth_off
+        - alert.jason_phone_high_accuracy
+        - alert.jason_phone_offline
+        - alert.jason_phone_ringer_off
+        - alert.jason_phone_wifi_disconnected
+        - alert.jason_phone_wifi_off
+        - alert.presence_override_jason
+        - alert.occupancy_mode
+        - alert.google_traffic_connected
+        - alert.work_commute_jason
+        - alert.home_commute_jason
+        - alert.late_for_work_jason
+        - alert.alarm_zone_sync
+        - alert.alarm_disabled
+        - alert.door_lock_malfunction
+        - alert.door_lock_jammed
+        - alert.door_lock_failed
+        - alert.garage_extended_heat
+        - alert.garage_high_temperature
+        - alert.garage_low_temperature
+        - alert.garage_temperature_throttle
+        - alert.cpu_temperature
+        - alert.disk_use
+        - alert.memory_use
+        - alert.processor_use
+        - alert.swap_use
+        - alert.zwave_device
+        - alert.zwave_network
+        - alert.pihole_connected
+        - alert.pihole_disabled
+        - alert.bluetooth_connected
+        - alert.indoor_high_humidity
+        - alert.indoor_high_temperature
+        - alert.indoor_low_temperature
+        - alert.hvac_window_door_open
+        - alert.hvac_filter
+        - alert.bathroom_mold_risk
+        - alert.outdoor_low_temperature
+        - alert.outdoor_high_temperature
+        - alert.storm_approaching
+        - alert.strong_wind
+        - alert.air_quality
+        - alert.flu_risk
+        - alert.asthma_risk
+        - alert.allergy_risk
+        - alert.uv_risk
+        - alert.sprinkler_controller_offline
+        - alert.spa_low_temperature
+        - alert.leak_detected
+        - alert.unavailable_leak_sensor
+        - alert.outdoor_sump_off
+        - alert.power_use
+        - alert.kiosk_offline
+        - alert.low_battery
+        - alert.remote_ui
+        - alert.available_updates
+        - alert.offline_integrations
+        - alert.unavailable_entities
+        - alert.unavailable_media_players
+        - alert.unknown_devices
+        - alert.unknown_browsers
+      to: "off" # alert turns off (idle state) - clear_notification is in done_message parameter
+
+    - platform: state
+      id: alert
+      entity_id:
+        - alert.calendar_empty
+      to:
+        - "off"
+        - idle
+  action:
+    - service: automation.turn_off
+      target:
+        entity_id: &notify_automations
+          - automation.notify_alert_persistent_notification_cleared
+          - automation.notify_alert_mobile_notification_cleared
+      data:
+        stop_actions: false
+
+    - service: notify.jason
+      continue_on_error: true
+      data:
+        message: clear_notification
+        data:
+          tag: "{{ trigger.entity_id.split('.')[1] }}"
+
+    - if: "{{ trigger.id == 'alert' }}"
+      then:
+        - service: persistent_notification.dismiss
+          continue_on_error: true
+          data:
+            notification_id: "{{ trigger.entity_id.split('.')[1] }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: *notify_automations

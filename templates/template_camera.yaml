@@ -9,13 +9,13 @@
       event_type: event_template_reloaded
 
     - platform: state
-      entity_id: camera.front_door
+      entity_id: button.lorex_reboot
       from:
         - unknown
         - unavailable
 
     - platform: state
-      entity_id: camera.front_door
+      entity_id: button.lorex_reboot
       to:
         - unknown
         - unavailable
@@ -27,6 +27,30 @@
       state: >
         {{ expand(integration_entities('onvif'))
             |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id:
+        - binary_sensor.lorex_nvr_connected
+        - input_boolean.camera_alerts
+      to:
+        - "on"
+        - "off"
+  binary_sensor:
+    - name: "Lorex NVR Connected Alert"
+      unique_id: lorex_nvr_connected_alert
+      icon: mdi:cctv
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.lorex_nvr_connected','off')
+            and is_state('input_boolean.camera_alerts','on') }}
 
 - trigger:
     - platform: homeassistant
@@ -55,16 +79,21 @@
         {{ expand(integration_entities('frigate'))
             |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
 
-- binary_sensor:
-    - name: "Lorex NVR Connected Alert"
-      unique_id: lorex_nvr_connected_alert
-      icon: mdi:cctv
-      device_class: problem
-      delay_on: 60
-      state: >
-        {{ is_state('binary_sensor.lorex_nvr_connected','off')
-            and is_state('input_boolean.camera_alerts','on') }}
+- trigger:
+    - platform: homeassistant
+      event: start
 
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id:
+        - binary_sensor.frigate_connected
+        - input_boolean.camera_alerts
+      to:
+        - "on"
+        - "off"
+  binary_sensor:
     - name: "Frigate Connected Alert"
       unique_id: frigate_connected_alert
       icon: mdi:cctv
@@ -74,6 +103,7 @@
         {{ is_state('binary_sensor.frigate_connected','off')
             and is_state('input_boolean.camera_alerts','on') }}
 
+- binary_sensor:
     - name: "Camera Object TTS Notifications"
       unique_id: camera_object_tts_notifications
       icon: mdi:cctv
@@ -85,36 +115,37 @@
         {% else %} false
         {% endif %}
 
-    - name: "Camera Person Detected"
-      unique_id: camera_person_detected
-      icon: mdi:cctv
-      device_class: presence
-      state: >
-        {{ states.sensor
-            |selectattr('entity_id','search','_frigate_person_count')
-            |selectattr('state','gt','0')|list|count > 0 }}
-
     - name: "Camera Tamper Alert"
       unique_id: camera_tamper_alert
-      icon: mdi:cctv
+      icon: mdi:cctv-off
       device_class: tamper
       delay_on: 15
       state: >
-        {{ states.binary_sensor
-            |selectattr('entity_id','search','camera_tamper_detection')
-            |selectattr('state','eq','on')|list|count > 0 }}
+        {% set entities = state_attr(this.entity_id,'entity_id') %}
+        {{ entities|count > 0 if entities != none else none }}
+      attributes:
+        entity_id: >
+          {{ states.binary_sensor
+              |selectattr('entity_id','in',integration_entities('onvif')|list)
+              |selectattr('entity_id','search','_tamper_detection')
+              |selectattr('state','eq','on')
+              |map(attribute='entity_id')|list }}
 
     - name: "Camera Offline Alert"
       unique_id: camera_offline_alert
-      icon: mdi:cctv
+      icon: mdi:cctv-off
       device_class: problem
-      delay_on: 60
+      delay_on: 15
       state: >
-        {{ states.camera
-            |selectattr('attributes.type','defined')
-            |selectattr('attributes.type','eq','nvr')
-            |selectattr('state','ne','idle')|list|count > 0 }}
-
+        {% set entities = state_attr(this.entity_id,'entity_id') %}
+        {{ entities|count > 0 if entities != none else none }}
+      attributes:
+        entity_id: >
+          {{ states.camera
+                |selectattr('entity_id','in',integration_entities('frigate')|list)
+                |rejectattr('entity_id','search','_person|_dog|_car')
+                |selectattr('state','in',['unknown','unavailable'])
+                |map(attribute='entity_id')|list }}
 - sensor:
     - name: "Frigate Clips Size Status"
       unique_id: frigate_clips_size_status

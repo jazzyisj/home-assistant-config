@@ -1,0 +1,64 @@
+###############################################################################
+## Hass - Alert Notification
+###############################################################################
+- id: hass_system_alert_notification
+  alias: "[Hass] System Alert Notification"
+  description: "Send or clear notification for hass alerts when alert entities change."
+  mode: queued
+  variables:
+    tag: "{{ trigger.entity_id.split('.')[1] }}"
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.available_updates
+        - sensor.offline_integrations
+        - sensor.unavailable_entities_filtered #TEMP remove main package
+        - sensor.unavailable_media_players
+        - sensor.unknown_devices
+        - sensor.unknown_browsers
+      attribute: entity_id
+      to: ~
+      for: 60 # throttle alerts
+  condition:
+    - condition: state
+      entity_id: input_boolean.hass_alerts
+      state: "on"
+  action:
+    - wait_template: "{{ is_state('input_boolean.startup_pending','off') }}"
+      timeout:
+        minutes: 15
+      continue_on_timeout: true
+
+    - delay: 30 # allow alerts to turn on
+
+    - if: "{{ is_state('alert.' ~ tag|replace('_filtered',''),'on') }}" #TEMP remove main package
+      then:
+        - service: notify.jason
+          data:
+            title: "{{ state_attr(trigger.entity_id,'friendly_name') }}"
+            message: >
+              - {{ expand(state_attr(trigger.entity_id,'entity_id'))
+                    |map(attribute='name')|join('<br>- ')|truncate(500) }}
+            data:
+              tag: "{{ tag }}"
+              group: System
+              channel: Alert
+              importance: max
+              ttl: 0
+              priority: high
+              visibility: public
+              notification_url: mdi:alert-circle
+              icon_url: !secret HASSIO_ICON
+              ledColor: !secret WARNING_COLOR
+              color: !secret WARNING_COLOR
+              vibrationPattern: !secret ALERT_VIBRATION
+              clickAction: /lovelace/system
+              actions:
+                - title: "Pause Alert"
+                  action: "pause_alert_{{ tag }}"
+      else:
+        - service: notify.jason
+          data:
+            message: clear_notification
+            data:
+              tag: "{{ tag }}"
