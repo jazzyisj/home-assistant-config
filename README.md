@@ -1,47 +1,44 @@
 # Home Assistant Configuration
 
-Home Assistant Configuration, updated to v2022.10.5
-
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_dark.png)
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_light.png)
 
 ## Entity Counts:
 
     Alarm_control_panel: 3
-    Alert: 113
-    Automation: 604
-    Binary_sensor: 475
-    Button: 62
-    Calendar: 16
+    Alert: 102
+    Automation: 592
+    Binary_sensor: 431
+    Button: 64
+    Calendar: 15
     Camera: 21
     Climate: 5
     Counter: 1
     Cover: 1
-    Device_tracker: 62
-    Fan: 9
-    Group: 51
-    Input_boolean: 179
-    Input_button: 2
+    Device_tracker: 56
+    Fan: 10
+    Group: 62
+    Input_boolean: 170
+    Input_button: 1
     Input_datetime: 38
-    Input_number: 190
+    Input_number: 179
     Input_select: 10
     Input_text: 69
-    Light: 48
+    Light: 47
     Lock: 4
-    Media_player: 46
-    Number: 85
-    Person: 2
-    Proximity: 2
+    Media_player: 25
+    Number: 25
+    Person: 1
+    Proximity: 1
     Remote: 1
     Scene: 9
-    Schedule: 1
     Script: 79
-    Select: 160
-    Sensor: 982
+    Select: 74
+    Sensor: 986
     Sun: 1
-    Switch: 144
+    Switch: 132
     Timer: 54
-    Update: 128
+    Update: 129
     Variable: 1
     Weather: 8
     Zone: 10
@@ -59,6 +56,7 @@ Home Assistant Configuration, updated to v2022.10.5
 - MariaDB
 - MaryTTS
 - Mosquitto broker
+- Music Assistant
 - phpMyAdmin
 - RTSPtoWeb - WebRTC
 - Samba share
@@ -68,7 +66,7 @@ Home Assistant Configuration, updated to v2022.10.5
 - VLC
 - WeatherFlow to MQTT
 - Z-Wave JS
-- Z-Wave JS to MQTT
+- Z-Wave JS UI
 - ZeroTier One
 
 ## TAGS USED IN CODE
@@ -88,7 +86,6 @@ Home Assistant Configuration, updated to v2022.10.5
     #BUGFIX - workaround for bug
 
     #UPDATE - waiting for update entities
-    #ZWAVE - zwave issues/notes
     #BLOOP - google home bloop fixes
     #LOCK_USER - lock user code
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
@@ -96,8 +93,9 @@ Home Assistant Configuration, updated to v2022.10.5
     #ALARMO - alarmo issues/notes
     #APEX - apex graph issues
     #DARKSKY - darksky code to replace
-    #BORDER - condition/state-switch - dead space/border
-    #MASS - Music Assistant issues/notes
+    #MASS - music assistant issues/notes
+    #TRACE - automations/scripts with trace issues
+    #SWITCH - state-switch issues
 
     #INFO - info level log tag
     #WARNING - warning level log tag
