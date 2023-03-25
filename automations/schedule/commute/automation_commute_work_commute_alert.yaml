@@ -4,23 +4,34 @@
 - id: commute_work_commute_alert
   alias: "[Commute] Work Commute Alert"
   description: "Play announcement when alert turns on."
-  mode: parallel
+  mode: restart
   variables:
-    person: "{{ trigger.entity_id[19:] }}"
+    person: "{{ trigger.entity_id.split('_')[-1] }}"
   trigger:
     - platform: state
-      entity_id: alert.work_commute_jason
+      id: commute
+      entity_id:
+        - alert.work_commute_jason
+        - alert.late_for_work_jason
       to: "on"
-      for: 10 # allow both alerts/work_commute, late alert turn on to avoid duplicate
+      # for: 10 #SHERI allow both alerts/work_commute, late alert turn on to avoid duplicate
   condition:
     - condition: state
-      entity_id: binary_sensor.owner_home
+      entity_id: binary_sensor.jason_home
       state: "on"
-
-    - condition: state
-      entity_id: binary_sensor.late_for_work_jason_alert
-      state: "off"
   action:
+    - if: "{{ trigger.entity_id == 'alert.work_commute_jason' }}"
+      then:
+        - service: button.press
+          target:
+            entity_id: button.jason_phone_open_mobile_app
+
+        - delay: 10 # let app open
+
+        - service: browser_mod.navigate
+          data:
+            path: /lovelace/traffic
+
     - repeat:
         sequence:
           - if:
@@ -32,15 +43,7 @@
                 target:
                   entity_id: light.dining_room_rgb_light
                 data:
-                  profile: work_commute_alert
-
-          - service: browser_mod.popup
-            data:
-              title: "Work Commute Traffic"
-              content: !include /config/ui/card/schedule/traffic_map.yaml
-              size: fullscreen
-              timeout: 900000
-              browser_id: !include /config/include/browsers.yaml
+                  profile: "{{ iif(trigger.entity_id == 'alert.late_for_work_jason','late_work_alert','work_commute_alert') }}"
 
           - service: script.turn_on
             continue_on_error: true
@@ -52,15 +55,70 @@
                 min_volume: 40
                 quiet_play: true
                 message: >
-                  {% set traffic_time = state_attr('sensor.' ~ person ~ '_time_to_work','duration_in_traffic') %}
-                  {% set leave_time = as_local(states('sensor.leave_home_time_' ~ person)|as_datetime).strftime('%-I:%M') %}
-                  {{ person|title }}, your current commute time to work is
-                  {{ traffic_time if traffic_time != none else 'expected to be longer than usual' }}.
-                  You should leave for work before {{ leave_time }} today!
+                  {% if trigger.entity_id == 'alert.late_for_work_jason' %}
+                    {% set traffic_time = state_attr('sensor.' ~ person ~ '_time_to_work','duration_in_traffic') %}
+                    Attention! {{ person|title }}! It is now {{ now().strftime('%-I:%M %p') }}!
+                    You should have already left for work!  Your current commute time to work is
+                    {{ traffic_time if traffic_time != none else 'not currently available'}}.
+                  {% else %}
+                    {% set traffic_time = state_attr('sensor.' ~ person ~ '_time_to_work','duration_in_traffic') %}
+                    {% set leave_time = as_local(states('sensor.leave_home_time_' ~ person)|as_datetime).strftime('%-I:%M') %}
+                    {{ person|title }}, your current commute time to work is
+                    {{ traffic_time if traffic_time != none else 'expected to be longer than usual' }}.
+                    You should leave for work before {{ leave_time }} today!
+                  {% endif %}
 
           - wait_template: "{{ not is_state(trigger.entity_id,'on') }}"
             timeout: # wait for alert to turned off/dismissed
-              minutes: 15
+              minutes: "{{ iif(trigger.entity_id == 'alert.late_for_work_jason',5,15) }}"
         until:
           - condition: template
             value_template: "{{ not is_state(trigger.entity_id,'on') }}"
+
+###############################################################################
+## Commute - Work Commute Alert Off
+###############################################################################
+- id: commute_work_commute_alert_off
+  alias: "[Commute] Work Commute Alert Off"
+  description: "Reset warning light when alert turns off."
+  variables:
+    person: "{{ trigger.entity_id[19:] }}"
+  trigger:
+    - platform: state
+      entity_id: &alert_entities
+        - alert.work_commute_jason
+        - alert.late_for_work_jason
+      to:
+        - "off"
+        - idle
+  action:
+    - if: "{{ trigger.entity_id == 'alert.work_commute_jason' }}"
+      then:
+        - service: browser_mod.navigate
+          data:
+            path: /lovelace/home
+
+    - condition: template
+      value_template: >
+        {{ not is_state('alert.work_commute_jason','on')
+            and not is_state('alert.late_for_work_jason','on') }}
+
+    - if:
+        - condition: template
+          value_template: >
+            {{ is_state('light.dining_room_rgb_light','on') and
+                is_state('binary_sensor.nighttime_illuminance_lights','off') }}
+      then:
+        - service: light.turn_on #reset bulb
+          target:
+            entity_id: light.dining_room_rgb_light
+          data:
+            profile: default_low
+
+        - service: light.turn_off
+          target:
+            entity_id: light.dining_room_rgb_light
+      else:
+        - service: script.turn_light_on
+          data:
+            light: light.dining_room_rgb_light

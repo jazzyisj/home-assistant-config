@@ -52,22 +52,21 @@
         - unknown
         - unavailable
 
-    # bt/wifi disconnect for faster home/away update
     - platform: state
       entity_id:
         - device_tracker.jason_phone_bt
-        - device_tracker.jason_phone_wifi #VERIFY wifi cycling
+        - device_tracker.jason_phone_wifi #ISSUE takes 3 min to disconnect
       to: not_home
-      for: 15 # prevent triggers on momentary disconnections
+      for: 60 # prevent triggers on momentary disconnections
 
-    # wifi disconnect for faster home/away update
-    # use mobile wifi - not cycling, faster
+    # faster wifi home/away update
     - platform: state
       entity_id: binary_sensor.jason_phone_wifi_connected
       to: "off"
       not_from:
         - unknown
         - unavailable
+      for: 60 # prevent triggers on momentary disconnections
   condition:
     - condition: state
       entity_id: switch.jason_phone_high_accuracy
@@ -120,11 +119,14 @@
       event_data:
         action: turn_off_jason_phone_high_accuracy
 
-    # turn off when we've arrived somwhere
+    # turn off when we've arrived somwhere (another zone)
     - platform: state
       entity_id: person.jason
       from: not_home
       for: 60
+      not_to:
+        - heading_home
+        - almost_home
 
     #ISSUE WARNING (MainThread) [homeassistant.components.homeassistant.triggers.numeric_state] Error initializing '[Mobile] Jason Phone High Accuracy Off' trigger: In 'numeric_state' condition: entity proximity.jphone_home state 'not set' cannot be processed as a number
     - platform: numeric_state
@@ -141,11 +143,14 @@
         - unknown
         - unavailable
 
-    # sensor is often unknown, no not_to so sensor not stuck on
+    # sensor is often unknown
     - platform: state
       id: activity
       entity_id: sensor.jphone_detected_activity
-      from: in_vehicle
+      to:
+        - still
+        - unknown
+        - unavailable
       for:
         minutes: 5
 
@@ -172,7 +177,7 @@
       id: tracker
       entity_id:
         - device_tracker.jason_phone_bt
-        - device_tracker.jason_phone_wifi #VERIFY wifi cycling
+        - device_tracker.jason_phone_wifi
       from: not_home
       for: 60
   condition:
@@ -180,10 +185,18 @@
       entity_id: switch.jason_phone_high_accuracy
       state: "on"
 
+    # shorter time delta than turn_on to ensure always triggered after turn_on if requried
     - condition: template
       value_template: >
-        {{ iif(trigger.id in ['commute','activity','jeep'],
-            states('proximity.jphone_home')|int(0) <= 10, true) }}
+        {{ true if this.attributes.last_triggered == none
+          else now() - this.attributes.last_triggered > timedelta(seconds=30) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id == 'activity',
+          is_state('binary_sensor.work_commute_active','off')
+          and is_state('binary_sensor.home_commute_active','off')
+          and is_state('binary_sensor.jason_phone_jeep_connected','off'), true) }}
 
     - condition: template
       value_template: >
