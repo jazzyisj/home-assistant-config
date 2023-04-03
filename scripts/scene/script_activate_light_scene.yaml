@@ -1,0 +1,43 @@
+###############################################################################
+## Activate Light Scene
+###############################################################################
+activate_light_scene:
+  alias: "Activate Light Scene"
+  description: "Turn on light scene if light automation on."
+  icon: mdi:home-lightbulb-outline
+  fields:
+    scene:
+      description: "Scene name."
+      example: "chill"
+  mode: restart
+  sequence:
+    - service: automation.turn_off
+      target: # group.light_in_use_automations
+        entity_id: &automations >
+          {{ states.automation
+              |selectattr('entity_id','search','automation.light_')
+              |selectattr('entity_id','search','_in_use')
+              |map(attribute='entity_id')|list }}
+
+    - service: scene.turn_on
+      continue_on_error: true
+      target:
+        entity_id: >
+          scene.{{ scene ~ iif(is_state('binary_sensor.nighttime_illuminance_lights','on'),
+            '_daytime_lights','_lights') }}
+      data:
+        transition: 2 #QUESTION how does this interact with zwave/adaptive lighting transitions
+
+    - delay: 5 # allow scene lights to turn on
+
+    - if: "{{ states('sensor.rgb_' ~ scene ~ '_scene') not in ['unknown','unavailable'] }}"
+      then:
+        - service: light.turn_on
+          target:
+            entity_id: light.dining_room_rgb_light
+          data:
+            rgb_color: "{{ state_attr('sensor.rgb_' ~ scene ~ '_scene','rgb_color') }}"
+
+    - service: automation.turn_on
+      target:
+        entity_id: *automations

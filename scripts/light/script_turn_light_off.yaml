@@ -1,0 +1,76 @@
+##############################################################################
+# Turn Light Off
+##############################################################################
+turn_light_off:
+  alias: "Turn Light Off"
+  description: "Turn light off."
+  icon: mdi:lightbulb-off
+  mode: parallel
+  fields:
+    entities:
+      description: "List of light entity ids"
+      example: "light.dining_room_rgb_light"
+    activate_timer:
+      description: "Activate light in use timer"
+      example: "true"
+    bypass_timer:
+      description: "Bypass light in use timer"
+      example: "false"
+  variables:
+    entities: > # convert to list
+      {% set all = expand(state_attr('binary_sensor.lights_on','entity_id'))
+          |selectattr('state','in',['on','off'])
+          |map(attribute='entity_id')|list %}
+      {% set entities = expand(lights|default(all))|map(attribute='entity_id')|list %}
+      {{ entities }}
+    activate_timer: "{{ activate_timer|default(true) }}"
+    bypass_timer: "{{ bypass_timer|default(false) }}"
+  sequence:
+    - if: "{{ not activate_timer }}"
+      then:
+        - service: automation.turn_off
+          target:
+            entity_id: automation.light_in_use_timer
+
+    - repeat:
+        count: "{{ entities|count }}"
+        sequence:
+          - variables:
+              light: "{{ entities[repeat.index-1]|default('') }}"
+              light_name: "{{ light.split('.')[1]|default('') }}"
+              switch: >
+                {{ (states.switch
+                    |selectattr('entity_id','search','adaptive_lighting')
+                    |selectattr('attributes.configuration','defined')
+                    |selectattr('attributes.configuration.lights','defined')
+                    |selectattr('attributes.configuration.lights','search',light)
+                    |map(attribute='entity_id')|list)[0]|default(none) }}
+              manual: >
+                {% if switch == none or light == '' %} {{ false }}
+                {% else %} {{ false }} {#TODO { light in state_attr(switch,'manual_control') } #}
+                {% endif %}
+
+          - if:
+              - condition: template
+                alias: "Timer bypassed or not active"
+                value_template: >
+                  {% if bypass_timer or not has_value(states('timer.' ~ light_name)) %} {{ true }}
+                  {% else %} {{ not manual and is_state('timer.' ~ light_name,'idle') }}
+                  {% endif %}
+
+              - condition: template
+                alias: "Shower scene off if bathroom light"
+                value_template: "{{ iif(light in area_entities('bathroom'),is_state('input_boolean.shower_scene','off'),true) }}"
+            then:
+              - service: light.turn_off
+                continue_on_error: true
+                target:
+                  entity_id: "{{ light }}"
+
+    - if: "{{ not activate_timer }}"
+      then:
+        - delay: 5 # wait for lights turn off
+
+        - service: automation.turn_on
+          target:
+            entity_id: automation.light_in_use_timer

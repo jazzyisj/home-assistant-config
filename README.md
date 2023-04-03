@@ -7,17 +7,17 @@
 
     Alarm_control_panel: 3
     Alert: 102
-    Automation: 592
+    Automation: 495
     Binary_sensor: 431
-    Button: 64
+    Button: 74
     Calendar: 15
-    Camera: 21
+    Camera: 28
     Climate: 5
     Counter: 1
     Cover: 1
-    Device_tracker: 56
+    Device_tracker: 55
     Fan: 10
-    Group: 62
+    Group: 60
     Input_boolean: 170
     Input_button: 1
     Input_datetime: 38
@@ -31,15 +31,14 @@
     Person: 1
     Proximity: 1
     Remote: 1
-    Scene: 9
-    Script: 79
+    Scene: 8
+    Script: 81
     Select: 74
-    Sensor: 986
+    Sensor: 1000
     Sun: 1
     Switch: 132
     Timer: 54
     Update: 129
-    Variable: 1
     Weather: 8
     Zone: 10
 
@@ -49,9 +48,7 @@
 - File editor
 - Frigate NVR
 - Glances
-- Grafana
 - Home Assistant Google Drive Backup
-- InfluxDB
 - Log Viewer
 - MariaDB
 - MaryTTS
@@ -85,14 +82,12 @@
     #BUG - unfixable bug in HA/component/device
     #BUGFIX - workaround for bug
 
-    #UPDATE - waiting for update entities
     #BLOOP - google home bloop fixes
     #LOCK_USER - lock user code
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
     #TV - TV notes
     #ALARMO - alarmo issues/notes
     #APEX - apex graph issues
-    #DARKSKY - darksky code to replace
     #MASS - music assistant issues/notes
     #TRACE - automations/scripts with trace issues
     #SWITCH - state-switch issues

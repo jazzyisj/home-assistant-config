@@ -1,0 +1,123 @@
+###############################################################################
+## Light - Illuminance Lighting
+###############################################################################
+- id: light_illuminance_lighting
+  alias: "[Light] Illuminance Lighting"
+  description: "Turn lights on based on outdoor illuminance."
+  mode: single
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      id: day
+      entity_id: binary_sensor.daytime_illuminance_lights
+      to: ~
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      id: night
+      entity_id: binary_sensor.nighttime_illuminance_lights
+      to: ~
+      not_from:
+        - unknown
+        - unavailable
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: "off"
+  action:
+    - choose:
+        - conditions: "{{ trigger.id == 'day' }}"
+          sequence:
+            - condition: state
+              entity_id: binary_sensor.nighttime_illuminance_lights
+              state: "off"
+
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              match: any
+              state:
+                - Home
+                - Guest
+
+            - variables:
+                day_lights: >
+                  {{ states.light
+                      |selectattr('attributes.day_lux','defined')
+                      |selectattr('attributes.day_lux','eq',true)
+                      |map(attribute='entity_id')|list }}
+
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.daytime_illuminance_lights
+                  state: "on"
+              then:
+                - service: script.turn_light_on
+                  data:
+                    lights: "{{ day_lights }}"
+                    activate_timer: false
+              else:
+                - service: script.turn_light_off
+                  data:
+                    lights: "{{ day_lights }}"
+
+        - conditions: "{{ trigger.id == 'night' }}"
+          sequence:
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.nighttime_illuminance_lights
+                  state: "on"
+              then:
+                - choose:
+                    - conditions:
+                        - condition: state
+                          entity_id: input_select.occupancy_mode
+                          match: any
+                          state:
+                            - Home
+                            - Guest
+                      sequence:
+                        - service: script.turn_light_on
+                          data:
+                            lights: >
+                              {{states.light
+                                  |selectattr('attributes.night_lux','defined')
+                                  |selectattr('attributes.night_lux','eq',true)
+                                  |map(attribute='entity_id')|list }}
+                            activate_timer: false
+
+                    - conditions:
+                        - condition: state
+                          entity_id: input_select.occupancy_mode
+                          match: any
+                          state:
+                            - Away
+                            - Vacation
+                      sequence:
+                        - service: script.turn_light_on
+                          data:
+                            lights: >
+                              {{states.light
+                                  |selectattr('attributes.away','defined')
+                                  |selectattr('attributes.away','eq',true)
+                                  |map(attribute='entity_id')|list }}
+                            activate_timer: false
+
+                    - conditions:
+                        - condition: state
+                          entity_id: input_select.occupancy_mode
+                          match: any
+                          state: Night
+                      sequence:
+                        - service: script.turn_light_on
+                          data:
+                            lights: >
+                              {{states.light
+                                  |selectattr('attributes.night','defined')
+                                  |selectattr('attributes.night','eq',true)
+                                  |map(attribute='entity_id')|list }}
+                            activate_timer: false
+                            profile: night_dim
+              else:
+                - service: script.turn_light_off
