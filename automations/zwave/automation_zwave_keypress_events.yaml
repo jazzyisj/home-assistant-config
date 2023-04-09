@@ -1,0 +1,376 @@
+###############################################################################
+## ZWave - Keypress Events
+###############################################################################
+- id: zwave_keypress_events
+  alias: "[ZWave] Keypress Events"
+  description: "Respond to Inovelli zwave dimmer/switch keypress events."
+  mode: parallel
+  variables:
+    light: >
+      {% set light = 'light.' ~ (states.sensor
+        |selectattr('attributes.node_id','defined')
+        |selectattr('attributes.node_id','eq',trigger.event.data['node_id'])
+        |map(attribute='entity_id')|join).split('.')[1][:-12] %}
+      {% if is_state_attr(light,'rgb_light','control') %}
+        {% set light = light|replace('_light','_rgb_light') %}
+      {% endif %}
+      {{ light if light != 'light.' else '' }}
+    timer: "{{ light|replace('light.','timer.')|replace('_rgb','') }}"
+    key_value: "{{ trigger.event.data['value'] }}"
+    key_name: "{{ trigger.event.data['property_key_name'] }}"
+  trigger:
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyHeldDown
+
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyPressed
+
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyPressed1x
+
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyPressed2x
+
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyPressed3x
+
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyPressed4x
+
+    - platform: event
+      event_type: zwave_js_value_notification
+      event_data:
+        value: KeyPressed5x
+  condition: "{{ light != '' }}"
+  action:
+    - choose:
+        # key held down events
+        - conditions: "{{ key_value == 'KeyHeldDown' }}"
+          sequence:
+            - service: timer.start
+              target:
+                entity_id: "{{ timer }}"
+
+        # 1x down events
+        - conditions: "{{ key_value == 'KeyPressed' and key_name == '001' }}"
+          sequence:
+            - service: script.turn_light_off
+              data:
+                lights: "{{ light }}"
+                override: >
+                  {{ is_state(light,'off')
+                      and now() - states[light].last_changed > timedelta(seconds=1) }}
+
+        # 1x up events
+        - conditions: "{{ key_value == 'KeyPressed' and key_name == '002' }}"
+          sequence:
+            - service: script.turn_light_on
+              data:
+                lights: "{{ light }}"
+                override: >
+                  {{ is_state(light,'on')
+                      and now() - states[light].last_changed > timedelta(seconds=1) }}
+
+        # 2x down events
+        - conditions: "{{ key_value == 'KeyPressed2x' and key_name == '001' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: light.turn_off
+                      target:
+                        entity_id: light.upstairs_potlights
+              default:
+                - service: script.turn_room_off
+                  data:
+                    room: "{{ area_name(light) }}"
+
+        # 2x up events
+        - conditions: "{{ key_value == 'KeyPressed2x' and key_name == '002' }}"
+          sequence:
+            - if: "{{ has_value(timer) }}"
+              then:
+                - service: timer.start
+                  target:
+                    entity_id: "{{ timer }}"
+
+                - service: light.turn_on
+                  target:
+                    entity_id: "{{ light }}"
+                  data:
+                    profile: default_max
+
+        # 3x down events
+        - conditions: "{{ key_value == 'KeyPressed3x' and key_name == '001' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: script.activate_light_scene
+                      data:
+                        scene: evening_lights
+
+                - conditions: "{{ light == 'light.dining_room_potlights' }}"
+                  sequence:
+                    - service: media_player.volume_down
+                      target:
+                        entity_id: >
+                          {{ expand('group.single_media_players')
+                              |selectattr('attributes.device_class','defined')
+                              |rejectattr('attributes.device_class','eq','tv')
+                              |selectattr('state','in',['playing','paused','buffering','on'])
+                              |map(attribute='entity_id')|list }}
+
+                - conditions: "{{ light == 'light.bathroom_shower_light' }}"
+                  sequence:
+                    - service: media_player.volume_down
+                      target:
+                        entity_id: media_player.bathroom_speaker
+
+                - conditions: "{{ is_state_attr(light,'garage_led',true) }}"
+                  sequence:
+                    - service: input_boolean.turn_off
+                      target:
+                        entity_id: input_boolean.garage_door_active_alert
+
+                - conditions: "{{ is_state_attr(light,'scene_led',true) }}"
+                  sequence:
+                    - service: script.toggle
+                      target:
+                        entity_id: script.bedtime
+
+        # 3x up events
+        - conditions: "{{ key_value == 'KeyPressed3x' and key_name == '002' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: light.turn_on
+                      target:
+                        entity_id: light.upstairs_potlights
+                      data:
+                        profile: default_low
+
+                    - service: timer.start
+                      target:
+                        entity_id: &upstairs_potlight_timers
+                          - timer.hallway_potlights
+                          - timer.dining_room_potlights
+                          - timer.kitchen_potlights
+
+                - conditions: "{{ light == 'light.dining_room_potlights' }}"
+                  sequence:
+                    - service: media_player.volume_up
+                      target:
+                        entity_id: >
+                          {{ expand('group.single_media_players')
+                              |selectattr('attributes.device_class','defined')
+                              |rejectattr('attributes.device_class','eq','tv')
+                              |selectattr('state','in',['playing','paused','buffering','on'])
+                              |map(attribute='entity_id')|list }}
+
+                - conditions: "{{ light == 'light.bathroom_shower_light' }}"
+                  sequence:
+                    - service: media_player.volume_up
+                      target:
+                        entity_id: media_player.bathroom_speaker
+
+                - conditions: "{{ is_state_attr(light,'garage_led',true) }}"
+                  sequence:
+                    - service: script.garage_door_toggle
+
+                - conditions: "{{ is_state_attr(light,'scene_led',true) }}"
+                  sequence:
+                    - service: script.waketime_switch
+
+        # 4x down events
+        - conditions: "{{ key_value == 'KeyPressed4x' and key_name == '001' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: script.activate_light_scene
+                      data:
+                        scene: evening_lights
+
+                - conditions: "{{ light == 'light.dining_room_rgb_light' }}"
+                  sequence:
+                    - service: script.waste_collection_alert_off
+
+                - conditions: "{{ light == 'light.dining_room_potlights' }}"
+                  sequence:
+                    - service: script.media_players_pause
+
+                - conditions: "{{ light == 'light.bathroom_shower_light' }}"
+                  sequence:
+                    - service: script.media_players_pause
+                      data:
+                        entity_id: media_player.bathroom_speaker
+
+                - conditions: "{{ light in ['light.back_house_potlights','light.outside_garage_lights'] }}"
+                  sequence:
+                    - service: script.backyard_off
+
+                - conditions: "{{ is_state_attr(light,'alarm_led',true) }}"
+                  sequence:
+                    - condition: state
+                      entity_id: binary_sensor.someone_home
+                      state: "on"
+
+                    - service: script.arm_alarm
+                      data:
+                        mode: night
+
+        # 4x up events
+        - conditions: "{{ key_value == 'KeyPressed4x' and key_name == '002' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: light.turn_on
+                      target:
+                        entity_id: light.upstairs_potlights
+                      data:
+                        profile: default
+
+                    - service: timer.start
+                      target:
+                        entity_id: *upstairs_potlight_timers
+
+                - conditions: "{{ light == 'light.dining_room_potlights' }}"
+                  sequence:
+                    - service: script.media_players_resume
+
+                - conditions: "{{ light == 'light.bathroom_shower_light' }}"
+                  sequence:
+                    - service: script.media_players_resume
+                      data:
+                        entity_id: media_player.bathroom_speaker
+
+                - conditions: "{{ light in ['light.back_house_potlights','light.outside_garage_lights'] }}"
+                  sequence:
+                    - service: script.backyard_on
+
+                - conditions: "{{ is_state_attr(light,'alarm_led',true) }}"
+                  sequence:
+                    - condition: state
+                      entity_id: binary_sensor.someone_home
+                      state: "on"
+
+                    - service: script.arm_alarm
+                      data:
+                        mode: home
+
+        # 5x down events
+        - conditions: "{{ key_value == 'KeyPressed5x' and key_name == '001' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: script.turn_light_off
+                      data:
+                        bypass_timer: true
+
+                - conditions: "{{ light == 'light.dining_room_potlights' }}"
+                  sequence:
+                    - service: switch.toggle
+                      target:
+                        entity_id: switch.system_mute
+
+                - conditions: "{{ light == 'light.bathroom_shower_light' }}"
+                  sequence:
+                    - if:
+                        - condition: state
+                          entity_id: media_player.bathroom_speaker
+                          attribute: is_volume_muted
+                          state: true
+                      then:
+                        - service: media_player.volume_mute
+                          data:
+                            entity_id: media_player.bathroom_speaker
+                            is_volume_muted: false
+                      else:
+                        - service: media_player.volume_mute
+                          target:
+                            entity_id: media_player.bathroom_speaker
+                          data:
+                            is_volume_muted: true
+
+                - conditions: "{{ is_state_attr(light,'alarm_led',true) }}"
+                  sequence:
+                    - service: script.arm_alarm
+                      data:
+                        mode: away
+
+                    - if: "{{ light == 'light.side_entrance_light' }}"
+                      then:
+                        - service: input_boolean.turn_on
+                          target:
+                            entity_id: input_boolean.home_override_jason
+
+                        - service: input_boolean.turn_off
+                          target:
+                            entity_id: input_boolean.jason_home
+
+                - conditions: "{{ is_state_attr(light,'alarm_clock_led',true) }}"
+                  sequence:
+                    - service: script.alarm_clock_off
+
+        # 5x up events
+        - conditions: "{{ key_value == 'KeyPressed5x' and key_name == '002' }}"
+          sequence:
+            - choose:
+                - conditions: "{{ light == 'light.hallway_potlights' }}"
+                  sequence:
+                    - service: light.turn_on
+                      target:
+                        entity_id: light.upstairs_potlights
+                      data:
+                        profile: default_max
+
+                    - service: timer.start
+                      target:
+                        entity_id: *upstairs_potlight_timers
+
+                - conditions: "{{ light == 'light.dining_room_rgb_light' }}"
+                  sequence:
+                    - service: script.weather_report
+
+                - conditions: "{{ light == 'light.bathroom_shower_light' }}"
+                  sequence:
+                    - service: input_boolean.toggle
+                      target:
+                        entity_id: input_boolean.shower_scene
+
+                - conditions: "{{ is_state_attr(light,'alarm_led',true) }}"
+                  sequence:
+                    - condition: state
+                      entity_id: binary_sensor.someone_home
+                      state: "on"
+
+                    - service: script.disarm_alarm
+                      data:
+                        zone: "{{ iif(light in ['light.outside_garage_lights'],'garage','master') }}"
+                        person: hassio
+
+                    - if: "{{ light == 'light.side_entrance_light' and not is_state('person.jason','home') }}"
+                      then:
+                        - service: input_boolean.turn_on
+                          target:
+                            entity_id: input_boolean.home_override_jason
+
+                        - service: input_boolean.turn_on
+                          target:
+                            entity_id: input_boolean.jason_home

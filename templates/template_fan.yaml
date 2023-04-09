@@ -9,7 +9,7 @@
         {% set entities = state_attr(this.entity_id,'entity_id') %}
         {{ false if entities == none else entities|count > 0 }}
       attributes:
-        entity_id: "{{ expand('group.fans')|selectattr('state','eq','on')|map(attribute='entity_id')|list }}"
+        entity_id: "{{ expand('group.fans')|selectattr('state','eq','on')|map(attribute='entity_id')|list|sort }}"
 
     - name: "Fan In Use"
       unique_id: fan_in_use
@@ -18,7 +18,7 @@
         {% set entities = state_attr(this.entity_id,'entity_id') %}
         {{ false if entities == none else entities|count > 0 }}
       attributes:
-        entity_id: "{{ expand('group.fan_timers')|selectattr('state','ne','idle')|map(attribute='entity_id')|list }}"
+        entity_id: "{{ expand('group.fan_timers')|selectattr('state','ne','idle')|map(attribute='entity_id')|list|sort }}"
 
     - name: "Unavailable Fans"
       unique_id: unavailable_fans
@@ -28,9 +28,7 @@
         {% set entities = state_attr(this.entity_id,'entity_id') %}
         {{ false if entities == none else entities|count > 0 }}
       attributes:
-        entity_id: >
-          {{ expand('group.fans')|selectattr('state','in',['unknown','unavailable'])
-              |map(attribute='entity_id')|list }}
+        entity_id: "{{ expand('group.fans')|map(attribute='entity_id')|reject('has_value')|list|sort }}"
 
     - name: "HVAC Fan"
       unique_id: hvac_fan
@@ -57,17 +55,17 @@
       unique_id: bathroom_humidity_fan
       icon: mdi:water-alert
       device_class: moisture
-      # will run for at least 5 minutes
-      delay_off: 300
-      state: "{{ states('sensor.bathroom_sensor_humidity')|int(0) > states('input_number.bathroom_humidity_threshold')|int(0) }}"
+      delay_off: 300 # will run for at least 5 minutes
+      state: "{{ states('sensor.bathroom_sensor_humidity')|int > states('input_number.bathroom_humidity_threshold')|int }}"
+      availability: "{{ is_number(states('sensor.bathroom_sensor_humidity')) }}"
 
     - name: "Bathroom Mold Fan"
       unique_id: bathroom_mold_fan
       icon: mdi:mushroom
       device_class: moisture
-      # will run for at least 5 minutes
-      delay_off: 300
-      state: "{{ states('sensor.bathroom_mold_risk')|int(0) > states('input_number.mold_risk_threshold')|int(0) }}"
+      delay_off: 300 # will run for at least 5 minutes
+      state: "{{ states('sensor.bathroom_mold_risk')|int > states('input_number.mold_risk_threshold')|int }}"
+      availability: "{{ is_number(states('sensor.bathroom_mold_risk')) }}"
 
     # uses absolute value so we can use temp above or below (negative value)
     # adjusts for seasons - doesn't run if outside is colder than inside, vice versa for warmer outside
@@ -77,15 +75,18 @@
       unique_id: bathroom_temperature_fan
       icon: mdi:thermometer-lines
       device_class: heat
-      # will run for at least 5 minutes
-      delay_off: 300
+      delay_off: 300 # will run for at least 5 minutes
       state: >
-        {% set tempdiff = (states('sensor.bathroom_sensor_air_temperature')|int(0) - states('sensor.thermostat_temperature')|int(0)|abs) %}
-        {{ (states('sensor.bathroom_sensor_air_temperature')|int(0) > states('input_number.high_temperature_threshold')|int(0))
-              or (states('sensor.bathroom_sensor_air_temperature')|int(0) < states('input_number.low_temperature_threshold')|int(0))
-              or (states('sensor.bathroom_sensor_air_temperature')|int(0) < states('sensor.thermostat_temperature')|int(0)
-                  and states('sensor.outdoor_temperature')|int(0) < states('sensor.thermostat_temperature')|int(0)
-                  and tempdiff >= states('input_number.bathroom_temperature_differential')|int(0))
-              or (states('sensor.bathroom_sensor_air_temperature')|int(0) > states('sensor.thermostat_temperature')|int(0)
-                  and states('sensor.outdoor_temperature')|int(0) > states('sensor.thermostat_temperature')|int(0)
-                  and tempdiff >= states('input_number.bathroom_temperature_differential')|int(0)) }}
+        {% set tempdiff = (states('sensor.bathroom_sensor_air_temperature')|int - states('sensor.thermostat_temperature')|int|abs) %}
+        {{ (states('sensor.bathroom_sensor_air_temperature')|int > states('input_number.high_temperature_threshold')|int)
+            or (is_number(states('sensor.outdoor_temperature'))
+              and ((states('sensor.bathroom_sensor_air_temperature')|int < states('input_number.low_temperature_threshold')|int)
+              or (states('sensor.bathroom_sensor_air_temperature')|int < states('sensor.thermostat_temperature')|int
+                  and states('sensor.outdoor_temperature')|int < states('sensor.thermostat_temperature')|int
+                  and tempdiff >= states('input_number.bathroom_temperature_differential')|int)
+              or (states('sensor.bathroom_sensor_air_temperature')|int > states('sensor.thermostat_temperature')|int
+                  and states('sensor.outdoor_temperature')|int > states('sensor.thermostat_temperature')|int
+                  and tempdiff >= states('input_number.bathroom_temperature_differential')|int))) }}
+      availability: >
+        {{ is_number(states('sensor.bathroom_sensor_air_temperature'))
+            and is_number(states('sensor.thermostat_temperature')) }}

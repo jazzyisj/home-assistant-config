@@ -64,7 +64,6 @@
 - WeatherFlow to MQTT
 - Z-Wave JS
 - Z-Wave JS UI
-- ZeroTier One
 
 ## TAGS USED IN CODE
 
@@ -82,6 +81,7 @@
     #BUG - unfixable bug in HA/component/device
     #BUGFIX - workaround for bug
 
+    #NONE - notes about 'None' values
     #BLOOP - google home bloop fixes
     #LOCK_USER - lock user code
     #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
@@ -89,7 +89,6 @@
     #ALARMO - alarmo issues/notes
     #APEX - apex graph issues
     #MASS - music assistant issues/notes
-    #TRACE - automations/scripts with trace issues
     #SWITCH - state-switch issues
 
     #INFO - info level log tag

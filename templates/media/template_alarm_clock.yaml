@@ -62,7 +62,7 @@
           data:
             value: "{{ option }}"
       options: &alarm_players >
-        {% set options = expand(state_attr('group.alarm_clock_media_players','entity_id'))|map(attribute='name')|list %}
+        {% set options = expand(state_attr('group.alarm_clock_media_players','entity_id'))|map(attribute='name')|list|sort %}
         {% if options|count > 0 %} {{ options }}
         {% else %} none
         {% endif %}
@@ -382,7 +382,7 @@
         entity_id: >
           {% set player = states(this.entity_id) %}
           {% set new_members = namespace(value=[]) %}
-          {% if player not in ['unknown','unavailable'] %}
+          {% if has_value(this.entity_id) %}
             {% set members = expand(state_attr(player,'group_members')) %}
             {% for item in members %}
               {% set new_members.value = new_members.value + [item.domain ~ '.mass_' ~ item.object_id] %}
@@ -394,7 +394,7 @@
     - name: "Alarm Clock Auto Next Alarm"
       unique_id: alarm_clock_auto_next_alarm
       device_class: timestamp
-      icon: >
+      icon: > #MACRO
         {% if is_state_attr('sensor.alarm_clock_auto_next_alarm','status','failed') %} mdi:alarm-note-off
         {% elif is_state_attr('sensor.alarm_clock_auto_next_alarm','status','snoozed') %} mdi:alarm-snooze
         {% elif is_state_attr('sensor.alarm_clock_auto_next_alarm','status','pending')  %} mdi:alarm-check
@@ -442,10 +442,12 @@
               {% elif states(states('sensor.alarm_clock_media_player')) in ['playing','buffering'] %} playing
               {% else %} delayed
               {% endif %}
-          {% elif states('sensor.alarm_clock_auto_next_alarm') in ['unknown','unavailable'] %} off
+          {% elif not has_value('sensor.alarm_clock_auto_next_alarm') %} off
           {% else %} pending
           {% endif %}
-        12hour: "{{ states('sensor.alarm_clock_auto_next_alarm')|as_timestamp(none)|timestamp_custom('%-I:%M %p',true,none) }}"
+        12hour: >
+          {% from 'format.jinja' import twelve_hour %}
+          {{ twelve_hour(this.entity_id) }}
 
     - name: "Alarm Clock Manual Next Alarm"
       unique_id: alarm_clock_manual_next_alarm
@@ -475,10 +477,12 @@
               {% elif states(states('sensor.alarm_clock_media_player')) in ['playing','buffering'] %} playing
               {% else %} delayed
               {% endif %}
-          {% elif states('sensor.alarm_clock_manual_next_alarm') in ['unknown','unavailable'] %} off
+          {% elif not has_value('sensor.alarm_clock_manual_next_alarm') %} off
           {% else %} pending
           {% endif %}
-        12hour: "{{ states('sensor.alarm_clock_manual_next_alarm')|as_timestamp(none)|timestamp_custom('%-I:%M %p',true,none) }}"
+        12hour: >
+          {% from 'format.jinja' import twelve_hour %}
+          {{ twelve_hour(this.entity_id) }}
 
     - name: "Alarm Clock Nap Next Alarm"
       unique_id: alarm_clock_nap_next_alarm
@@ -502,23 +506,25 @@
               {% elif states(states('sensor.alarm_clock_media_player')) in ['playing','buffering'] %} playing
               {% else %} delayed
               {% endif %}
-          {% elif states('sensor.alarm_clock_nap_next_alarm') in ['unknown','unavailable'] %} off
+          {% elif not has_value('sensor.alarm_clock_nap_next_alarm') %} off
           {% else %} pending
           {% endif %}
-        12hour: "{{ states('sensor.alarm_clock_nap_next_alarm')|as_timestamp(none)|timestamp_custom('%-I:%M %p',true,none) }}"
+        12hour: >
+          {% from 'format.jinja' import twelve_hour %}
+          {{ twelve_hour(this.entity_id) }}
 
     # other alarm clocks set in next 24 hours
     - name: "Alarm Clock Other"
       unique_id: alarm_clock_other
       device_class: timestamp
-      icon: "{{ 'mdi:alarm-off' if states('sensor.alarm_clock_other') in ['unknown','unavailable'] else 'mdi:alarm-check' }}"
+      icon: "{{ iif(has_value('sensor.alarm_clock_other'),'mdi:alarm-check','mdi:alarm-off') }}"
       state: >
         {% set set_alarms = namespace(value=[]) %}
         {% set alarms = state_attr('sensor.alarm_clock_other','alarm_clocks') %}
         {% if alarms != none %}
           {% for item in alarms  %}
-            {% set next = states('sensor.' ~ item ~ '_next_alarm') %}
-            {% if next not in ['unknown','unavailable'] %}
+            {% if has_value('sensor.' ~ item ~ '_next_alarm') %}
+              {% set next = states('sensor.' ~ item ~ '_next_alarm') %}
               {% if next|as_datetime <= now() + timedelta(hours=24) %}
                 {% set set_alarms.value = set_alarms.value + [next|as_datetime] %}
               {% endif %}
@@ -534,15 +540,17 @@
         status: "{{ 'off' if state_attr('sensor.alarm_clock_other','source') == none else 'set' }}"
         source: >
           {% set source = namespace(value=none) %}
-          {% set next = states('sensor.alarm_clock_other') %}
-          {% if next not in ['unknown','unavailable'] %}
+          {% if has_value('sensor.alarm_clock_other') %}
+            {% set next = states('sensor.alarm_clock_other') %}
             {% set alarms = expand('group.alarm_clock_other_alarms') %}
             {% for item in alarms if next == item.state %}
               {% set source.value = item.name|replace(' Next Alarm','') %}
             {% endfor %}
           {% endif %}
           {{ source.value }}
-        12hour: "{{ states('sensor.alarm_clock_other')|as_timestamp(none)|timestamp_custom('%-I:%M %p',true,none) }}"
+        12hour: >
+          {% from 'format.jinja' import twelve_hour %}
+          {{ twelve_hour(this.entity_id) }}
 
     # earliest of auto, manual, phone, google home alarms in next 24 hours
     - name: "Alarm Clock Next Alarm"
@@ -565,8 +573,8 @@
               if state_attr('sensor.alarm_clock_other','alarm_clocks') != none else [] %}
           {% set alarm_clocks = ['alarm_clock_auto','alarm_clock_manual','alarm_clock_nap'] + other_alarms %}
           {% for item in alarm_clocks %}
-            {% set alarm = states('sensor.' ~ item ~ '_next_alarm') %}
-            {% if alarm not in ['unknown','unavailable'] %}
+            {% if has_value('sensor.' ~ item ~ '_next_alarm') %}
+              {% set alarm = states('sensor.' ~ item ~ '_next_alarm') %}
               {% if alarm|as_datetime <= now() + timedelta(hours=24) %}
                 {% set set_alarms.value = set_alarms.value + [alarm|as_timestamp] %}
               {% endif %}
@@ -595,4 +603,6 @@
             {% endif %}
           {% else %} {{ none }}
           {% endif %}
-        12hour: "{{ states('sensor.alarm_clock_next_alarm')|as_timestamp(none)|timestamp_custom('%a %-I:%M %p',true,none) }}"
+        12hour: >
+          {% from 'format.jinja' import twelve_hour %}
+          {{ twelve_hour(this.entity_id) }}

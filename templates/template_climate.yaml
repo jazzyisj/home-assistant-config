@@ -21,40 +21,19 @@
       event_type: event_template_reloaded
 
     - platform: state
-      entity_id: climate.thermostat
-      from:
-        - unknown
-        - unavailable
-
-    - platform: state
-      entity_id: climate.thermostat
-      to:
-        - unknown
-        - unavailable
+      entity_id: sensor.time
   binary_sensor:
     - name: "Nest Connected"
       unique_id: nest_connected
       icon: mdi:home-circle
       device_class: connectivity
       state: >
-        {{ expand(integration_entities('nest'))
-            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+        {% set entities = state_attr(this.entity_id,'entity_id')|select('has_value')|list %}
+        {{ entities|count > 0 if entities != none else false }}
+      attributes:
+        entity_id: "{{ integration_entities('nest') }}"
 
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id:
-        - binary_sensor.nest_connected
-        - input_boolean.climate_alerts
-      to:
-        - "on"
-        - "off"
-  binary_sensor:
+- binary_sensor:
     - name: "Nest Connected Alert"
       unique_id: nest_connected_alert
       icon: mdi:home-circle
@@ -64,23 +43,22 @@
         {{ is_state('binary_sensor.nest_connected','off')
             and is_state('input_boolean.climate_alerts','on') }}
 
-- binary_sensor:
     - name: "HVAC Active"
       unique_id: hvac_active
       state: >
         {{ state_attr('climate.thermostat','hvac_action') in ['heating','cooling']
             or is_state_attr('climate.thermostat','fan_mode','on') }}
-      availability: "{{ states('climate.thermostat') not in ['unknown','unavailable'] }}"
+      availability: "{{ has_value('climate.thermostat') }}"
 
     - name: "HVAC Filter Alert"
       unique_id: hvac_filter_alert
       icon: mdi:air-filter
       device_class: problem
       state: >
-        {% set filter_hours = states('sensor.hvac_filter_hours')|int(-1) > 250 %}
-        {% set reset_time = states('button.hvac_filter_reset') %}
         {% set time_limit = false %}
-        {% if reset_time not in ['unknown','unavailable'] %}
+        {% set filter_hours = states('sensor.hvac_filter_hours')|int(-1) > 250 %}
+        {% if has_value('button.hvac_filter_reset') %}
+          {% set reset_time = states('button.hvac_filter_reset') %}
           {% set time_limit = now() - reset_time|as_datetime > timedelta(days=90) %}
         {% endif %}
         {{ filter_hours or time_limit }}
@@ -91,9 +69,9 @@
       delay_on: 1800
       state: >
         {{ ((states('sensor.thermostat_temperature')|int(0) < states('input_number.low_temperature_threshold')|int(0))
-              and not states('sensor.thermostat_temperature') in ['unknown','unavailable'])
+              and has_value('sensor.thermostat_temperature'))
             or ((states('sensor.bathroom_sensor_air_temperature')|int(0) < states('input_number.low_temperature_threshold')|int(0) )
-              and not states('sensor.bathroom_sensor_air_temperature') in ['unknown','unavailable'])
+              and has_value('sensor.bathroom_sensor_air_temperature'))
             and is_state('input_boolean.climate_alerts','on') }}
 
     # add bathroom temp differential to temp threshold to reduce false alerts
@@ -103,10 +81,10 @@
       delay_on: 1800
       state: >
         {{ (states('sensor.thermostat_temperature')|int(0) > states('input_number.high_temperature_threshold')|int(0)
-              and not states('sensor.thermostat_temperature') in ['unknown','unavailable'])
+              and has_value('sensor.thermostat_temperature'))
             or (( states('sensor.bathroom_sensor_air_temperature')|int(0) > (states('input_number.high_temperature_threshold')|int(0)
                   + states('input_number.bathroom_temperature_differential')|int(0) ))
-              and not states('sensor.bathroom_sensor_air_temperature') in ['unknown','unavailable'])
+              and has_value('sensor.bathroom_sensor_air_temperature'))
             and is_state('input_boolean.climate_alerts','on') }}
 
     - name: "Indoor High Humidity Alert"
@@ -115,9 +93,9 @@
       delay_on: 3600
       state: >
         {{ (states('sensor.thermostat_humidity')|int(0) > states('input_number.high_humidity_threshold')|int(0)
-              and not states('sensor.thermostat_humidity') in ['unknown','unavailable'] )
+              and has_value('sensor.thermostat_humidity'))
             or (states('sensor.bathroom_sensor_humidity')|int(0) > states('input_number.high_humidity_threshold')|int(0)
-              and not states('sensor.bathroom_sensor_humidity') in ['unknown','unavailable'])
+              and has_value('sensor.bathroom_sensor_humidity'))
             and is_state('input_boolean.climate_alerts','on') }}
 
     - name: "Bathroom Mold Risk Alert"
@@ -140,9 +118,9 @@
       attributes:
         entity_id: >
           {{ expand('group.door_alert_sensors')|rejectattr('entity_id','eq','binary_sensor.garage_side_door_open_alert')
-              |selectattr('state','eq','on')|map(attribute='entity_id')|list
+              |selectattr('state','eq','on')|map(attribute='entity_id')|list|sort
             + expand('group.window_alert_sensors')|selectattr('state','eq','on')
-              |map(attribute='entity_id')|list }}
+              |map(attribute='entity_id')|list|sort }}
 
 - sensor:
     # req for hvac runtime history stats
@@ -168,7 +146,7 @@
           {% endif %}
         {% else %} {{ none }}
         {% endif %}
-      availability: "{{ states('climate.thermostat') not in ['unknown','unavailable'] }}"
+      availability: "{{ has_value('climate.thermostat') }}"
 
     # overload climate integration sensors
     - name: "Indoor Temperature"

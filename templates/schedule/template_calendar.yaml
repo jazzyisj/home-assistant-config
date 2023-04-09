@@ -33,40 +33,19 @@
       event_type: event_template_reloaded
 
     - platform: state
-      entity_id: calendar.work_calendar
-      from:
-        - unknown
-        - unavailable
-
-    - platform: state
-      entity_id: calendar.work_calendar
-      to:
-        - unknown
-        - unavailable
+      entity_id: sensor.time
   binary_sensor:
     - name: "Google Calendar Connected"
       unique_id: google_calendar_connected
       icon: mdi:calendar
       device_class: connectivity
       state: >
-        {{ expand(integration_entities('google'))
-              |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+        {% set entities = state_attr(this.entity_id,'entity_id')|select('has_value')|list %}
+        {{ entities|count > 0 if entities != none else false }}
+      attributes:
+        entity_id: "{{ integration_entities('google') }}"
 
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id:
-        - binary_sensor.google_calendar_connected
-        - input_boolean.schedule_alerts
-      to:
-        - "on"
-        - "off"
-  binary_sensor:
+- binary_sensor:
     - name: "Google Calendar Connected Alert"
       unique_id: google_calendar_connected_alert
       icon: mdi:calendar
@@ -76,7 +55,6 @@
         {{ is_state('binary_sensor.google_calendar_connected','off')
             and is_state('input_boolean.schedule_alerts','on') }}
 
-- binary_sensor:
     - name: "Calendar Empty Alert"
       unique_id: calendar_empty_alert
       state: >
@@ -87,7 +65,7 @@
           {{ states.calendar
               |selectattr('attributes.start_time','defined')|selectattr('attributes.start_time','eq',null)
               |rejectattr('entity_id','in',['calendar.work_vacation_jason','calendar.work_layoff'])
-              |map(attribute='name')|list }}
+              |map(attribute='name')|list|sort }}
       availability: "{{ is_state('binary_sensor.google_calendar_connected','on') }}"
 
 - sensor:
@@ -95,7 +73,7 @@
       unique_id: next_waste_day
       device_class: timestamp
       icon: >
-        {% set next = states('sensor.next_waste_day') %}
+        {% set next = states(this.entity_id) %}
         {% if next == states('sensor.next_garbage_day')
             and states.sensor.next_garbage_day.attributes is defined %}
           {{ states.sensor.next_garbage_day.attributes.icon }}
@@ -108,12 +86,12 @@
         {% else %} mdi:trash-can
         {% endif %}
       state: >
-        {% set garbage = none if states('sensor.next_garbage_day') in ['unknown','unavailable']
-            else states('sensor.next_garbage_day')|as_datetime|as_local %}
-        {% set recycle = none if states('sensor.next_recycle_day') in ['unknown','unavailable']
-            else states('sensor.next_recycle_day')|as_datetime|as_local %}
-        {% set yardwaste = none if states('sensor.next_yardwaste_day') in ['unknown','unavailable']
-            else states('sensor.next_yardwaste_day')|as_datetime|as_local %}
+        {% set garbage = states('sensor.next_garbage_day')|as_datetime|as_local
+            if has_value('sensor.next_garbage_day') else none %}
+        {% set recycle = states('sensor.next_recycle_day')|as_datetime|as_local
+            if has_value('sensor.next_recycle_day') else none %}
+        {% set yardwaste = states('sensor.next_yardwaste_day')|as_datetime|as_local
+            if has_value('sensor.next_yardwaste_day') else none %}
         {% set types = [garbage, recycle, yardwaste] %}
         {% set active = namespace(types=[]) %}
         {% for item in types if item != none %}
@@ -122,8 +100,8 @@
         {{ none if active.types == [] else active.types|min }}
       attributes:
         display: >
-          {% set next = none if states('sensor.next_waste_day') in ['unknown','unavailable']
-              else states('sensor.next_waste_day')|as_datetime %}
+          {% set next = states(this.entity_id)|as_datetime
+              if has_value(this.entity_id) else none %}
           {% if next != none %}
             {% if next.day == now().day %} Today
             {% elif next - now() <= timedelta(hours=24) %} Tomorrow
@@ -133,7 +111,7 @@
           {% else %} unknown
           {% endif %}
         waste_type: >
-          {% set next = states('sensor.next_waste_day') %}
+          {% set next = states(this.entity_id) %}
           {% if next == states('sensor.next_garbage_day') %} garbage
           {% elif next == states('sensor.next_recycle_day') %} recycle
           {% elif next == states('sensor.next_yardwaste_day') %} yardwaste
@@ -152,7 +130,7 @@
         {% endif %}
       attributes:
         display: >
-          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+          {% if has_value(this.entity_id) %}
             {% set start = states(this.entity_id)|as_datetime %}
             {% if now() > start %} Today
             {% elif start - now() < timedelta(days=1) %} Tomorrow
@@ -173,7 +151,7 @@
         {% endif %}
       attributes:
         display: >
-          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+          {% if has_value(this.entity_id) %}
             {% set start = states(this.entity_id)|as_datetime %}
             {% if now() > start %} Today
             {% elif start - now() < timedelta(days=1) %} Tomorrow
@@ -194,7 +172,7 @@
         {% endif %}
       attributes:
         display: >
-          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+          {% if has_value(this.entity_id) %}
             {% set start = states(this.entity_id)|as_datetime %}
             {% if now() > start %} Today
             {% elif start - now() < timedelta(days=1) %} Tomorrow
@@ -202,7 +180,7 @@
             {% endif %}
           {% endif %}
         warning: >
-          {% if states(this.entity_id) not in ['unknown','unavailable'] %}
+          {% if has_value(this.entity_id) %}
             {% set start = states(this.entity_id)|as_datetime %}
             {{ start - now() < timedelta(days=3) and start - now() > timedelta(days=1) }}
           {% endif %}

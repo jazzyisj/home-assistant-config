@@ -9,40 +9,19 @@
       event_type: event_template_reloaded
 
     - platform: state
-      entity_id: sensor.tomorrow_io_home_fire_index
-      from:
-        - unknown
-        - unavailable
-
-    - platform: state
-      entity_id: sensor.tomorrow_io_home_fire_index
-      to:
-        - unknown
-        - unavailable
+      entity_id: sensor.time
   binary_sensor:
-    - name: "Tomorrow.io Connected"
+    - name: "Tomorrow IO Connected"
       unique_id: tomorrow_io_connected
-      icon: mdi:weather-partly-snowy-rainy
+      icon: mdi:weather-sunny-alert
       device_class: connectivity
       state: >
-        {{ expand(integration_entities('tomorrowio'))
-            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+        {% set entities = state_attr(this.entity_id,'entity_id')|select('has_value')|list %}
+        {{ entities|count > 0 if entities != none else false }}
+      attributes:
+        entity_id: "{{ integration_entities('tomorrowio') }}"
 
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id:
-        - binary_sensor.tomorrow_io_connected
-        - input_boolean.weather_alerts
-      to:
-        - "on"
-        - "off"
-  binary_sensor:
+- binary_sensor:
     - name: "Tomorrow.io Connected Alert"
       unique_id: tomorrow_io_connected_alert
       icon: mdi:weather-partly-snowy-rainy
@@ -52,48 +31,13 @@
         {{ is_state('binary_sensor.tomorrow_io_connected','off')
             and is_state('input_boolean.weather_alerts','on') }}
 
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id: sensor.gdacs_alerts
-      from:
-        - unknown
-        - unavailable
-
-    - platform: state
-      entity_id: sensor.gdacs_alerts
-      to:
-        - unknown
-        - unavailable
-  binary_sensor:
     - name: "GDACS Connected"
       unique_id: gdacs_connected
       icon: mdi:home-flood
       device_class: connectivity
-      state: > #ISSUE sensor.gdacs_alerts not unavailable/unknown when WAN down
-        {{ expand(integration_entities('gdacs'))
-            |rejectattr('state','in',['unknown','unavailable'])|list|count > 0 }}
+      #ISSUE sensor.gdacs_alerts not unavailable/unknown when WAN down
+      state: "{{ integration_entities('gdacs')|select('has_value')|list|count > 0 }}"
 
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id:
-        - binary_sensor.gdacs_connected
-        - input_boolean.weather_alerts
-      to:
-        - "on"
-        - "off"
-  binary_sensor:
     - name: "GDACS Connected Alert"
       unique_id: gdacs_connected_alert
       icon: mdi:home-flood
@@ -103,7 +47,6 @@
         {{ is_state('binary_sensor.gdacs_connected','off')
             and is_state('input_boolean.weather_alerts','on') }}
 
-- binary_sensor:
     - name: "Weather LED Active"
       unique_id: weather_led_alert
       state: >
@@ -225,7 +168,7 @@
                 |sort(reverse=true, attribute='attributes.from_date')
                 |map(attribute='attributes.alert_level')|first }}
           {% endif %}
-      availability: "{{ states('sensor.gdacs_alerts') not in ['unknown','unavailable'] }}"
+      availability: "{{ has_value('sensor.gdacs_alerts') }}"
 
 - sensor:
     - name: "Outdoor Temperature Trend"
@@ -241,8 +184,8 @@
         {% else %} Steady
         {% endif %}
       availability: >
-        {{ states('binary_sensor.temperature_rising') not in ['unknown','unavailable']
-            and states('binary_sensor.temperature_falling') not in ['unknown','unavailable'] }}
+        {{ has_value('binary_sensor.temperature_rising')
+            and has_value('binary_sensor.temperature_falling') }}
 
     - name: "Moon Phase"
       unique_id: moon_phase
@@ -295,11 +238,11 @@
       unique_id: current_condition
       icon: mdi:weather-partly-snowy-rainy
       state: >
-        {% if states('weather.weatherflow_local_daily') not in ['unknown','unavailable'] %}
+        {% if has_value('weather.weatherflow_local_daily') %}
           {% set condition = states('weather.weatherflow_local_daily') %}
-        {% elif states('weather.weatherflow_day_based_forecast') not in ['unknown','unavailable'] %}
+        {% elif has_value('weather.weatherflow_day_based_forecast') %}
           {% set condition = states('weather.weatherflow_day_based_forecast') %}
-        {% elif states('weather.windsor') not in ['unknown','unavailable'] %}
+        {% elif has_value('weather.windsor') %}
           {% set condition = states('weather.windsor') %}
         {% endif %}
 
@@ -319,14 +262,14 @@
         {% endif %}
       attributes:
         provider: >
-          {% if states('weather.weatherflow_local_daily') not in ['unknown','unavailable'] %} WeatherFlow Local
-          {% elif states('weather.weatherflow_day_based_forecast') not in ['unknown','unavailable'] %} WeatherFlow Cloud
-          {% elif states('weather.windsor') not in ['unknown','unavailable'] %} Environment Canada
+          {% if has_value('weather.weatherflow_local_daily') %} WeatherFlow Local
+          {% elif has_value('weather.weatherflow_day_based_forecast') %} WeatherFlow Cloud
+          {% elif has_value('weather.windsor') %} Environment Canada
           {% endif %}
       availability: >
-        {{ states('weather.weatherflow_local_daily') not in ['unknown','unavailable']
-            or states('weather.weatherflow_day_based_forecast') not in ['unknown','unavailable']
-            or states('weather.windsor') not in ['unknown','unavailable'] }}
+        {{ has_value('weather.weatherflow_local_daily')
+            or has_value('weather.weatherflow_day_based_forecast')
+            or has_value('weather.windsor') }}
 
     #ISSUE WARNING (MainThread) [homeassistant.components.sensor] Sensor sensor.outdoor_temperature_filtered has device class temperature, state class measurement and unit °C thus indicating it has a numeric value; however, it has the non-numeric value: unknown (<class 'str'>); Please update your configuration if your entity is manually configured, otherwise create a bug report at https://github.com/home-assistant/core/issues?q=is%3Aopen+is%3Aissue+label%3A%22integration%3A+filter%22
     - name: "Outdoor Temperature"
@@ -560,15 +503,14 @@
     - name: "Precipitation Intensity"
       unique_id: precipitation_intensity
       icon: mdi:weather-pouring
-      #NONE state is none, tempest is None when no value,
-      #unknown when 'None' in state, null when 'None' as attribute
+      #NONE weatherflow state is 'none', tempest is 'None' when no value
       device_class: precipitation_intensity
       state_class: measurement
       unit_of_measurement: mm/h
       state: >
-        {% if states('sensor.tempest_st_00057689_rain_intensity') != 'None' %}
+        {% if states('sensor.tempest_st_00057689_rain_intensity')|lower != 'none' %}
           {{ states('sensor.tempest_st_00057689_rain_intensity') }}
-        {% elif states('sensor.weatherflow_precipitation_intensity') != 'none' %}
+        {% elif states('sensor.weatherflow_precipitation_intensity')|lower != 'none' %}
           {{ states('sensor.weatherflow_precipitation_intensity') }}
         {% else %} 0
         {% endif %}
@@ -579,30 +521,30 @@
           {% else %} WeatherFlow Local
           {% endif %}
       availability: >
-        {{ states('sensor.tempest_st_00057689_rain_intensity') not in ['unknown','unavailable']
-            or states('sensor.weatherflow_precipitation_intensity') not in ['unknown','unavailable'] }}
+        {{ has_value('sensor.tempest_st_00057689_rain_intensity')
+            or has_value('sensor.weatherflow_precipitation_intensity') }}
 
     - name: "Precipitation Rate"
       unique_id: precipitation_rate
       icon: mdi:weather-pouring
-      device_class: precipitation_intensity
-      state_class: measurement
-      unit_of_measurement: mm/h
+      # device_class: precipitation_intensity
+      # state_class: measurement
+      # unit_of_measurement: mm/h
       state: >
-        {% if is_number(states('sensor.tempest_st_00057689_rain_rate')) %}
+        {% if has_value(states('sensor.tempest_st_00057689_rain_rate')) %}
           {{ states('sensor.tempest_st_00057689_rain_rate')|float }}
-        {% elif is_number(states('sensor.weatherflow_precipitation_rate')) %}
+        {% elif has_value(states('sensor.weatherflow_precipitation_rate')) %}
           {{ states('sensor.weatherflow_precipitation_rate')|float }}
-        {% else %} 0
+        {% else %} none
         {% endif %}
-      attributes:
-        provider: >
-          {% if is_number(states('sensor.tempest_st_00057689_rain_rate')) %} WeatherFlow Local
-          {% elif is_number(states('sensor.weatherflow_precipitation_rate')) %} WeatherFlow Cloud
-          {% endif %}
-      availability: >
-        {{ is_number(states('sensor.tempest_st_00057689_rain_rate'))
-            or is_number(states('sensor.weatherflow_precipitation_rate')) }}
+      # attributes:
+      #   provider: >
+      #     {% if is_number(states('sensor.tempest_st_00057689_rain_rate')) %} WeatherFlow Local
+      #     {% elif is_number(states('sensor.weatherflow_precipitation_rate')) %} WeatherFlow Cloud
+      #     {% endif %}
+      # availability: >
+      #   {{ is_number(states('sensor.tempest_st_00057689_rain_rate'))
+      #       or is_number(states('sensor.weatherflow_precipitation_rate')) }}
 
     - name: "Precipitation Duration Today"
       unique_id: precipitation_duration_today
@@ -708,10 +650,10 @@
       unique_id: precipitation_type
       icon: mdi:weather-rainy
       device_class: enum
-      state: > #NONE
-        {% set type = states('sensor.tempest_st_00057689_precipitation_type')|lower %}
+      state: > #NONE tempest state 'None' when no value
         {% set freeze_alt = states('sensor.tempest_st_00057689_freezing_level_altitude')|int(-1) %}
-        {% if type not in ['unknown','unavailable'] %}
+        {% if has_value('sensor.tempest_st_00057689_precipitation_type') %}
+          {% set type = states('sensor.tempest_st_00057689_precipitation_type')|lower %}
           {% if type != 'none' %} {{ type }}
           {% elif freeze_alt != -1 and freeze_alt < 200 %} snow
           {% else %} rain
@@ -723,11 +665,11 @@
         {% endif %}
       attributes:
         provider: >
-          {% if states('sensor.tempest_st_00057689_precipitation_type')|lower not in ['unknown','unavailable'] %} WeatherFlow Local
+          {% if has_value('sensor.tempest_st_00057689_precipitation_type') %} WeatherFlow Local
           {% else %} WeatherFlow Cloud
           {% endif %}
       availability: >
-        {{ states('sensor.tempest_st_00057689_precipitation_type') not in ['unknown','unavailable']
+        {{ has_value('sensor.tempest_st_00057689_precipitation_type')
             or states('binary_sensor.weatherflow_is_freezing') in ['off','on'] }}
 
     - name: "Lightning Count"
@@ -946,7 +888,7 @@
       state: "{{ states('sensor.weatherflow_beaufort_description')|replace('_',' ')|title }}"
       attributes:
         provider: WeatherFlow Cloud
-      availability: "{{ states('sensor.weatherflow_beaufort_description') not in ['unknown','unavailable'] }}"
+      availability: "{{ has_value('sensor.weatherflow_beaufort_description') }}"
 
     - name: "Cloud Cover"
       unique_id: cloud_cover
