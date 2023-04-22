@@ -1,11 +1,6 @@
 ###############################################################################
 ## Package - Company Scene
 ###############################################################################
-input_boolean:
-  company_scene:
-    name: "Company Scene"
-    icon: mdi:account-group
-
 timer:
   company_scene:
     name: "Company Scene Timer"
@@ -43,40 +38,48 @@ template:
       - name: "RGB Company Scene"
         unique_id: rgb_company_scene
         icon: mdi:lightbulb
-        state: >
-          rgb({{ states('input_number.rgb_red_company')|int }},
-          {{- states('input_number.rgb_green_company')|int }},
-          {{- states('input_number.rgb_blue_company')|int }})
+        state: |
+          {% from 'rgb.jinja' import scene_rgb_state %}
+          {{ scene_rgb_state('company') }}
         attributes:
-          rgb_color: >
-            [{{ states('input_number.rgb_red_company')|int }},
-              {{- states('input_number.rgb_green_company')|int }},
-              {{- states('input_number.rgb_blue_company')|int }}]
+          rgb_color: |
+            {% from 'rgb.jinja' import scene_rgb_attribute %}
+            {{ scene_rgb_attribute('company') }}
+
+switch:
+  - platform: template
+    switches:
+      company_scene:
+        friendly_name: "Company Scene"
+        unique_id: company_scene
+        icon_template: mdi:account-group
+        value_template: "{{ not is_state('timer.company_scene','idle') }}"
+        turn_on:
+          - if: "{{ states('input_select.occupancy_mode') in ['Home','Guest'] }}"
+            then:
+              - service: script.turn_on
+                target:
+                  entity_id: script.scene_on
+                data:
+                  variables:
+                    scene: company
+
+              - service: switch.turn_on
+                target:
+                  entity_id: switch.refrigerator_ice_plus
+            else:
+              - service: script.turn_on
+                target:
+                  entity_id: script.turn_scene_off
+                data:
+                  variables:
+                    scene: company
+        turn_off:
+          - service: script.scene_off
+            data:
+              scene: company
 
 automation:
-  ###############################################################################
-  ## Scene - Company Scene On
-  ###############################################################################
-  - id: scene_company_scene_on
-    alias: "[Scene] Company Scene On"
-    description: "Turn on company scene."
-    trigger:
-      - platform: state
-        entity_id: input_boolean.company_scene
-        to: "on"
-    action:
-      - service: script.scene_on
-        data:
-          scene: company
-
-      - condition: state
-        entity_id: input_boolean.company_scene
-        state: "on"
-
-      - service: switch.turn_on
-        target:
-          entity_id: switch.refrigerator_ice_plus
-
   ###############################################################################
   ## Scene - Company Scene Off
   ###############################################################################
@@ -85,45 +88,11 @@ automation:
     description: "Turn off company scene."
     max_exceeded: silent
     trigger:
-      - platform: state
-        entity_id: input_boolean.company_scene
-        to: "off"
-
-      - platform: state
-        entity_id: input_select.occupancy_mode
-        to:
-          - Night
-          - Away
-          - Vacation
-
       - platform: event
         event_type: timer.finished
         event_data:
           entity_id: timer.company_scene
     action:
-      - service: script.scene_off
-        data:
-          scene: company
-
-  ###############################################################################
-  ## Scene - Set Light Color Company
-  ###############################################################################
-  - id: scene_set_light_color_company
-    alias: "[Scene] Set Light Color Company"
-    mode: restart
-    trigger:
-      - platform: state
-        entity_id: sensor.rgb_company_scene
-        not_to:
-          - unknown
-          - unavailable
-    condition:
-      - condition: state
-        entity_id: input_boolean.company_scene
-        state: "on"
-    action:
-      - service: light.turn_on
+      - service: switch.turn_off
         target:
-          entity_id: light.dining_room_rgb_light
-        data:
-          rgb_color: "{{ state_attr('sensor.rgb_company_scene','rgb_color') }}"
+          entity_id: switch.company_scene

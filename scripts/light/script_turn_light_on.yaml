@@ -13,11 +13,11 @@ turn_light_on:
     activate_timer:
       description: "Activate light in use timer"
       example: "true"
-    timer:
-      description: "Start light/manual control timer"
-      example: "false"
+    timer_minutes:
+      description: "Override timer duration minutes"
+      example: "10"
     bypass_timer:
-      description: "Activate light in use timer"
+      description: "Bypass light in use timer / manual mode"
       example: "false"
     override:
       description: "Override adaptive lighting"
@@ -29,20 +29,14 @@ turn_light_on:
       description: "Transition time"
       example: "5"
   variables:
-    entities: > # convert to list
-      {% set all = expand('group.lights')
-          |selectattr('state','in',['on','off'])
-          |map(attribute='entity_id')|list %}
-      {% set entities = expand(lights|default(all))|map(attribute='entity_id')|list %}
-      {{ entities }}
+    entities: "{{ expand(lights|default('group.lights'))|map(attribute='entity_id')|list}}"
     activate_timer: "{{ activate_timer|default(true) }}"
-    timer: "{{ activate_timer|default(false) }}"
     bypass_timer: "{{ bypass_timer|default(false) }}"
     override: "{{ override|default(false) }}"
     profile: "{{ profile|default(iif(is_state('input_select.occupancy_mode','Night'),'default_dim','default')) }}"
-    transition: "{{ transition|default(2) }}"
+    transition: "{{ transition|default(0) }}"
   sequence:
-    - if: "{{ not activate_timer and not override }}"
+    - if: "{{ not activate_timer }}"
       then:
         - service: automation.turn_off
           target:
@@ -52,13 +46,26 @@ turn_light_on:
         for_each: "{{ entities }}"
         sequence:
           - variables:
-              timer: "timer.{{ repeat.item.split('.')[1]|replace('_rgb','')|default('') }}"
+              timer: >
+                {% set timer = '' %}
+                {% if state_attr(repeat.item,'rgb_light') not in ['control','slave'] %}
+                  {% if state_attr(repeat.item,'rgb_light') == 'master' %}
+                    {% set timer = 'timer.' ~ state_attr(repeat.item,'rgb_control').split('.')[1]|default('') %}
+                  {% else %}
+                    {% set timer = 'timer.' ~ repeat.item.split('.')[1]|default('') %}
+                  {% endif %}
+                {% endif %}
+                {{ timer if has_value(timer) else none }}
               switch: >
+                {% if state_attr(repeat.item,'rgb_light') == 'slave' %}
+                    {% set light = state_attr(repeat.item,'master') %}
+                {% else %} {% set light = repeat.item %}
+                {% endif %}
                 {{ (states.switch
                     |selectattr('entity_id','search','adaptive_lighting')
                     |selectattr('attributes.configuration','defined')
                     |selectattr('attributes.configuration.lights','defined')
-                    |selectattr('attributes.configuration.lights','search',repeat.item)
+                    |selectattr('attributes.configuration.lights','search',light)
                     |map(attribute='entity_id')|list)[0]|default(none) }}
               manual: >
                 {{ repeat.item in state_attr(switch,'manual_control')
@@ -66,23 +73,23 @@ turn_light_on:
 
           - if: "{{ override }}"
             then:
-              - if: "{{ has_value(timer) }}"
-                then:
-                  - service: timer.start
-                    target:
-                      entity_id: "{{ timer }}"
-
               - service: light.turn_on
                 target:
                   entity_id: "{{ repeat.item }}"
                 data:
-                  profile: default
+                  profile: "{{ profile }}"
             else:
               - condition: template
-                alias: "No timer or timer bypassed, or timer not active and not manual mode"
+                alias: "Timer bypassed, or no timer, or timer idle and not manual mode"
                 value_template: >
-                  {{ (bypass_timer or not has_value(timer))
+                  {{ (bypass_timer or timer == none)
                       or (not manual and is_state(timer,'idle')) }}
+
+              - condition: template
+                alias: "Light not in active scene"
+                value_template: >
+                  {{ repeat.item not in state_attr('binary_sensor.scene_active','entity_id')
+                      if is_state('binary_sensor.scene_active','on') else true }}
 
               - if: "{{ switch != none and is_state(switch,'on') }}"
                 then:
@@ -107,7 +114,12 @@ turn_light_on:
                       profile: "{{ profile }}"
                       transition: "{{ transition }}"
 
-    - if: "{{ not activate_timer and not override }}"
+    - wait_template: >
+        {{ states.light|selectattr('entity_id','in',entities)
+            |selectattr('state','eq','off')|list|count == 0 }}
+      timeout: 30
+
+    - if: "{{ not activate_timer }}"
       then:
         - service: automation.turn_on
           target:

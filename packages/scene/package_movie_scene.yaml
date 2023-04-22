@@ -1,11 +1,6 @@
 ###############################################################################
 ## Package - Movie Scene
 ###############################################################################
-input_boolean:
-  movie_scene:
-    name: "Movie Scene"
-    icon: mdi:movie-filter
-
 timer:
   movie_scene:
     name: "Movie Scene Timer"
@@ -20,67 +15,133 @@ input_number:
     max: 480
     step: 10
 
+  rgb_blue_movie:
+    name: "RGB Blue"
+    min: 0
+    max: 255
+    step: 1
+
+  rgb_green_movie:
+    name: "RGB Green"
+    min: 0
+    max: 255
+    step: 1
+
+  rgb_red_movie:
+    name: "RGB Red"
+    min: 0
+    max: 255
+    step: 1
+
+template:
+  - sensor:
+      - name: "RGB Movie Scene"
+        unique_id: rgb_movie_scene
+        icon: mdi:lightbulb
+        state: |
+          {% from 'rgb.jinja' import scene_rgb_state %}
+          {{ scene_rgb_state('movie') }}
+        attributes:
+          rgb_color: |
+            {% from 'rgb.jinja' import scene_rgb_attribute %}
+            {{ scene_rgb_attribute('movie') }}
+
+switch:
+  - platform: template
+    switches:
+      movie_scene:
+        friendly_name: "Movie Scene"
+        unique_id: movie_scene
+        icon_template: mdi:movie-filter
+        value_template: "{{ not is_state('timer.movie_scene','idle') }}"
+        turn_on:
+          - if: "{{ states('input_select.occupancy_mode') in ['Home','Guest'] }}"
+            then:
+              - service: script.turn_on
+                target:
+                  entity_id: script.scene_on
+                data:
+                  variables:
+                    scene: movie
+
+              - delay: 1 # wait for scene_on to turn on
+
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.media_preset_enabled_movie
+                    state: "on"
+                then:
+                  - wait_template: "{{ is_state('script.scene_on','off') }}"
+                    timeout: 60
+
+                  - service: media_player.turn_on
+                    continue_on_error: true
+                    target:
+                      entity_id: media_player.living_room_tv
+
+                  - delay: 5 #TODO source selection etc not always working
+
+                  - wait_template: "{{ 'HDMI 3' in state_attr('media_player.living_room_tv','source_list') }}"
+                    timeout: 60
+
+                  - if: "{{ states('media_player.living_room_tv') != 'off' }}"
+                    then:
+                      - if: "{{ 'HDMI 3' in state_attr('media_player.living_room_tv','source_list') }}"
+                        then:
+                          - service: media_player.select_source
+                            continue_on_error: true
+                            target:
+                              entity_id: media_player.living_room_tv
+                            data:
+                              source: HDMI 3
+
+                      - service: media_player.volume_set
+                        continue_on_error: true
+                        target:
+                          entity_id: media_player.living_room_tv
+                        data:
+                          volume_level: 0.25
+
+                      - service: media_player.volume_mute
+                        continue_on_error: true
+                        target:
+                          entity_id: media_player.living_room_tv
+                        data:
+                          is_volume_muted: false
+            else:
+              - service: script.turn_on
+                target:
+                  entity_id: script.turn_scene_off
+                data:
+                  variables:
+                    scene: movie
+        turn_off:
+          - service: script.scene_off
+            data:
+              scene: movie
+
+          - and:
+              - condition: state
+                entity_id: input_boolean.alarm_triggered
+                state: "off"
+
+              - condition: state
+                entity_id: input_boolean.media_preset_enabled_movie
+                state: "on"
+
+          - if: "{{ states('media_player.living_room_tv') != 'off' }}"
+            then:
+              - service: media_player.select_source
+                target:
+                  entity_id: media_player.living_room_tv
+                data:
+                  source: Live TV
+
+              - service: media_player.turn_off
+                target:
+                  entity_id: media_player.living_room_tv
+
 automation:
-  ###############################################################################
-  ## Scene - Movie Scene On
-  ###############################################################################
-  - id: scene_movie_scene_on
-    alias: "[Scene] Movie Scene On"
-    description: "Turn on movie scene."
-    trigger:
-      - platform: state
-        entity_id: input_boolean.movie_scene
-        to: "on"
-    action:
-      - service: script.scene_on
-        data:
-          scene: movie
-
-      - condition: state
-        entity_id: input_boolean.movie_scene
-        state: "on"
-
-      - service: media_player.turn_on
-        continue_on_error: true
-        target:
-          entity_id: media_player.living_room_tv
-
-      - wait_template: "{{ 'Netflix' in state_attr('media_player.living_room_tv','source_list') }}"
-
-      - if: "{{ states('media_player.living_room_tv') != 'off' }}"
-        then:
-          - service: media_player.select_source
-            continue_on_error: true
-            target:
-              entity_id: media_player.living_room_tv
-            data:
-              source: Netflix
-
-          - service: media_player.volume_set
-            continue_on_error: true
-            target:
-              entity_id: media_player.living_room_tv
-            data:
-              volume_level: 0.25
-
-          - service: media_player.volume_mute
-            continue_on_error: true
-            target:
-              entity_id: media_player.living_room_tv
-            data:
-              is_volume_muted: false
-
-      #IDEA - condition: template
-      #   value_template: "{{ state_attr('media_player.mass_dining_room_hub','entity_picture') != none }}"
-
-      # - service: color_extractor.turn_on
-      #   target:
-      #     entity_id: light.dining_room_rgb_light
-      #   data:
-      #     color_extract_url: "{{ state_attr('media_player.mass_dining_room_hub','entity_picture') }}"
-      #     brightness_pct: 80
-      #     transition: 5
-
   ###############################################################################
   ## Scene - Movie Scene Off
   ###############################################################################
@@ -89,34 +150,11 @@ automation:
     description: "Turn off movie scene."
     max_exceeded: silent
     trigger:
-      - platform: state
-        entity_id: input_boolean.movie_scene
-        to: "off"
-
-      - platform: state
-        entity_id: input_select.occupancy_mode
-        to:
-          - Night
-          - Away
-          - Vacation
-
       - platform: event
         event_type: timer.finished
         event_data:
           entity_id: timer.movie_scene
     action:
-      - service: script.scene_off
-        data:
-          scene: movie
-
-      - if: "{{ states('media_player.living_room_tv') != 'off' }}"
-        then:
-          - service: media_player.select_source
-            target:
-              entity_id: media_player.living_room_tv
-            data:
-              source: Live TV
-
-          - service: media_player.turn_off
-            target:
-              entity_id: media_player.living_room_tv
+      - service: switch.turn_off
+        target:
+          entity_id: switch.movie_scene

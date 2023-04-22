@@ -8,7 +8,7 @@
   trigger:
     - platform: state
       id: motion
-      entity_id: binary_sensor.bathroom_sensor_motion
+      entity_id: binary_sensor.bathroom_sensor_motion #IDEA Inovelli mmwave light
       to: "on"
       not_from:
         - unknown
@@ -35,25 +35,12 @@
       match: any
       state: "on"
   action:
-    - if: "{{ is_state('input_select.occupancy_mode','Night') }}"
-      then:
-        - service: timer.start
-          target:
-            entity_id: timer.bathroom_vanity_light
-          data:
-            duration:
-              minutes: 5
-
-        - service: light.turn_on
-          target:
-            entity_id: light.bathroom_vanity_rgb_light
-          data:
-            profile: night
-      else:
-        - service: script.turn_light_on
-          data:
-            lights: light.bathroom_vanity_rgb_light
-            activate_timer: false
+    - service: script.turn_light_on
+      data:
+        lights: light.bathroom_vanity_rgb_light
+        activate_timer: false
+        override: "{{ is_state('input_select.occupancy_mode','Night') }}"
+        profile: "{{ iif(is_state('input_select.occupancy_mode','Night'),'night','default_max') }}"
 
 ###############################################################################
 ## Light - Bathroom Vanity Light Auto Off
@@ -89,7 +76,7 @@
     - condition: state
       entity_id:
         - input_boolean.alarm_triggered
-        - input_boolean.shower_scene
+        - switch.shower_scene
       state: "off"
 
     - condition: state
@@ -107,9 +94,9 @@
         lights: light.bathroom_vanity_rgb_light
 
 ###############################################################################
-## Light - Bathroom Vanity Night Light
+## Light - Bathroom Vanity Night Light On
 ###############################################################################
-- id: light_bathroom_vanity_night_light
+- id: light_bathroom_vanity_night_light_on
   alias: "[Light] Bathroom Vanity Night Light"
   description: "Turn on light back on in night mode if manually turned off."
   mode: restart
@@ -118,14 +105,45 @@
       value_template: >
         {{ is_state('light.bathroom_vanity_rgb_light','off')
             and is_state('binary_sensor.bathroom_sensor_motion','off')
-            and is_state('timer.bathroom_vanity_light','idle') }}
+            and is_state('timer.bathroom_vanity_light','idle')
+            and is_state('input_select.occupancy_mode','Night') }}
   condition:
     - condition: state
-      entity_id: input_select.occupancy_mode
-      state: Night
+      entity_id:
+        - binary_sensor.nighttime_illuminance_lights
+        - binary_sensor.daytime_illuminance_lights
+        - binary_sensor.bathroom_illuminance_lights
+      match: any
+      state: "on"
   action:
     - service: script.turn_light_on
       data:
         lights: light.bathroom_vanity_rgb_light
         profile: night_dim
+        activate_timer: false
+
+###############################################################################
+## Light - Bathroom Vanity Night Light Off
+###############################################################################
+- id: light_bathroom_vanity_night_light_off
+  alias: "[Light] Bathroom Vanity Night Light Off"
+  description: "Turn on light back on in night mode if manually turned off."
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to: Home
+      from: Night
+  condition:
+    - condition: state
+      entity_id: light.bathroom_vanity_rgb_light
+      state: "on"
+  action:
+    - wait_template: >
+        {{ is_state('binary_sensor.bathroom_sensor_motion','off')
+            and is_state('timer.bathroom_vanity_light','idle') }}
+
+    - service: script.turn_light_off
+      data:
+        lights: light.bathroom_vanity_rgb_light
         activate_timer: false
