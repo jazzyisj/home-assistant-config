@@ -63,48 +63,57 @@
         {% endif %}
         {{ filter_hours or time_limit }}
 
+    #IDEA split these up so we can use availability?
     - name: "Indoor Low Temperature Alert"
       unique_id: indoor_low_temperature_alert
       device_class: cold
       delay_on: 1800
       state: >
-        {{ ((states('sensor.thermostat_temperature')|int(0) < states('input_number.low_temperature_threshold')|int(0))
-              and has_value('sensor.thermostat_temperature'))
-            or ((states('sensor.bathroom_sensor_air_temperature')|int(0) < states('input_number.low_temperature_threshold')|int(0) )
-              and has_value('sensor.bathroom_sensor_air_temperature'))
-            and is_state('input_boolean.climate_alerts','on') }}
+        {% set thresh = states('input_number.low_temperature_threshold')|int %}
+        {% set thermostat = states('sensor.thermostat_temperature')|int %}
+        {% set bath =states('sensor.bathroom_sensor_air_temperature')|int %}
+        {{ min([thermostat, bath]) < thresh and is_state('input_boolean.climate_alerts','on') }}
+      availability: >
+        {{ is_number(states('sensor.thermostat_temperature'))
+            and is_number(states('sensor.bathroom_sensor_air_temperature')) }}
 
-    # add bathroom temp differential to temp threshold to reduce false alerts
+    # subtract bathroom temp differential to temp threshold to reduce false alerts
     - name: "Indoor High Temperature Alert"
       unique_id: indoor_high_temperature_alert
       device_class: heat
       delay_on: 1800
       state: >
-        {{ (states('sensor.thermostat_temperature')|int(0) > states('input_number.high_temperature_threshold')|int(0)
-              and has_value('sensor.thermostat_temperature'))
-            or (( states('sensor.bathroom_sensor_air_temperature')|int(0) > (states('input_number.high_temperature_threshold')|int(0)
-                  + states('input_number.bathroom_temperature_differential')|int(0) ))
-              and has_value('sensor.bathroom_sensor_air_temperature'))
-            and is_state('input_boolean.climate_alerts','on') }}
+        {% set thresh = states('input_number.high_temperature_threshold')|int %}
+        {% set thermostat = states('sensor.thermostat_temperature')|int %}
+        {% set bath =states('sensor.bathroom_sensor_air_temperature')|int
+            - states('input_number.bathroom_temperature_differential')|int %}
+        {{ max([thermostat, bath]) > thresh and is_state('input_boolean.climate_alerts','on') }}
+      availability: >
+        {{ is_number(states('sensor.thermostat_temperature'))
+            and is_number(states('sensor.bathroom_sensor_air_temperature')) }}
 
     - name: "Indoor High Humidity Alert"
       unique_id: indoor_high_humidity_alert
       device_class: moisture
       delay_on: 3600
       state: >
-        {{ (states('sensor.thermostat_humidity')|int(0) > states('input_number.high_humidity_threshold')|int(0)
-              and has_value('sensor.thermostat_humidity'))
-            or (states('sensor.bathroom_sensor_humidity')|int(0) > states('input_number.high_humidity_threshold')|int(0)
-              and has_value('sensor.bathroom_sensor_humidity'))
-            and is_state('input_boolean.climate_alerts','on') }}
+        {% set thresh = states('input_number.high_humidity_threshold')|int %}
+        {% set thermostat = states('sensor.thermostat_humidity')|int %}
+        {% set bath =states('sensor.bathroom_sensor_humidity')|int %}
+        {{ max([thermostat, bath]) > thresh and is_state('input_boolean.climate_alerts','on') }}
+      availability: >
+        {{ is_number(states('sensor.thermostat_humidity'))
+            and is_number(states('sensor.bathroom_sensor_humidity')) }}
 
     - name: "Bathroom Mold Risk Alert"
       unique_id: bathroom_mold_risk_alert
       device_class: moisture
       delay_on: 3600
       state: >
-        {{ states('sensor.bathroom_mold_risk')|int(0) > states('input_number.mold_risk_threshold')|int(0)
+        {{ states('sensor.bathroom_mold_risk')|int
+              > states('input_number.mold_risk_threshold')|int
             and is_state('input_boolean.climate_alerts','on') }}
+      availability: "{{ is_number(states('sensor.bathroom_mold_risk')) }}"
 
     - name: "HVAC Window Door Open Alert"
       unique_id: hvac_window_door_open_alert
@@ -132,17 +141,18 @@
       unique_id: thermostat_target_temperature
       icon: mdi:hvac
       device_class: temperature
+      state_class: measurement
       unit_of_measurement: °C
       state: >
-        {% set hvac_mode = states('climate.thermostat') %}
-        {% if hvac_mode in ['heat','cool'] %}
-          {{ state_attr('climate.thermostat','temperature') }}
-        {% elif hvac_mode == 'heat_cool' %}
-          {% if states('sensor.outdoor_temperature')|int(0)
-              > state_attr('climate.thermostat','target_temp_high')|int %}
-            {{ state_attr('climate.thermostat','target_temp_high') }}
-          {% else %}
-            {{ state_attr('climate.thermostat','target_temp_low') }}
+        {% set hvac = states('climate.thermostat') %}
+        {% set temp = state_attr('climate.thermostat','temperature') %}
+        {% set high = state_attr('climate.thermostat','target_temp_high') %}
+        {% set low = state_attr('climate.thermostat','target_temp_low') %}
+        {% set outdoor = states('sensor.outdoor_temperature') %}
+        {% if hvac in ['heat','cool'] %} {{ temp|int }}
+        {% elif hvac == 'heat_cool' %}
+          {% if outdoor|int > high %} {{ high|int }}
+          {% else %} {{ low|int }}
           {% endif %}
         {% else %} {{ none }}
         {% endif %}
@@ -154,7 +164,7 @@
       device_class: temperature
       state_class: measurement
       unit_of_measurement: °C
-      state: "{{ '%0.1f'|format(states('sensor.thermostat_temperature')|float(none)) }}"
+      state: "{{ states('sensor.thermostat_temperature') }}"
       availability: "{{ is_number(states('sensor.thermostat_temperature')) }}"
 
     - name: "Indoor Humidity"
@@ -162,21 +172,22 @@
       device_class: humidity
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ '%0.1f'|format(states('sensor.thermostat_humidity')|int(none)) }}"
+      state: "{{ states('sensor.thermostat_humidity') }}"
       availability: "{{ is_number(states('sensor.thermostat_humidity')) }}"
 
     - name: "HVAC Boost"
       unique_id: hvac_boost
-      icon: "{{ iif(states('sensor.hvac_boost')|int(0) > -1,'mdi:thermometer-plus','mdi:thermometer-minus') }}"
+      icon: "{{ iif(states(this.entity_id)|int(-1) > -1,'mdi:thermometer-plus','mdi:thermometer-minus') }}"
+      state_class: measurement
       unit_of_measurement: "°C"
       state: >
         {% if is_state('input_boolean.hvac_boost','on') %}
-          {% set humidity = states('sensor.outdoor_humidity')|int(0) %}
+          {% set temp = states('sensor.outdoor_temperature')|int %}
+          {% set humidity = states('sensor.outdoor_humidity')|int %}
           {% set hvac_mode = states('climate.thermostat') %}
-          {% set cool = true if hvac_mode == 'cool'
-              or (hvac_mode == 'heat_cool' and states('sensor.outdoor_temperature')|int(0)
-                >= state_attr('climate.thermostat','target_temp_high')|int) else false %}
-          {% if not cool and is_state('binary_sensor.waketime_active','on') %} 2
+          {% set cool = true if hvac_mode == 'cool' or (hvac_mode == 'heat_cool'
+              and temp >= state_attr('climate.thermostat','target_temp_high')|int) else false %}
+          {% if not cool and is_state('binary_sensor.waketime_active','on') and temp < 5 %} {{ iif(temp < -5,2,1) }}
           {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} {{ iif(humidity > 80,2,1) }}
           {% elif is_state('binary_sensor.outdoor_high_temperature_alert','on') %} {{ iif(humidity > 80,-1,0) }}
           {% elif humidity > 80 %}{{ iif(cool,-1,1) }}
@@ -184,3 +195,7 @@
           {% endif %}
         {% else %} 0
         {% endif %}
+      availability: >
+        {{ is_number(states('sensor.outdoor_temperature'))
+            and is_number(states('sensor.outdoor_humidity'))
+            and has_value('climate.thermostat') }}

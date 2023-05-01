@@ -9,6 +9,7 @@
     scene: >
       {% if trigger.entity_id in ['switch.chill_scene','switch.company_scene',
         'switch.movie_scene'] %} {{ trigger.entity_id.split('.')[1][:-6] }}
+      {% elif trigger.entity_id == 'binary_sensor.waketime_active' %} morning
       {% elif is_state('switch.chill_scene','on') %} chill
       {% elif is_state('switch.company_scene','on') %} company
       {% elif is_state('switch.movie_scene','on') %} movie
@@ -44,7 +45,6 @@
       id: scene_off
       entity_id:
         - binary_sensor.waketime_active
-        - binary_sensor.bedtime_active
         - switch.chill_scene
         - switch.company_scene
         - switch.movie_scene
@@ -145,6 +145,18 @@
                 activate_timer: false
                 bypass_timer: true
 
+            - service: adaptive_lighting.set_manual_control
+              data:
+                entity_id: switch.adaptive_lighting_main_lights
+                lights: "{{ main_lights }}"
+                manual_control: false
+
+            - service: adaptive_lighting.set_manual_control
+              data:
+                entity_id: switch.adaptive_lighting_rgb_lights
+                lights: "{{ rgb_lights }}"
+                manual_control: false
+
 ###############################################################################
 ## Scene - Scene Light Color
 ###############################################################################
@@ -169,48 +181,47 @@
 
     - platform: state
       id: scene
-      entity_id: &scenes
+      entity_id:
         - switch.chill_scene
         - switch.company_scene
         - switch.movie_scene
       to: "on"
-      for: 2 # allow scene lights to turn on first
-
-    - platform: state
-      id: scene
-      entity_id: *scenes
-      to: "off"
+      for: 5 # allow scene lights to turn on first
+      not_from:
+        - unknown
+        - unavailable
   condition:
     - condition: template
       alias: "Scene rgb color sensor is valid"
       value_template: "{{ has_value('sensor.rgb_' ~ scene) }}"
+
+    - condition: template
+      alias: "Scene switch is on"
+      value_template: "{{ is_state('switch.' ~ scene ,'on') }}"
   action:
-    if:
-      - condition: template
-        alias: "Scene switch is on"
-        value_template: "{{ is_state('switch.' ~ scene ,'on') }}"
-    then:
-      - service: light.turn_on
-        target:
-          entity_id:
-            - light.dining_room_rgb_light
-        data:
-          rgb_color: "{{ state_attr('sensor.rgb_' ~ scene,'rgb_color') }}"
-    else:
-      # reset rgb color
-      - service: script.turn_light_on
-        data:
-          lights:
-            - light.dining_room_rgb_light
-          bypass_timer: true
-          acitvate_timer: false
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_in_use_timer
+      data:
+        stop_actions: false
+
+    - service: light.turn_on
+      target:
+        entity_id: light.dining_room_light_rgb
+      data:
+        rgb_color: "{{ state_attr('sensor.rgb_' ~ scene,'rgb_color') }}"
+      continue_on_error: true
+
+    - service: automation.turn_on
+      target:
+        entity_id: automation.light_in_use_timer
 
   #IDEA - condition: template
   #   value_template: "{{ state_attr('media_player.mass_dining_room_hub','entity_picture') != none }}"
 
   # - service: color_extractor.turn_on
   #   target:
-  #     entity_id: light.dining_room_rgb_light
+  #     entity_id: light.dining_room_light_rgb
   #   data:
   #     color_extract_url: "{{ state_attr('media_player.mass_dining_room_hub','entity_picture') }}"
   #     brightness_pct: 80

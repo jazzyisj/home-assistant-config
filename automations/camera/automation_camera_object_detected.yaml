@@ -13,6 +13,7 @@
     camera: "{{ trigger.payload_json['after']['camera'][:-8] }}"
     start_time: "{{ trigger.payload_json['after']['start_time'] }}"
     new: "{{ trigger.payload_json['type'] == 'new' }}"
+    entered_zones: "{{ trigger.payload_json['after']['entered_zones'] }}"
   trigger:
     - platform: mqtt
       topic: frigate/events
@@ -22,16 +23,22 @@
 
     - condition: template
       value_template: "{{ object in ['person','car'] }}"
+
+    - condition: template
+      value_template: "{{ iif(camera == 'front_drive','driveway' in entered_zones,true) }}"
+
+    - condition: template
+      value_template: "{{ iif(camera == 'front_door','porch' in entered_zones,true) }}"
   action:
     - if:
         - condition: template
           value_template: >
             {{ is_state('input_boolean.object_tts_notifications','on')
-                and is_state('binary_sensor.camera_object_tod','on')
-                and is_state('binary_sensor.someone_home','on') }}
+                and is_state('binary_sensor.someone_home','on')
+                and (is_state('binary_sensor.camera_object_tod','on')
+                  or camera in ['front_door','side_door']) }}
       then:
         - service: script.turn_on
-          continue_on_error: true
           target:
             entity_id: script.tts_play
           data:
@@ -56,14 +63,15 @@
                 {% else %}
                   An object was detected!
                 {% endif %}
+          continue_on_error: true
 
         - service: script.turn_on
-          continue_on_error: true
           target:
             entity_id: script.cast_camera
           data:
             variables:
               camera: "{{ camera }}"
+          continue_on_error: true
 
     - if:
         - condition: state

@@ -9,13 +9,10 @@ turn_light_on:
   fields:
     lights:
       description: "List of light entity ids"
-      example: "['light.dining_room_rgb_light','light.dining_potlights']"
+      example: "['light.dining_room_light_rgb','light.dining_potlights']"
     activate_timer:
       description: "Activate light in use timer"
       example: "true"
-    timer_minutes:
-      description: "Override timer duration minutes"
-      example: "10"
     bypass_timer:
       description: "Bypass light in use timer / manual mode"
       example: "false"
@@ -23,20 +20,28 @@ turn_light_on:
       description: "Override adaptive lighting"
       example: "false"
     profile:
-      description: "Light profile to use"
+      description: "Light profile"
       example: "default"
+    brightness:
+      description: "Light brightness"
+      example: "180"
+    rgb_color:
+      description: "RGB color"
+      example: "[255,180,107]"
     transition:
       description: "Transition time"
       example: "5"
   variables:
     entities: "{{ expand(lights|default('group.lights'))|map(attribute='entity_id')|list}}"
-    activate_timer: "{{ activate_timer|default(true) }}"
-    bypass_timer: "{{ bypass_timer|default(false) }}"
-    override: "{{ override|default(false) }}"
-    profile: "{{ profile|default(iif(is_state('input_select.occupancy_mode','Night'),'default_dim','default')) }}"
-    transition: "{{ transition|default(0) }}"
   sequence:
-    - if: "{{ not activate_timer }}"
+    - if:
+        - condition: template
+          value_template: "{{ entities == none or entities|count == 0 }}"
+      then:
+        - stop: "No entities specified."
+          error: true
+
+    - if: "{{ not activate_timer|default(true) }}"
       then:
         - service: automation.turn_off
           target:
@@ -71,18 +76,36 @@ turn_light_on:
                 {{ repeat.item in state_attr(switch,'manual_control')
                     if switch != none and state_attr(switch,'manual_control') != none else false }}
 
-          - if: "{{ override }}"
+          - if: "{{ override|default(false) or brightness is defined or profile is defined }}"
             then:
+              - if: "{{ switch != none and is_state(switch,'on') }}"
+                then:
+                  - service: adaptive_lighting.set_manual_control
+                    data:
+                      entity_id: "{{ switch }}"
+                      lights: "{{ repeat.item }}"
+                      manual_control: true
+
               - service: light.turn_on
                 target:
                   entity_id: "{{ repeat.item }}"
-                data:
-                  profile: "{{ profile }}"
+                data: >
+                  {% set data_dict = namespace(value='') %}
+                  {% set options = ['brightness','transition','profile'] %}
+                  {% set values = [brightness|default(none),transition|default(none),profile|default(none)] %}
+                  {% for item in options %}
+                    {% if values[loop.index0] != none %}
+                      {% set data_dict.value = data_dict.value
+                          ~ '"' ~ item ~ '":"'
+                          ~ values[loop.index0] ~ '"' ~ ',' %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ '{' ~ data_dict.value[:-1] ~ '}' }}
             else:
               - condition: template
                 alias: "Timer bypassed, or no timer, or timer idle and not manual mode"
                 value_template: >
-                  {{ (bypass_timer or timer == none)
+                  {{ (bypass_timer|default(false) or timer == none)
                       or (not manual and is_state(timer,'idle')) }}
 
               - condition: template
@@ -93,33 +116,32 @@ turn_light_on:
 
               - if: "{{ switch != none and is_state(switch,'on') }}"
                 then:
-                  - if: "{{ is_state(repeat.item,'off') }}"
-                    then:
-                      - service: adaptive_lighting.apply
-                        continue_on_error: true
-                        data:
-                          entity_id: "{{ switch }}"
-                          lights: "{{ repeat.item }}"
-                          transition: "{{ transition }}"
-                          adapt_brightness: true
-                          adapt_color: true
-                          prefer_rgb_color: true
-                          turn_on_lights: true
+                  - service: adaptive_lighting.apply
+                    data:
+                      entity_id: "{{ switch }}"
+                      lights: "{{ repeat.item }}"
+                      transition: "{{ transition|default(0) }}"
+                      adapt_brightness: true
+                      adapt_color: true
+                      prefer_rgb_color: true
+                      turn_on_lights: true
+                    continue_on_error: true
+
                 else:
                   - service: light.turn_on
-                    continue_on_error: true
                     target:
                       entity_id: "{{ repeat.item }}"
                     data:
-                      profile: "{{ profile }}"
-                      transition: "{{ transition }}"
+                      profile: "{{ iif(is_state('input_select.occupancy_mode','Night'),'default_dim','default') }}"
+                      transition: "{{ transition|default(0) }}"
+                    continue_on_error: true
 
     - wait_template: >
         {{ states.light|selectattr('entity_id','in',entities)
             |selectattr('state','eq','off')|list|count == 0 }}
       timeout: 30
 
-    - if: "{{ not activate_timer }}"
+    - if: "{{ not activate_timer|default(true) }}"
       then:
         - service: automation.turn_on
           target:
