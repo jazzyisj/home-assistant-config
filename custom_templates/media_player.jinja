@@ -1,0 +1,63 @@
+{# ISSUE #ERROR (MainThread) [homeassistant.helpers.template_entity] TemplateError('TypeError: argument of type
+'NoneType' is not iterable') while processing template 'Template("{% set media_player = 'media_player.bedroom_tv' %} {%
+set sensor = namespace(state='off') %} {% set media_types = ['tts','alarm_clock'] %} {% set group_players =
+state_attr('group.group_media_players','entity_id') %} {% if states(media_player) in
+['playing','paused','buffering','on'] %} #}
+
+{% macro player_state(entity) %}
+{% set sensor = namespace(state='off') %}
+{% set media_types = ['tts','alarm_clock'] %}
+{% set group_players = state_attr('group.group_media_players','entity_id') %}
+{% if states(entity) in ['playing','paused','buffering','on'] %}
+{% for type in media_types %}
+{% set type_sensor = 'sensor.' ~ type ~ '_media_player' %}
+{% set type_player = states(type_sensor)|replace('mass_','') %}
+{% set type_players = state_attr(type_sensor,'entity_id')|replace('mass_','') %}
+{% if is_state('binary_sensor.' ~ type,'on') or is_state('input_boolean.' ~ type,'on') %}
+{% if entity == type_player %}
+{% set sensor.state = type %}
+{% elif type_players not in ['',none] %}
+{% for item in type_players %}
+{% if group_players != none %}
+{% if item in group_players %}
+{% set sensor.state = type ~'_group' %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% endif %}
+{% endfor %}
+{% if sensor.state == 'off' and group_players != none %}
+{% for player in group_players %}
+{% if entity in state_attr('sensor.' ~ player.split('.')[1],'entity_id')
+and states(player) in ['playing','paused','buffering','on'] %}
+{% set sensor.state = 'group' %}
+{% endif %}
+{% endfor %}
+{% endif %}
+{% set sensor.state = 'on' if sensor.state == 'off' else sensor.state %}
+{% endif %}
+{{ sensor.state }}
+{% endmacro %}
+
+{% macro group_state(entity) %}
+{% set sensor = namespace(state='off') %}
+{% set media_types = ['tts','alarm_clock'] %}
+{% if states(entity) in ['playing','paused','buffering','on'] %}
+{% for type in media_types %}
+{% if is_state('binary_sensor.' ~ type,'on') or is_state('input_boolean.' ~ type,'on')
+and entity == states('sensor.' ~ type ~ '_media_player') %}
+{% set sensor.state = type %}
+{% endif %}
+{% endfor %}
+{% set sensor.state = 'on' if sensor.state == 'off' else sensor.state %}
+{% endif %}
+{{ sensor.state }}
+{% endmacro %}
+
+{% macro entity_id_attribute(attribute) %}
+{{ expand('group.single_media_players')
+|selectattr('attributes.' ~ attribute,'defined')
+|selectattr('attributes.' ~ attribute,'eq',true)
+|map(attribute='entity_id')|list|sort }}
+{% endmacro %}
