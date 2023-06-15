@@ -24,9 +24,6 @@ switch:
         icon_template: mdi:shower-head
         value_template: "{{ not is_state('timer.shower_scene','idle') }}"
         turn_on:
-          - variables:
-              shower_volume: "{{ states('input_number.media_preset_volume_shower')|float(-1)/100 }}"
-
           - service: timer.start
             target:
               entity_id: timer.shower_scene
@@ -46,6 +43,13 @@ switch:
               - condition: state
                 entity_id: input_boolean.media_preset_enabled_shower
                 state: "on"
+
+              - condition: state
+                entity_id: input_select.occupancy_mode
+                match: any
+                state:
+                  - Home
+                  - Guest
             then:
               - if:
                   - condition: state
@@ -56,7 +60,7 @@ switch:
                     target:
                       entity_id: input_number.bathroom_speaker_tts
                     data:
-                      value: "{{ shower_volume }}"
+                      value: "{{ states('input_number.media_preset_volume_shower')|float(-1)/100 }}"
 
                   - wait_template: "{{ is_state('input_boolean.tts','off') }}"
                     timeout: 120
@@ -66,14 +70,14 @@ switch:
                   - condition: template
                     alias: "Bathroom speaker already playing media"
                     value_template: >
-                      {{ 'media_player.mass_bathroom_speaker'
+                      {{ 'media_player.bathroom_speaker_2'
                           in state_attr('binary_sensor.mass_media','entity_id') }}
                 then:
-                  - service: media_player.volume_set
+                  - service: script.media_player_set_volumes
                     target:
-                      entity_id: media_player.mass_bathroom_speaker
+                      entity_id: media_player.bathroom_speaker
                     data:
-                      volume_level: "{{ shower_volume }}"
+                      volume: "{{ states('input_number.media_preset_volume_shower')|int }}"
                 else:
                   - service: script.media_play
                     data:
@@ -147,29 +151,28 @@ switch:
                 target:
                   entity_id: input_number.bathroom_speaker_tts
                 data:
-                  value: "{{ states('input_number.bathroom_speaker_default_volume')|float(-1) }}"
+                  value: "{{ states('input_number.bathroom_speaker_default_volume')|float }}"
 
               - wait_template: "{{ is_state('input_boolean.tts','off') }}"
                 timeout: 120
+
           - if:
               - condition: template
                 alias: "Bathroom speaker is active queue."
-                value_template: "{{ is_state_attr('media_player.mass_bathroom_speaker','active_queue','media_player.bathroom_speaker') }}"
+                value_template: "{{ is_state('media_player.bathroom_speaker_2','playing') }}"
             then:
               - service: script.media_players_off
                 data:
                   entity_id: media_player.bathroom_speaker
-
-              - service: script.media_player_set_volumes
-                data:
-                  entity_id: media_player.bathroom_speaker
-                  source: reset
             else:
-              # set volume to group media player volume
+              # set bathroom speaker to default media volume
               - service: script.media_player_set_volumes
                 data:
                   entity_id: media_player.bathroom_speaker
-                  volume: "{{ (state_attr(state_attr('media_player.mass_bathroom_speaker','active_queue'),'volume_level')*100)|int }}"
+                  volume: >
+                    {{ iif(is_state('binary_sensor.quiet_time','on'),
+                        states('input_number.media_quiet_volume')|int,
+                          states('input_number.media_default_volume')|int) }}
 
 automation:
   ###############################################################################

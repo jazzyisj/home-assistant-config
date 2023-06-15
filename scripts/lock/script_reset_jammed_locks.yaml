@@ -1,0 +1,47 @@
+###############################################################################
+## Reset Jammed Locks
+###############################################################################
+reset_jammed_locks:
+  alias: "Reset Jammed Locks"
+  description: "Reset jammed entry locks."
+  icon: mdi:lock
+  variables:
+    buttons: >
+      {{ states.binary_sensor|selectattr('entity_id','search','_door_lock_jammed')
+            |selectattr('state','eq','on')
+            |map(attribute='object_id')|map('regex_replace',find='(.*)_door_lock_jammed',
+              replace='button.\\1_door_lock_idle_lock_state',ignorecase=False)|list }}
+    locks: >
+      {{ expand(buttons)|map(attribute='object_id')
+          |map('regex_replace',find='(.*)_door_lock_idle_lock_state',
+              replace='lock.\\1_door_lock',ignorecase=False)|list }}
+  sequence:
+    - service: script.lock_entry_locks
+      data:
+        entity_id: "{{ locks }}"
+
+    - wait_template: "{{ expand(locks)|selectattr('state','ne','locked')|list|count == 0 }}"
+      timeout: 60
+
+    - if: "{{ wait.completed }}"
+      then:
+        - service: button.press
+          target:
+            entity_id: "{{ buttons }}"
+      else:
+        - service: script.tts_play
+          data:
+            message: >
+              {%- set msg = namespace(value='') %}
+              {%- set qty = namespace(value=0) %}
+              {%- for item in locks %}
+                {%- set qty.value = qty.value|int(0) + 1 %}
+                {%- if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
+                {%- set msg.value = msg.value ~ item.split('.')[1]|replace('_door_lock','')|replace('_',' ')|title %}
+              {%- endfor %}
+              {%- set clist = ', and ' if msg.value.split(', ')|count > 2 else ' and ' %}
+              {%- set plural = 's have' if qty.value|int(0) > 1 else ' has' %}
+              The {{ clist.join(msg.value.rsplit(', ', 1)) }} door lock jam{{ plural }} not been cleared!
+            quiet_play: true
+            night_play: true
+            ignore_away: true

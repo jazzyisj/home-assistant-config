@@ -15,10 +15,10 @@ media_play:
           |selectattr('name','eq',states('select.media_preset_speaker_' ~ preset))
           |map(attribute='entity_id')|join('') }}
     #MASS change to mass player
-    mass_player: "{{ media_player.split('.')[0] ~ '.mass_' ~ media_player.split('.')[1] if media_player != '' }}"
+    mass_player: "{{ media_player ~ '_2' if media_player != '' }}"
     play_players: >
       {{ iif(mass_player is defined,iif(is_state_attr(mass_player,'is_group',true),
-          state_attr(mass_player,'group_members'),mass_player|replace('mass_','')), []) }}
+          state_attr(mass_player,'group_members'),mass_player|replace('_2','')), []) }}
     stop_players: >
       {{ expand(play_players)|selectattr('state','in',['playing','paused','buffering'])
           |map(attribute='entity_id')|list }}
@@ -45,11 +45,13 @@ media_play:
                 entity_id: timer.media_preset_sleep
 
         - variables:
-            overlap_players: >
+            overlap_players: > #MASS
               {% set players = namespace(entity_id=[]) %}
-              {% set active_players = state_attr('binary_sensor.mass_media','entity_id') %}
+              {% set active_players = expand(state_attr('binary_sensor.mass_media','entity_id'))
+                  |selectattr('state','in',['playing','paused','buffering'])
+                  |map(attribute='entity_id')|list %}
               {% for item in active_players %}
-                {% set hass_player = item|replace('mass_','') %}
+                {% set hass_player = item|replace('_2','') %}
                 {% if hass_player in play_players %}
                   {% set players.entity_id = players.entity_id + [hass_player] %}
                 {% endif %}
@@ -59,7 +61,7 @@ media_play:
         # stop mass queue if overlap with preset players
         - if: "{{ overlap_players|count > 0 }}"
           then:
-            - service: script.mass_players_off
+            - service: script.media_players_off
               data:
                 entity_id: "{{ overlap_players }}"
 
@@ -89,9 +91,8 @@ media_play:
           timeout: 5
 
         - service: mass.queue_command
-          target:
-            entity_id: "{{ mass_player }}"
           data:
+            player_id: "{{ mass_player }}"
             command: play_media
             uri: "{{ states('select.media_preset_' ~ preset) }}"
             enqueue_mode: replace
@@ -105,7 +106,7 @@ media_play:
           target:
             entity_id: "{{ play_players }}"
           data:
-            volume: "{{ states('input_number.media_preset_volume_' ~ preset)|float }}"
+            volume: "{{ states('input_number.media_preset_volume_' ~ preset)|int }}"
 
         # if sleep preset and sleep timer is idle start timer
         - if: "{{ preset == 'sleep' and is_state('timer.media_preset_sleep','idle') }}"
@@ -115,4 +116,4 @@ media_play:
                 entity_id: timer.media_preset_sleep
               data:
                 duration:
-                  minutes: "{{ states('input_number.media_preset_sleep_time')|int(0) }}"
+                  minutes: "{{ states('input_number.media_preset_sleep_time')|int }}"
