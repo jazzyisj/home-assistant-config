@@ -1,13 +1,13 @@
 # Home Assistant Configuration
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_dark.png)
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2022_9_light.png)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_dark.png)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_light.png)
 
 ---
 
 ## ENTITY COUNTS
 
-##### <font color='cyan'>Updated 23-04-30</font>
+##### <font color='cyan'>Updated 23-07-02</font>
 
 - Alarm_control_panel: 3
 - Alert: 103

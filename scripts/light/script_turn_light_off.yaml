@@ -7,7 +7,7 @@ turn_light_off:
   icon: mdi:lightbulb-off
   mode: parallel
   fields:
-    entities:
+    lights:
       description: "List of light entity ids"
       example: "light.dining_room_light_rgb"
     activate_timer:
@@ -18,12 +18,12 @@ turn_light_off:
       example: "false"
   variables:
     entities: > # convert to list
-      {% set all = expand(state_attr('binary_sensor.lights_on','entity_id'))
-          |map(attribute='entity_id')|select('has_value')|list %}
+      {% set all = state_attr('group.lights','entity_id')|select('has_value')|list %}
       {% set entities = expand(lights|default(all))|map(attribute='entity_id')|list %}
       {{ entities }}
     activate_timer: "{{ activate_timer|default(true) }}"
     bypass_timer: "{{ bypass_timer|default(false) }}"
+    lights_on: "{{ ['x'] }}"
   sequence:
     - if:
         - condition: template
@@ -32,6 +32,12 @@ turn_light_off:
         - stop: "No entities specified."
           error: true
 
+    - if: "{{ not activate_timer }}"
+      then:
+        - service: automation.turn_off
+          target:
+            entity_id: automation.light_in_use_timer
+
     - service: variable.update_sensor
       target:
         entity_id: sensor.turn_lights_off
@@ -39,11 +45,12 @@ turn_light_off:
         attributes:
           entity_id: "{{ [] }}"
 
-    - if: "{{ not activate_timer }}"
-      then:
-        - service: automation.turn_off
-          target:
-            entity_id: automation.light_in_use_timer
+    - service: variable.update_sensor
+      target:
+        entity_id: sensor.turn_timers_off
+      data:
+        attributes:
+          entity_id: "{{ [] }}"
 
     - repeat:
         for_each: "{{ entities }}"
@@ -82,16 +89,21 @@ turn_light_off:
                     target:
                       entity_id: "{{ timer }}"
                 else:
-                  - service: timer.cancel
-                    target:
-                      entity_id: "{{ timer }}"
+                  - if: "{{ timer != none }}"
+                    then:
+                      - service: variable.update_sensor
+                        target:
+                          entity_id: sensor.turn_timers_off
+                        data:
+                          attributes:
+                            entity_id: "{{ state_attr('sensor.turn_timers_off','entity_id') + [timer] }}"
             else:
               - if:
                   - condition: template
                     alias: "Timer bypassed, or no timer, or timer idle and not manual mode"
                     value_template: >
-                      {{ (bypass_timer or timer == none)
-                          or (not manual and is_state(timer,'idle')) }}
+                      {{ ((bypass_timer or timer == none)
+                          or (not manual and is_state(timer,'idle'))) }}
 
                   - condition: template
                     alias: "Light not in active scene"
@@ -112,10 +124,19 @@ turn_light_off:
                       attributes:
                         entity_id: "{{ state_attr('sensor.turn_lights_off','entity_id') + [repeat.item] }}"
 
-    - service: light.turn_off
-      continue_on_error: true
-      target:
-        entity_id: "{{ state_attr('sensor.turn_lights_off','entity_id') }}"
+    - if: "{{  state_attr('sensor.turn_lights_off','entity_id') != [] }}"
+      then:
+        - service: light.turn_off
+          continue_on_error: true
+          target:
+            entity_id: "{{ state_attr('sensor.turn_lights_off','entity_id') }}"
+
+    - if: "{{  state_attr('sensor.turn_timers_off','entity_id') != [] }}"
+      then:
+        - service: timer.cancel
+          continue_on_error: true
+          target:
+            entity_id: "{{ state_attr('sensor.turn_timers_off','entity_id') }}"
 
     - if: "{{ not activate_timer }}"
       then:
