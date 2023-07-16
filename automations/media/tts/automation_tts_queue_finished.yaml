@@ -24,69 +24,19 @@
       entity_id: input_boolean.tts_enabled
       state: "on"
   action:
+    # reset volumes to pre tts values if tts wasn't muted
     - if:
         - condition: state
           entity_id: input_boolean.tts_muted
-          state: "on"
+          state: "off"
       then:
-        - service: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.tts_muted
-      else:
-        - variables:
-            tts_players: >
-              {{ expand(states('input_text.tts_active_players').split(','))
-                  |rejectattr('entity_id','in',state_attr('sensor.alarm_clock_media_player','entity_id'))
-                  |map(attribute='entity_id')|list }}
-            mass_players: "{{ expand(states('input_text.tts_restore_mass').split(','))|map(attribute='entity_id')|list }}"
+        - service: script.media_player_set_volumes
+          data:
+            source: tts_off
 
-        - service: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.tts
-
-        - if:
-            - condition: state
-              entity_id: input_boolean.tts_override
-              state: "off"
-          then:
-            - service: select.select_option
-              target:
-                entity_id: select.tts_media_player_manual
-              data:
-                option: "None Selected"
-
-        # turn off tts players not used by mass
-        - if: "{{ tts_players|count > 0 }}"
-          then:
-            - service: script.media_players_off
-              data:
-                entity_id: "{{ tts_players }}"
-                ignore_players: "{{ mass_players }}"
-
-        - if: "{{ is_state('input_boolean.resume_mass','on') }}"
-          then:
-            - repeat:
-                for_each: "{{ mass_players }}"
-                sequence:
-                  - service: mass.queue_command
-                    continue_on_error: true
-                    target:
-                      entity_id: "{{ mass_players[repeat.index-1] }}"
-                    data:
-                      command: snapshot_restore
-
-            - service: input_boolean.turn_off
-              target:
-                entity_id: input_boolean.resume_mass
-
-            - service: input_text.set_value
-              target:
-                entity_id: input_text.tts_restore_mass
-              data:
-                value: ""
-
-        - if: "{{ tts_players|count > 0 }}"
-          then:
-            - service: script.media_player_set_volumes
-              data:
-                source: tts_off
+    # reset tts booleans
+    - service: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.tts_muted
+          - input_boolean.tts

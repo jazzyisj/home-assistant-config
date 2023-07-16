@@ -14,29 +14,53 @@ media_play:
       {{ expand('group.media_players')
           |selectattr('name','eq',states('select.media_preset_speaker_' ~ preset))
           |map(attribute='entity_id')|join('') }}
-    #MASS change to mass player
-    mass_player: "{{ media_player ~ '_2' if media_player != '' }}"
+    mass_player: > #MASS change to mass player
+      {% set mass = media_player ~ '_2' %}
+      {{ iif(has_value(mass),mass,none) }}
     play_players: >
-      {{ iif(mass_player is defined,iif(is_state_attr(mass_player,'is_group',true),
-          state_attr(mass_player,'group_members'),mass_player|replace('_2','')), []) }}
+      {% if mass_player != none %}
+        {% set players = namespace(entity_id=[]) %}
+        {% set devices = state_attr(mass_player,'group_members')
+            if is_state_attr(mass_player,'mass_player_type','group')
+              else [state_attr(mass_player,'mass_player_id')] %}
+        {% for item in devices %}
+          {% set entity = expand('group.mass_media_players')
+              |selectattr('attributes.mass_player_id','eq',item)
+              |map(attribute='entity_id')|list %}
+          {% set players.entity_id = players.entity_id + entity %}
+        {% endfor %}
+        {{ players.entity_id }}
+      {% elif media_player != '' %}
+        {% if state_attr(media_player,'type','group') %}
+          {{ state_attr(media_player,'entity_id') }}
+        {% else %} {{ media_player }}
+        {% endif %}
+      {% else %} {{ none }}
+      {% endif %}
     stop_players: >
       {{ expand(play_players)|selectattr('state','in',['playing','paused','buffering'])
           |map(attribute='entity_id')|list }}
   sequence:
-    - if:
-        - or:
+    - choose: #STOP?
+        - conditions:
             - condition: state
               entity_id: switch.system_mute
               state: "on"
+          sequence:
+            - service: browser_mod.notification
+              data:
+                duration: 30000
+                message: "Media preset cannot not be played."
 
+        - conditions:
             - condition: template
-              value_template: "{{ media_player == '' }}"
-      then:
-        - service: browser_mod.notification
-          data:
-            duration: 30000
-            message: "Media preset cannot not be played."
-      else:
+              value_template: "{{ play_players == none }}"
+          sequence:
+            - service: browser_mod.notification
+              data:
+                duration: 30000
+                message: "No valid media players." #STOP
+      default:
         # cancel sleep timer if active and not sleep preset
         - if: "{{ preset != 'sleep' and not is_state('timer.media_preset_sleep','idle') }}"
           then:
@@ -58,37 +82,47 @@ media_play:
               {% endfor %}
               {{ players.entity_id }}
 
-        # stop mass queue if overlap with preset players
-        - if: "{{ overlap_players|count > 0 }}"
-          then:
-            - service: script.media_players_off
-              data:
-                entity_id: "{{ overlap_players }}"
+        #MASS stop mass queue if overlap with preset players
+        # - if: "{{ overlap_players|count > 0 }}"
+        #   then:
+        #     - service: script.media_players_off
+        #       data:
+        #         entity_id: "{{ overlap_players }}"
 
         #BLOOP set tts player volumes to 0 before media play avoid google bloops
-        - service: media_player.volume_set
-          target:
-            entity_id: "{{ play_players }}" # this sets individual media player volumes instead of group
-          data:
-            volume_level: 0
+        # - service: media_player.volume_set
+        #   target:
+        #     entity_id: "{{ play_players }}" # this sets individual media player volumes instead of group
+        #   data:
+        #     volume_level: 0
+
+        # - delay: 1 #MASS
 
         #BLOOP tts players must be stopped - prevent volume jump
-        - if: "{{ stop_players|count > 0 }}"
-          then:
-            - service: media_player.media_stop
-              target:
-                entity_id: "{{ stop_players }}"
+        # - if: "{{ stop_players|count > 0 }}"
+        #   then:
+        #     - service: script.media_players_pause
+        #       target:
+        #         entity_id: "{{ stop_players }}"
+        #       continue_on_error: true
 
         #BLOOP turn on tts players so no bloop when turned on with tts play - bloop happens here when volume is 0
-        - if: "{{ expand(play_players)|selectattr('state','eq','off')|list|count > 0 }}"
-          then:
-            - service: media_player.turn_on
-              target:
-                entity_id: "{{ expand(play_players)|selectattr('state','eq','off')|map(attribute='entity_id')|list }}"
+        # - if: "{{ expand(play_players)|selectattr('state','eq','off')|list|count > 0 }}"
+        #   then:
+        #     - service: media_player.turn_on
+        #       target:
+        #         entity_id: "{{ expand(play_players)|selectattr('state','eq','off')|map(attribute='entity_id')|list }}"
 
         #BLOOP wait until all tts tts players are idle state
-        - wait_template: "{{ expand(play_players)|selectattr('state','ne','idle')|list|count == 0 }}"
-          timeout: 5
+        # - wait_template: "{{ expand(play_players)|selectattr('state','ne','idle')|list|count == 0 }}"
+        #   timeout: 10
+
+        - service: script.media_player_set_volumes
+          target:
+            entity_id: "{{ play_players }}"
+          data:
+            volume: "{{ states('input_number.media_preset_volume_' ~ preset)|int }}"
+            source: media
 
         - service: mass.queue_command
           data:
@@ -97,23 +131,27 @@ media_play:
             uri: "{{ states('select.media_preset_' ~ preset) }}"
             enqueue_mode: replace
             repeat_mode: all
+          continue_on_error: true
 
-        - wait_template: "{{ is_state(mass_player,'playing') }}"
+        - wait_template: "{{ is_state(media_player,'playing') }}"
           timeout: 30 # wait for media to start play
-          continue_on_timeout: false # don't start timers if media doesn't play
 
-        - service: script.media_player_set_volumes
-          target:
-            entity_id: "{{ play_players }}"
-          data:
-            volume: "{{ states('input_number.media_preset_volume_' ~ preset)|int }}"
-
-        # if sleep preset and sleep timer is idle start timer
-        - if: "{{ preset == 'sleep' and is_state('timer.media_preset_sleep','idle') }}"
+        - if: "{{ not wait.completed }}"
           then:
-            - service: timer.start
-              target:
-                entity_id: timer.media_preset_sleep
+            - service: script.media_player_reset_volumes
               data:
-                duration:
-                  minutes: "{{ states('input_number.media_preset_sleep_time')|int }}"
+                force_reset: true
+          else:
+            - service: input_boolean.turn_off
+              target:
+                entity_id: group.media_launchers
+
+            # if sleep preset and sleep timer is idle start timer
+            - if: "{{ preset == 'sleep' and is_state('timer.media_preset_sleep','idle') }}"
+              then:
+                - service: timer.start
+                  target:
+                    entity_id: timer.media_preset_sleep
+                  data:
+                    duration:
+                      minutes: "{{ states('input_number.media_preset_sleep_time')|int }}"

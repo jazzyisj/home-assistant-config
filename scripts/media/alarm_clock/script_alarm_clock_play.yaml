@@ -29,8 +29,8 @@ alarm_clock_play:
           if is_state_attr(media_player,'is_group',true) else [media_player] }}
     playlist: "{{ states('select.alarm_clock_sound_' ~ alarm_type) }}"
     volume: "{{ states('input_number.alarm_clock_volume_' ~ alarm_type)|float('unknown') }}"
-    # if alarm triggers on startup before playlist sensor are populated media_type in alarm_clock_play defaults to a sound
-    # becuase the playlist select has not been populated and playlist will be null - default to digital here
+    # if playlist sensor is not populated media_type in alarm_clock_play will default to sound
+    # playlist select will not been populated so alarm playlist will be null - default to digital here
     media_url:
       > #MASS stored in www still so this will work, change to alarm sound list plus playlist names
       {% if playlist == 'Media' %} {{ states('select.alarm_clock_media_' ~ alarm_type) }}
@@ -47,6 +47,24 @@ alarm_clock_play:
           alias: "Alarm type is valid"
           value_template: "{{ alarm_type in alarm_types }}"
       then:
+        # wait until any announcements are done playing
+        - if:
+            - condition: state
+              entity_id: input_boolean.tts
+              state: "on"
+          then:
+            - service: browser_mod.notification
+              data:
+                duration: 30000
+                message: "Alarm clock waiting for announcements to finish."
+
+            - wait_template: "{{ is_state('input_boolean.tts','off') }}"
+              timeout:
+                minutes: 5
+
+            - delay: # delay to allow media players to reset volumes before playing alarm clock
+                seconds: 5
+
         # only run if another alarm type is not on
         - if: >
             {% set found = namespace(value=0) %}
@@ -58,37 +76,36 @@ alarm_clock_play:
             {% endfor %}
             {{ found.value == 0 }}
           then:
-            - wait_template: "{{ is_state('input_boolean.tts','off') }}"
-              timeout: 300 # wait if started during tts
-
+            # make sure any previous alarm clock failed is reset
             - service: input_boolean.turn_off
               target:
                 entity_id: input_boolean.alarm_clock_failed
+
+            - wait_template: "{{ is_state('input_boolean.tts','off') }}"
+              timeout: 300 # wait if started during tts
 
             - if: >
                 {{ is_state('switch.alarm_clock_snooze','on')
                     and (not resume or is_state('timer.alarm_clock_snooze','idle')) }}
               then:
+                # don't stop alarm clock if snooze reset
                 - service: input_boolean.turn_on
                   target:
-                    entity_id: input_boolean.alarm_clock_snooze_stop_action
+                    entity_id: input_boolean.alarm_clock_snooze_bypass_stop
 
                 - service: switch.turn_off
                   target:
                     entity_id: switch.alarm_clock_snooze
 
-                - service: timer.cancel
-                  target:
-                    entity_id: timer.alarm_clock_snooze
-
             - if: "{{ first_run }}"
-              then: # save media player volumes before conditions so values are set for alarm_clock_stop
+              then:
+                # save media player volumes before conditions so values are set for alarm_clock_stop
                 - service: script.media_player_save_volumes
                   data:
                     entity_id: "{{ media_players }}"
                     source: alarm_clock
 
-            # only on first run so changes on main UI during alarm aren't bypassed on restart
+            # only on first run so changes made on UI during alarm aren't bypassed on restart
             - if: "{{ first_run }}"
               then:
                 - if: "{{ is_state('switch.alarm_clock_' ~ alarm_type,'off') }}"
@@ -108,24 +125,6 @@ alarm_clock_play:
               entity_id: switch.alarm_clock_snooze
               state: "off"
 
-            # wait until any announcements are done playing
-            - if:
-                - condition: state
-                  entity_id: input_boolean.tts
-                  state: "on"
-              then:
-                - service: browser_mod.notification
-                  data:
-                    duration: 30000
-                    message: "Alarm clock waiting for announcements to finish."
-
-                - wait_template: "{{ is_state('input_boolean.tts','off') }}"
-                  timeout:
-                    minutes: 5
-
-                - delay: # delay to allow media players to reset volumes before playing alarm clock
-                    seconds: 5
-
             - if:
                 - condition: template
                   alias: "Media player or media player group member not available"
@@ -138,7 +137,7 @@ alarm_clock_play:
                     entity_id: input_boolean.alarm_clock_failed
               else:
                 - variables:
-                    players_stop: > #BITWISE
+                    stop_players: > #BITWISE
                       {% set players = namespace(entity_id=[]) %}
                       {% for item in expand(state_attr('sensor.alarm_clock_media_player','entity_id'))
                           |selectattr('state','in',['playing','paused','buffering','on']) %}
@@ -155,11 +154,11 @@ alarm_clock_play:
                       - automation.alarm_clock_snooze_on
 
                 # if the alarm clock media player is playing stop it so we don't get a volume jump
-                - if: "{{ players_stop|count > 0 }}"
+                - if: "{{ stop_players|count > 0 }}"
                   then:
                     - service: media_player.media_stop
                       target:
-                        entity_id: "{{ players_stop }}"
+                        entity_id: "{{ stop_players }}"
                       continue_on_error: true
 
                 - service: media_player.volume_set #BLOOP set volume to 0 before setting volume to avoid google volume pops
@@ -180,9 +179,8 @@ alarm_clock_play:
                     entity_id: *alarm_automations
 
                 - service: mass.queue_command
-                  target:
-                    entity_id: "{{ media_player }}"
                   data:
+                    player_id: "{{ media_player }}"
                     command: play_media
                     uri: "{{ media_url }}"
                     enqueue_mode: play
