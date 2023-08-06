@@ -66,36 +66,34 @@
                   target:
                     entity_id: input_boolean.occupancy_override
               else:
-                # don't turn off dining room light, bathroom lights
-                - service: timer.cancel
+                # turn off to stop actions occuring in night mode
+                - service: automation.turn_off
                   target:
-                    entity_id: >
-                      {% set timed_lights = states.timer
-                          |selectattr('attributes.timed_light','defined')
-                          |selectattr('attributes.timed_light','eq',true)
-                          |map(attribute='entity_id')|list %}
-                      {{ states.timer
-                          |selectattr('attributes.type','defined')
-                          |selectattr('attributes.type','eq','light')
-                          |rejectattr('entity_id','in',['timer.dining_room_light'
-                            ,'timer.bathroom_vanity_light','timer.bathroom_shower_light'])
-                          |map(attribute='entity_id')|list }}
+                    entity_id: automation.presence_someone_arrives_home
+                  data:
+                    stop_actions: true
 
-                - service: homeassistant.turn_off
+                - service: automation.turn_on
                   target:
-                    entity_id:
-                      - automation.presence_someone_arrives_home #IDEA maybe better way?
+                    entity_id: automation.presence_someone_arrives_home
+
+                - variables:
+                    off_entities:
                       - input_boolean.bedtime_delayed
                       - script.waketime
                       - script.waketime_lights
                       - switch.company_scene
                       - switch.movie_scene
                       - switch.chill_scene
-                      - switch.shower_scene
 
-                - service: automation.turn_on
-                  target:
-                    entity_id: automation.presence_someone_arrives_home
+                - repeat:
+                    for_each: "{{ off_entities }}"
+                    sequence:
+                      - if: "{{ is_state(repeat.item,'on') }}"
+                        then:
+                          - service: homeassistant.turn_off
+                            target:
+                              entity_id: "{{ repeat.item }}"
 
         - conditions:
             - condition: state
@@ -104,10 +102,19 @@
                 - Away
                 - Vacation
           sequence:
-            - service: homeassistant.turn_off
+            # turn off to stop actions occuring in away/vaction mode
+            - service: automation.turn_off
               target:
-                entity_id:
-                  - automation.presence_someone_arrives_home #IDEA maybe better way?
+                entity_id: automation.presence_someone_arrives_home
+              data:
+                stop_actions: true
+
+            - service: automation.turn_on
+              target:
+                entity_id: automation.presence_someone_arrives_home
+
+            - variables:
+                off_entities:
                   - input_boolean.bedtime_delayed
                   - script.waketime
                   - script.waketime_lights
@@ -117,17 +124,17 @@
                   - switch.chill_scene
                   - switch.shower_scene
 
-            - service: automation.turn_on
-              target:
-                entity_id: automation.presence_someone_arrives_home
+            - repeat:
+                for_each: "{{ off_entities }}"
+                sequence:
+                  - if: "{{ is_state(repeat.item,'on') }}"
+                    then:
+                      - service: homeassistant.turn_off
+                        target:
+                          entity_id: "{{ repeat.item }}"
 
-            - service: timer.cancel # cancel all device timers (allow timed devices to turn off)
-              target:
-                entity_id: >
-                  {{ states.timer|selectattr('attributes.type','in',['light','ceiling_fan','vent_fan'])
-                      |map(attribute='entity_id')|list }}
-
-            - service: timer.cancel # cancel arrive home light timer (away->home->away)
+            # cancel arrive home light timer (away->home->away before timer finished)
+            - service: timer.cancel
               target:
                 entity_id: timer.arrive_home_lights
 
@@ -145,7 +152,7 @@
                   target:
                     entity_id: input_boolean.occupancy_override
 
-                - service: input_select.select_option # back to previous mode if night/override else home mode
+                - service: input_select.select_option
                   target:
                     entity_id: input_select.occupancy_mode
                   data:
@@ -182,7 +189,7 @@
 ###############################################################################
 ## Presence - Occupancy Mode Reset
 ###############################################################################
-- id: presence_occupancy_mode_reset
+- id: presence_occupancy_mode_reset #VERIFY sunday
   alias: "[Presence] Occupancy Mode Reset"
   description: "Auto select occupancy mode."
   trigger:

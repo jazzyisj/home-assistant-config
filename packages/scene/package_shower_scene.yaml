@@ -33,12 +33,21 @@ switch:
 
           - service: script.turn_light_on
             data:
-              lights:
-                - light.bathroom_shower_light
-                - light.bathroom_vanity_light_rgb
+              lights: light.bathroom_shower_light
               profile: default_max
-              override: true
-              activate_timer: true
+              activate_timer: false
+
+          - service: script.turn_light_on
+            data:
+              lights: light.bathroom_vanity_light_rgb
+              profile: defaul
+              activate_timer: false
+
+          - service: timer.cancel
+            target:
+              entity_id:
+                - timer.bathroom_vanity_light
+                - timer.bathroom_shower_light
 
           - if:
               - condition: state
@@ -84,96 +93,89 @@ switch:
                     data:
                       preset: shower
         turn_off:
+          - if:
+              - condition: state
+                entity_id: input_boolean.alarm_triggered
+                state: "off"
+            then:
+              - service: light.turn_off
+                target:
+                  entity_id: light.bathroom_shower_light
+
+              - if:
+                  - or:
+                      - condition: state
+                        entity_id: binary_sensor.nighttime_illuminance_lights
+                        state: "on"
+
+                      - condition: state
+                        entity_id: binary_sensor.daytime_illuminance_lights
+                        state: "on"
+
+                      - condition: state
+                        entity_id: binary_sensor.bathroom_illuminance_lights
+                        state: "on"
+                then:
+                  - service: script.turn_light_on
+                    data:
+                      lights: light.bathroom_vanity_light_rgb
+                      profile: default
+                      activate_timer: true
+                else:
+                  - service: light.turn_off
+                    target:
+                      entity_id: light.bathroom_vanity_light_rgb
+
+              - if:
+                  - condition: state
+                    entity_id: input_select.occupancy_mode
+                    state:
+                      - Home
+                      - Guest
+
+                  - condition: state
+                    entity_id: input_boolean.media_preset_enabled_shower
+                    state: "on"
+                then:
+                  - if:
+                      - condition: template
+                        alias: "TTS on and bathroom speaker in tts media players"
+                        value_template: >
+                          {{ is_state('input_boolean.tts','on')
+                              and 'media_player.bathroom_speaker' in state_attr('sensor.tts_media_player','entity_id') }}
+                    then:
+                      # set bathroom speaker to default volume for post tts volume level
+                      - service: input_number.set_value
+                        alias: "Set bathroom speaker restore volume to media volume"
+                        target:
+                          entity_id: input_number.bathroom_speaker_tts
+                        data:
+                          value: "{{ states('input_number.bathroom_speaker_default_volume')|float }}"
+
+                      - wait_template: "{{ is_state('input_boolean.tts','off') }}"
+                        timeout: 120
+
+                  - if:
+                      - condition: template
+                        alias: "Bathroom speaker is active queue."
+                        value_template: "{{ is_state('media_player.bathroom_speaker_2','playing') }}"
+                    then:
+                      - service: script.media_players_off
+                        data:
+                          entity_id: media_player.bathroom_speaker
+                    else:
+                      # set bathroom speaker to default media volume
+                      - service: script.media_player_set_volumes
+                        data:
+                          entity_id: media_player.bathroom_speaker
+                          volume: >
+                            {{ iif(is_state('binary_sensor.quiet_time','on'),
+                                states('input_number.media_quiet_volume')|int,
+                                  states('input_number.media_default_volume')|int) }}
+
           - service: timer.cancel
             target:
               entity_id: timer.shower_scene
-
-          - condition: state
-            entity_id: input_boolean.alarm_triggered
-            state: "off"
-
-          - service: light.turn_off
-            target:
-              entity_id: light.bathroom_shower_light
-
-          - if:
-              - or:
-                  - condition: state
-                    entity_id: binary_sensor.nighttime_illuminance_lights
-                    state: "on"
-
-                  - condition: state
-                    entity_id: binary_sensor.daytime_illuminance_lights
-                    state: "on"
-
-                  - condition: state
-                    entity_id: binary_sensor.bathroom_illuminance_lights
-                    state: "on"
-            then:
-              - service: script.turn_light_on
-                data:
-                  lights: light.bathroom_vanity_light_rgb
-                  profile: default
-
-              # don't leave vanity light stranded on
-              - if:
-                  - condition: state
-                    entity_id: binary_sensor.bathroom_sensor_motion
-                    state: "off"
-                then:
-                  - service: timer.start
-                    target:
-                      entity_id: timer.bathroom_vanity_light
-            else:
-              - service: light.turn_off
-                target:
-                  entity_id: light.bathroom_vanity_light_rgb
-
-          - condition: state
-            entity_id: input_select.occupancy_mode
-            state:
-              - Home
-              - Guest
-
-          - condition: state
-            entity_id: input_boolean.media_preset_enabled_shower
-            state: "on"
-
-          - if:
-              - condition: template
-                alias: "TTS on and bathroom speaker in tts media players"
-                value_template: >
-                  {{ is_state('input_boolean.tts','on')
-                      and 'media_player.bathroom_speaker' in state_attr('sensor.tts_media_player','entity_id') }}
-            then:
-              # set bathroom speaker to default volume for post tts volume level
-              - service: input_number.set_value
-                alias: "Set bathroom speaker restore volume to media volume"
-                target:
-                  entity_id: input_number.bathroom_speaker_tts
-                data:
-                  value: "{{ states('input_number.bathroom_speaker_default_volume')|float }}"
-
-              - wait_template: "{{ is_state('input_boolean.tts','off') }}"
-                timeout: 120
-
-          - if:
-              - condition: template
-                alias: "Bathroom speaker is active queue."
-                value_template: "{{ is_state('media_player.bathroom_speaker_2','playing') }}"
-            then:
-              - service: script.media_players_off
-                data:
-                  entity_id: media_player.bathroom_speaker
-            else:
-              # set bathroom speaker to default media volume
-              - service: script.media_player_set_volumes
-                data:
-                  entity_id: media_player.bathroom_speaker
-                  volume: >
-                    {{ iif(is_state('binary_sensor.quiet_time','on'),
-                        states('input_number.media_quiet_volume')|int,
-                          states('input_number.media_default_volume')|int) }}
 
 automation:
   ###############################################################################

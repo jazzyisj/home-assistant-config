@@ -7,6 +7,19 @@
   max_exceeded: silent
   trigger:
     - platform: state
+      id: switch
+      entity_id: input_boolean.media_color_light_sync
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      id: player
+      entity_id: media_player.dining_room_hub
+      to: "off"
+
+    - platform: state
       entity_id:
         - binary_sensor.work_commute_active
         - alert.work_commute_jason
@@ -19,47 +32,36 @@
         - unavailable
 
     - platform: state
-      entity_id:
-        - switch.chill_scene
-        - switch.company_scene
-        - switch.movie_scene
-      to: ~
+      entity_id: binary_sensor.scene_active
+      to: "off"
       not_from:
         - unknown
         - unavailable
   condition:
     - condition: state
+      entity_id: light.dining_room_light_rgb
+      state: "on"
+
+    - condition: state
       entity_id: input_boolean.alarm_triggered
       state: "off"
+
+    - condition: template
+      value_template: "{{ iif(trigger.id == 'player',is_state('input_boolean.media_color_light_sync','on'),true) }}"
+
+    - condition: template
+      value_template: >
+        {% set entities = state_attr('binary_sensor.scene_active','entity_id') %}
+        {% if entities != none %}
+          {{ 'light.dining_room_light_rgb' not in state_attr('binary_sensor.scene_active','entity_id') }}
+        {% else %} {{ true }}
+        {% endif %}
   action:
-    - if: "{{ is_state('switch.adaptive_lighting_rgb_lights','on') }}"
-      then:
-        - service: adaptive_lighting.apply
-          data:
-            entity_id: switch.adaptive_lighting_rgb_lights
-            lights: light.dining_room_light_rgb
-            transition: 0
-            adapt_brightness: false
-            adapt_color: true
-            prefer_rgb_color: true
-            turn_on_lights: false
-
-        - service: adaptive_lighting.set_manual_control
-          data:
-            entity_id: switch.adaptive_lighting_rgb_lights
-            lights: light.dining_room_light_rgb
-            manual_control: false
-
-        - wait_template: >
-            {{ 'light.dining_room_light_rgb'
-                  not in state_attr('switch.adaptive_lighting_rgb_lights','manual_control') }}
-          timeout: 30
-      else:
-        - service: script.turn_light_on
-          data:
-            lights: light.dining_room_light_rgb
-            activate_timer: false
-            profile: default
+    - service: script.turn_light_on
+      data:
+        lights: light.dining_room_light_rgb
+        activate_timer: false
+        profile: default_min
 
     - if:
         - condition: state
@@ -69,3 +71,19 @@
         - service: light.turn_off
           target:
             entity_id: light.dining_room_light_rgb
+      else:
+        - if: "{{ is_state('switch.adaptive_lighting_rgb_lights','off') }}"
+          then:
+            - service: script.turn_light_on
+              data:
+                lights: light.dining_room_light_rgb
+                activate_timer: false
+                profile: default
+
+    - if: "{{ is_state('switch.adaptive_lighting_rgb_lights','on') }}"
+      then:
+        - service: adaptive_lighting.set_manual_control
+          data:
+            entity_id: switch.adaptive_lighting_rgb_lights
+            lights: light.dining_room_light_rgb
+            manual_control: false

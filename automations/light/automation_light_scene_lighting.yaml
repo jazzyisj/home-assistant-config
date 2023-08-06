@@ -10,9 +10,6 @@
       {% if trigger.entity_id in ['switch.chill_scene','switch.company_scene',
         'switch.movie_scene'] %} {{ trigger.entity_id.split('.')[1][:-6] }}
       {% elif trigger.entity_id == 'binary_sensor.waketime_active' %} morning
-      {% elif is_state('switch.chill_scene','on') %} chill
-      {% elif is_state('switch.company_scene','on') %} company
-      {% elif is_state('switch.movie_scene','on') %} movie
       {% endif %}
     scene_lights: &scene_lights >
       {{ expand(state_attr('scene.' ~ scene,'entity_id'))
@@ -23,14 +20,13 @@
           |selectattr('attributes.night_lux','defined')
           |selectattr('attributes.night_lux','eq',true)
           |map(attribute='entity_id')|list }}
-    main_lights: &main_lights >
+    adaptive_lights: &adaptive_lights >
       {{ expand(states.switch.adaptive_lighting_main_lights.attributes.configuration['lights'])
-          |selectattr('entity_id','in',state_attr('scene.' ~ scene,'entity_id'))
-          |map(attribute='entity_id')|list }}
-    rgb_lights: &rgb_lights >
-      {{ expand(states.switch.adaptive_lighting_rgb_lights.attributes.configuration['lights'])
-          |selectattr('entity_id','in',state_attr('scene.' ~ scene,'entity_id'))
-          |map(attribute='entity_id')|list }}
+            |selectattr('entity_id','in',state_attr('scene.' ~ scene,'entity_id'))
+            |map(attribute='entity_id')|list
+          + expand(states.switch.adaptive_lighting_rgb_lights.attributes.configuration['lights'])
+            |selectattr('entity_id','in',state_attr('scene.' ~ scene,'entity_id'))
+            |map(attribute='entity_id')|list }}
   trigger:
     - platform: state
       id: scene_on
@@ -68,22 +64,37 @@
   action:
     - if: "{{ trigger.id == 'scene_on' }}"
       then:
+        # turn manual control on so scene settings aren't changed by adaptive lighting
         - service: adaptive_lighting.set_manual_control
           data:
             entity_id: switch.adaptive_lighting_main_lights
-            lights: "{{ main_lights }}"
-            manual_control: true
-
-        - service: adaptive_lighting.set_manual_control
-          data:
-            entity_id: switch.adaptive_lighting_rgb_lights
-            lights: "{{ rgb_lights }}"
+            lights: "{{ adaptive_lights }}"
             manual_control: true
 
         - service: script.light_scene_on
           data:
             scene: "{{ scene }}"
+
+        - delay: 5 # wait for scene lights to come on to determine which lights are still off
+
+        - variables:
+            lights_off: >
+              {{ expand(adaptive_lights)|selectattr('state','eq','off')
+                  |map(attribute='entity_id')|list }}
+
+        - if: "{{ lights_off|count > 0 }}"
+          then:
+            - service: adaptive_lighting.set_manual_control
+              data:
+                entity_id: switch.adaptive_lighting_main_lights
+                lights: "{{ lights_off }}"
+                manual_control: false
       else:
+        # only if no other scene is still on, non-scene lights are turned off by new scene entity
+        - wait_template: "{{ is_state('binary_sensor.scene_active','off') }}"
+          timeout: 15
+          continue_on_timeout: false
+
         - if:
             - condition: state
               entity_id: binary_sensor.nighttime_illuminance_lights
@@ -106,6 +117,7 @@
                         lights: *night_lights
                         activate_timer: false
                         bypass_timer: true
+                        reset: true
 
                 # turn non-night lux scene lights off
                 - if: "{{ scene_lights|count > 0 }}"
@@ -115,47 +127,21 @@
                         lights: *scene_lights
                         activate_timer: false
                         bypass_timer: true
-
-                # req if light was already off manual off not triggered
-                - if: "{{ main_lights|count > 0 }}"
-                  then:
-                    - service: adaptive_lighting.set_manual_control
-                      data:
-                        entity_id: switch.adaptive_lighting_main_lights
-                        lights: *main_lights
-                        manual_control: false
-
-                - if: "{{ rgb_lights|count > 0 }}"
-                  then:
-                    - service: adaptive_lighting.set_manual_control
-                      data:
-                        entity_id: switch.adaptive_lighting_rgb_lights
-                        lights: *rgb_lights
-                        manual_control: false
+                        reset: true
           else:
             - service: script.turn_light_off
               data:
                 lights: *scene_lights
                 activate_timer: false
                 bypass_timer: true
+                reset: true
 
             - service: script.turn_light_off
               data:
                 lights: *night_lights
                 activate_timer: false
                 bypass_timer: true
-
-            - service: adaptive_lighting.set_manual_control
-              data:
-                entity_id: switch.adaptive_lighting_main_lights
-                lights: "{{ main_lights }}"
-                manual_control: false
-
-            - service: adaptive_lighting.set_manual_control
-              data:
-                entity_id: switch.adaptive_lighting_rgb_lights
-                lights: "{{ rgb_lights }}"
-                manual_control: false
+                reset: true
 
 ###############################################################################
 ## Scene - Scene Light Color
@@ -186,7 +172,7 @@
         - switch.company_scene
         - switch.movie_scene
       to: "on"
-      for: 5 # allow scene lights to turn on first
+      for: 10 # allow scene lights to turn on first
       not_from:
         - unknown
         - unavailable
@@ -199,6 +185,12 @@
       alias: "Scene switch is on"
       value_template: "{{ is_state('switch.' ~ scene ,'on') }}"
   action:
+    - service: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_rgb_lights
+        lights: light.dining_room_light_rgb
+        manual_control: true
+
     - service: automation.turn_off
       target:
         entity_id: automation.light_in_use_timer
@@ -211,19 +203,9 @@
       data:
         #TODO not working in light script
         rgb_color: "{{ state_attr('sensor.rgb_' ~ scene,'rgb_color') }}"
+        transition: 5
       continue_on_error: true
 
     - service: automation.turn_on
       target:
         entity_id: automation.light_in_use_timer
-
-  #IDEA - condition: template
-  #   value_template: "{{ state_attr('media_player.dining_room_hub','entity_picture') != none }}"
-
-  # - service: color_extractor.turn_on
-  #   target:
-  #     entity_id: light.dining_room_light_rgb
-  #   data:
-  #     color_extract_url: "{{ state_attr('media_player.dining_room_hub','entity_picture') }}"
-  #     brightness_pct: 80
-  #     transition: 5

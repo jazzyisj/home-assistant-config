@@ -1,6 +1,6 @@
 ((LitElement) => {
 
-console.info('NUMBERBOX_CARD 4.11');
+console.info('NUMBERBOX_CARD 4.14');
 const html = LitElement.prototype.html;
 const css = LitElement.prototype.css;
 class NumberBox extends LitElement {
@@ -84,11 +84,20 @@ secondaryInfo(){
 		while(j.length){
 			let t=j.shift();
 			if(t[0]=='%'){
+				let f=NaN;
 				t=t.substring(1).split(':');
 				let b=this._hass.states;
 				for (let d=0; d<t.length; d++){
 					if(lu.indexOf(t[d])>1){t[d]=t[d].replace('-','_');}
 					const id = t[d];
+					if(id[0]=='~'){
+						f=Number(id.substring(1));
+						if(!isNaN(f)){
+							let g=parseFloat(b);
+							if(isNaN(g)){f=NaN;}else{b=g;}
+						}
+						break;
+					}
 					if(b.hasOwnProperty(id)){
 						b=b[id];
 						if(!d){
@@ -107,7 +116,7 @@ secondaryInfo(){
 						}
 					}
 				}
-				ret += (typeof b !== 'object')? b : t;
+				ret += (typeof b !== 'object')? (isNaN(f)?b:b.toFixed(f)) : t;
 			}else{
 				ret += t;
 			}
@@ -216,7 +225,7 @@ publishNum(dhis){
 	if(dhis.pending===false){return;}
 	const s=dhis.config.service.split('.');
 	if(s[0]=='input_datetime'){dhis.pending=dhis.numTime(dhis.pending,1);}
-	const v={entity_id: dhis.config.entity, [dhis.config.param]: dhis.pending};
+	const v = { ...dhis.config.service_params, [dhis.config.param]: dhis.pending };
 	dhis.pending=false;
 	dhis.old.state=dhis.state;
 	dhis._hass.callService(s[0], s[1], v);
@@ -226,7 +235,7 @@ niceNum(){
 	let fix=0; let v=this.pending;
 	if( v === false ){
 		v=this.state;
-		if(v=='unavailable' || ( v=='unknown' && this.config.initial === undefined ) ){return '?';}
+		if(v=='unavailable' || v === null || ( v=='unknown' && this.config.initial === undefined ) ){return '?';}
 		v=this.timeNum(v);
 		if(isNaN(v) && this.config.initial !== undefined){
 			v=Number(this.config.initial);
@@ -365,6 +374,7 @@ setConfig(config) {
 		refresh: 0,
 		initial: undefined,
 		moreinfo: config.entity,
+		service_params: {entity_id: config.entity},
 		...config
 	};
 	if(this.config.service.split('.').length < 2){

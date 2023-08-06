@@ -8,73 +8,20 @@
     - platform: time
       id: bedtime
       at: sensor.bedtime_warning
-
-    - platform: event
-      event_type: timer.finished
-      event_data:
-        entity_id: timer.bedtime_delay
   condition:
-    - condition: state
-      entity_id: binary_sensor.someone_home
-      state: "on"
-
-    - condition: state
-      entity_id: input_select.occupancy_mode
-      state:
-        - Home
-        - Guest
-
-    - condition: state
-      entity_id: input_boolean.alarm_triggered
-      state: "off"
-
     - condition: template
-      alias: "Workday/weekend/guest routine enabled, defaults to house waketime if next_waketime is none"
+      alias: "Workday/weekend/guest routine enabled"
       value_template: >
-        {% if is_state('binary_sensor.owner_home','off') %}
-          {{ is_state('input_boolean.guest_night','on') }}
-        {% elif (now() > today_at(states('input_datetime.house_waketime'))
-            if has_value('sensor.next_waketime')
-              else now() > states('sensor.next_waketime')|as_datetime) %}
-            {{ is_state('input_boolean.workday_night','on')
-                if is_state('binary_sensor.work_tomorrow','on')
-                  else is_state('input_boolean.weekend_night','on') }}
-        {% else %}
-          {{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_today','on')
+        {% if is_state('binary_sensor.owner_home','on') %}
+          {{ is_state('input_boolean.workday_night','on') if is_state('binary_sensor.work_tomorrow','on')
               else is_state('input_boolean.weekend_night','on') }}
+        {% else %}
+          {{ is_state('input_boolean.guest_night','on') }}
         {% endif %}
   action:
     - service: script.bedtime
       data:
-        warning: "{{ iif(trigger.id == 'bedtime',true,false) }}"
-
-###############################################################################
-## Schedule - Bedtime Clear Notification
-###############################################################################
-- id: schedule_bedtime_clear_notification
-  alias: "[Schedule] Bedtime Clear Notification"
-  description: "Clear notification."
-  max_exceeded: silent
-  trigger:
-    - platform: state
-      entity_id: input_boolean.bedtime_delayed
-      to: "off"
-
-    - platform: state
-      entity_id: input_select.occupancy_mode
-      to: Night
-
-    - platform: event
-      id: pending
-      event_type: mobile_app_notification_action
-      event_data:
-        action: clear_bedtime
-  action:
-    - service: notify.jason
-      data:
-        message: clear_notification
-        data:
-          tag: bedtime_alert
+        warning: true
 
 ###############################################################################
 ## Schedule - Bedtime Delay Turned On
@@ -89,10 +36,6 @@
     - platform: state
       entity_id: input_boolean.bedtime_delayed
       to: "on"
-      not_from:
-        - unknown
-        - unavailable
-      for: 15 # allow scene_active to turn on
   action:
     - if:
         - condition: state
@@ -112,63 +55,40 @@
             message: >
               Bedtime delay has been turned off.
               The house is in {{ states('input_select.occupancy_mode') }} mode.
-      else:
-        - if:
-            - condition: state
-              entity_id: binary_sensor.bedtime_active
-              state: "on"
-          then:
-            - service: timer.start
-              target:
-                entity_id: timer.bedtime_delay
-              data:
-                duration:
-                  minutes: "{{ bedtime_delay }}"
 
-            # wait for timer active so timer delayed bedtime can be calculated
-            - wait_template: "{{ states('timer.bedtime_delay') == 'active' }}"
-              timeout: 5
-              continue_on_timeout: false
+        - stop: "Bedtime not run, occupancy mode is {{ states('input_select.occupancy_mode') }}."
 
-            - service: script.turn_on
-              target:
-                entity_id: script.tts_play
-              data:
-                variables:
-                  message: >
-                    Your bedtime has been delayed by {{ bedtime_delay }} minutes.
-                    I'll check on you again at {{ state_attr('sensor.delayed_bedtime','12hour') }}
-                    to see if you've come to your senses yet.
-                  quiet_play: true
-              continue_on_error: true
+    - if:
+        - condition: state
+          entity_id:
+            - binary_sensor.bedtime_active
+            - binary_sensor.scene_active
+          state: "off"
+      then:
+        - service: script.turn_on
+          target:
+            entity_id: script.tts_play
+          data:
+            variables:
+              message: >
+                You've elected to stay up past your bedtime today.
+                It has been delayed by {{ bedtime_delay }}
+                minutes and is now set for {{ state_attr('sensor.delayed_bedtime','12hour') }}.
+              quiet_play: true
+          continue_on_error: true
 
-          else:
-            # not if turned on by scene active
-            - condition: state
-              entity_id: binary_sensor.scene_active
-              state: "off"
+    - if:
+        - condition: state
+          entity_id: binary_sensor.scene_active
+          state: "off"
 
-            - delay: 1 # allow delayed_bedtime to be calculated
-
-            - service: script.turn_on
-              target:
-                entity_id: script.tts_play
-              data:
-                variables:
-                  message: >
-                    You've elected to stay up past your bedtime today.
-                    Your bedtime has been delayed by {{ bedtime_delay }}
-                    minutes and is now set for {{ state_attr('sensor.delayed_bedtime','12hour') }}.
-                  quiet_play: true
-              continue_on_error: true
-
-    - condition: template
-      alias: Just before or after bedtime
-      value_template: >
-        {% set bedtime = states('sensor.bedtime_today')|as_datetime %}
-        {{ now() > bedtime - timedelta(hours=2) }}
-
-    - service: script.bedtime_notification
+        - condition: template
+          alias: "Send bedtime notifications when just before or after bedtime"
+          value_template: >
+            {% set bedtime = states('sensor.bedtime_today')|as_datetime %}
+            {{ now() > bedtime - timedelta(hours=2) }}
+      then:
+        - service: script.bedtime_notification
 
 ###############################################################################
 ## Schedule - Bedtime Delay Turned Off
@@ -179,7 +99,6 @@
   max_exceeded: silent
   trigger:
     - platform: state
-      id: delay_off
       entity_id: input_boolean.bedtime_delayed
       to: "off"
   action:
@@ -188,14 +107,11 @@
             - condition: state
               entity_id: binary_sensor.scene_active
               state: "on"
-
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              match: any
-              state:
-                - Home
-                - Guest
           sequence:
+            - service: automation.turn_off
+              target:
+                entity_id: automation.schedule_bedtime_delay_turned_on
+
             - service: input_boolean.turn_on
               target:
                 entity_id: input_boolean.bedtime_delayed
@@ -205,19 +121,26 @@
                 duration: 30000
                 message: "Bedtime delay cannot be turned off when a scene is active."
 
+            - service: automation.turn_on
+              target:
+                entity_id: automation.schedule_bedtime_delay_turned_on
+
         - conditions:
             - condition: state
               entity_id: binary_sensor.bedtime_active
               state: "on"
-
-            - not:
-                - condition: state
-                  entity_id: timer.bedtime_delay
-                  state: idle
           sequence:
-            - service: timer.finish
+            - service: timer.cancel
               target:
                 entity_id: timer.bedtime_delay
+
+            - service: script.bedtime
+              data:
+                warning: false
+      default:
+        - service: timer.cancel
+          target:
+            entity_id: timer.bedtime_delay
 
 ###############################################################################
 ## Schedule - Turn On Bedtime Delay
@@ -228,14 +151,13 @@
   max_exceeded: silent
   trigger:
     - platform: event
-      event_type: timer.start
-      event_data:
-        entity_id: timer.bedtime_delay
-
-    - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: bedtime_delay_on
+
+    - platform: state
+      entity_id: binary_sensor.scene_active
+      to: "on"
   action:
     - service: input_boolean.turn_on
       target:
@@ -263,7 +185,44 @@
       event_type: timer.cancelled
       event_data:
         entity_id: timer.bedtime_delay
+
+    - platform: state
+      entity_id: binary_sensor.scene_active
+      to: "off"
   action:
     - service: input_boolean.turn_off
       target:
         entity_id: input_boolean.bedtime_delayed
+
+    - if: "{{ is_state('binary_sensor.bedtime_active','on') }}"
+      then:
+        - service: script.bedtime
+          data:
+            warning: false
+
+###############################################################################
+## Schedule - Bedtime Clear Notification
+###############################################################################
+- id: schedule_bedtime_clear_notification
+  alias: "[Schedule] Bedtime Clear Notification"
+  description: "Clear notification."
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.bedtime_delayed
+      to: "off"
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to: Night
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: clear_bedtime
+  action:
+    - service: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: bedtime_alert

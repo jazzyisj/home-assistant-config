@@ -9,12 +9,20 @@
       entity_id: binary_sensor.wan_connected
       to: ~
       for: 60
+      not_from:
+        - unknown
+        - unavailable
   action:
     - if:
         - condition: state
           entity_id: binary_sensor.wan_connected
           state: "off"
       then:
+        #ISSUE sensor takes a while to turn off
+        - wait_template: "{{ is_state('binary_sensor.marytts_running','off') }}"
+          timeout:
+            minutes: 5
+
         - if:
             - condition: state
               entity_id: binary_sensor.marytts_running
@@ -23,7 +31,37 @@
             - service: hassio.addon_start
               data:
                 addon: 243ffc37_marytts
+
+        - wait_template: "{{ is_state('binary_sensor.marytts_running','on') }}"
+          timeout:
+            minutes: 5
+
+        - repeat:
+            while: "{{ is_state('binary_sensor.wan_connected','off') }}"
+            sequence:
+              - service: script.tts_play
+                data:
+                  message: "Attention! The internet is offline!"
+                  min_volume: 70
+                  quiet_play: true
+                  save_msg: true
+
+              - wait_template: "{{ is_state('binary_sensor.wan_connected','on') }}"
+                timeout:
+                  minutes: 60
       else:
+        - service: script.tts_play
+          data:
+            message: "The internet is back online!"
+            min_volume: 70
+            quiet_play: true
+            save_msg: true
+
+        #ISSUE sensor takes a while to turn on
+        - wait_template: "{{ is_state('binary_sensor.marytts_running','on') }}"
+          timeout:
+            minutes: 5
+
         - if:
             - condition: state
               entity_id: binary_sensor.marytts_running
