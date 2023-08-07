@@ -125,7 +125,7 @@ tts_play:
       then:
         - service: input_boolean.turn_on
           target:
-            entity_id: input_boolean.tts_muted # prevents automation.tts_queue_finished trigger
+            entity_id: input_boolean.tts_muted # prevents automation.tts_finished volume reset
 
         - if: >
             {{ is_state('input_boolean.jason_phone_tts_enabled','on')
@@ -150,7 +150,6 @@ tts_play:
                 variables:
                   message: "{{ message }}"
       else:
-        # tts not muted, allow automation.tts_queue_finished actions
         - service: input_boolean.turn_off
           target:
             entity_id: input_boolean.tts_muted
@@ -164,8 +163,13 @@ tts_play:
         - variables:
             muted_players: >
               {{ expand(media_players)|selectattr('attributes.is_volume_muted','defined')|selectattr('attributes.is_volume_muted','eq',true)|map(attribute='entity_id')|list }}
-            media_players: >
+            active_players: >
               {{ expand(media_players)|rejectattr('entity_id','in',muted_players)|map(attribute='entity_id')|list }}
+
+        - service: script.media_player_set_volumes
+          data:
+            source: tts_all # lower active media player volumes for tts
+          continue_on_error: true
 
         - service: automation.turn_off
           target:
@@ -174,41 +178,37 @@ tts_play:
             stop_actions: false
           continue_on_error: true
 
-        - service: script.media_player_set_volumes
-          data:
-            source: tts_all # lower active media player volumes for tts
-            entity_id: >
-              {{ expand(state_attr('group.single_media_players','entity_id'))
-                  |rejectattr('entity_id','in',media_players)
-                  |map(attribute='entity_id')|list }}
-          continue_on_error: true
-
-        #BLOOP set tts player volumes to 0 before media play avoid google bloops
+        # try to lower volume of google bloops
         - service: media_player.volume_set
           target:
-            entity_id: "{{ media_players }}" # this sets all individual media player volumes instead of group
+            entity_id: "{{ active_players }}"
           data:
             volume_level: 0
           continue_on_error: true
 
-        #BLOOP tts players must be paused - prevent volume jump
+        #ISSUE tts players must be paused to prevent volume jump
         - service: script.media_players_pause
           target:
-            entity_id: "{{ media_players }}"
+            entity_id: "{{ active_players }}"
           continue_on_error: true
 
-        - delay: 1 #MASS for power bloop (volume 0)
+        # wait until all tts tts players are idle state to prevent volume jump
+        - wait_template: "{{ expand(active_players)|selectattr('state','in',['playing','buffering'])|list|count == 0 }}"
+          timeout: 10
 
-        #BLOOP turn on tts players so no bloop when turned on with tts play - bloop happens here when volume is 0
-        - if: "{{ expand(media_players)|selectattr('state','eq','off')|list|count > 0 }}"
-          then:
-            - service: media_player.turn_on
-              target:
-                entity_id: "{{ expand(media_players)|selectattr('state','eq','off')|map(attribute='entity_id')|list }}"
-              continue_on_error: true
+        - delay: 1 # still getting a volume jump, player buffer?
 
-        #ISSUE ensure tablet media player volume is set, has no mute - must be before muted players filtered out
-        - if: "{{ 'media_player.kiosk_internal' in media_players }}"
+        # set volume before player override volumes
+        #ISSUE no way to avoid google home volume pops here
+        - service: media_player.volume_set
+          target:
+            entity_id: "{{ active_players }}"
+          data:
+            volume_level: "{{ volume }}"
+          continue_on_error: true
+
+        #ISSUE ensure kiosk tablet media player volume is set, no mute - must be before muted players filtered out
+        - if: "{{ 'media_player.kiosk_internal' in active_players }}"
           then:
             - service: media_player.volume_set
               target:
@@ -217,29 +217,12 @@ tts_play:
                 volume_level: 0.8
               continue_on_error: true
 
-        #BLOOP wait until all tts tts players are idle state
-        - wait_template: "{{ expand(media_players)|selectattr('state','in',['playing','buffering'])|list|count == 0 }}"
-          timeout: 10
-
-        - service: automation.turn_on
-          target:
-            entity_id: automation.media_player_save_volume
-
-        # set volume on each tts message in case message volume set
-        # set volume before player override volumes
-        #ISSUE #BLOOP no way to avoid google home volume pops here
-        - service: media_player.volume_set
-          target:
-            entity_id: "{{ media_players }}"
-          data:
-            volume_level: "{{ volume }}"
-
         # volume exceptions - skip exceptions if alert (use alert volume)
         - if: "{{ not alert }}"
           then:
             # increase bathroom speaker volume if shower script is on
             - if: >
-                {{ 'media_player.bathroom_speaker' in media_players
+                {{ 'media_player.bathroom_speaker' in active_players
                       and is_state('switch.shower_scene','on') }}
               then:
                 - service: media_player.volume_set
@@ -272,21 +255,26 @@ tts_play:
                   {% endif %}
                 options:
                   gender: "{{ gender|default('female' if 'Female' in states('input_select.tts_cloud_voice') else 'male') }}"
-              continue_on_error: true
+              continue_on_error: true #ISSUE #MASS script does not continue if mass fails
           else:
             - service: "{{ tts_service }}"
               target:
                 entity_id: "{{ tts_player }}"
               data:
                 message: "{{ message }}"
-              continue_on_error: true
+              continue_on_error: true #ISSUE #MASS script does not continue if mass fails
 
-        - delay: 1 #MASS don't skip next wait_template
+        - delay: 1 # let mass queue clear
 
+        # wait for tts to start playing
+        - wait_template: "{{ state_attr(media_player,'media_position') > 0 }}"
+          timeout: 10
+
+        # wait for media player to start playing
         - wait_template: "{{ is_state(media_player,'playing') }}"
-          timeout: 30
+          timeout: 10
 
-        #MASS # message failed script if announcement is not playing after wait timeout
+        # tts failed script if announcement is not playing after wait timeout
         - if: "{{ not is_state(media_player,'playing') }}"
           then:
             - service: script.turn_on
@@ -295,20 +283,19 @@ tts_play:
               data:
                 variables:
                   tts_service: "{{ tts_service }}"
-                  media_player: "{{ tts_player }}"
+                  media_player: "{{ media_player }}"
+                  tts_player: "{{ tts_player }}"
                   message: "{{ message }}"
+              continue_on_error: true
           else:
-            - wait_template: "{{ not is_state(media_player,'playing') }}"
-              timeout: 120 # this is effectively the max tts message time
+            # wait for tts to stop playing
+            - wait_template: >
+                {{ state_attr(media_player,'media_position') == none
+                    or is_state_attr(media_player,'media_position',0) }}
+              timeout: 100 # + 20 (wait templates) is effectively the max tts message time
+              continue_on_timeout: false # tts finished triggered
 
-    # reset player overide player back to none if master override is off
-    - if:
-        - condition: state
-          entity_id: input_boolean.tts_override
-          state: "off"
-      then:
-        - service: select.select_option
-          target:
-            entity_id: select.tts_media_player_manual
-          data:
-            option: "None Selected"
+    # reset tts booleans
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.tts

@@ -86,7 +86,6 @@
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug
 - #NONE - notes about 'None' values
-- #BLOOP - google home bloop fixes
 - #LOCK_USER - lock user code
 - #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
 - #TV - TV notes
