@@ -10,39 +10,41 @@
 ##### <font color='cyan'>Updated 23-07-02</font>
 
 - Alarm_control_panel: 3
-- Alert: 103
-- Automation: 286
-- Binary_sensor: 423
-- Button: 92
+- Alert: 102
+- Automation: 301
+- Binary_sensor: 483
+- Button: 98
 - Calendar: 15
-- Camera: 22
+- Camera: 48
 - Climate: 5
 - Counter: 1
 - Cover: 1
-- Device_tracker: 51
+- Device_tracker: 157
 - Fan: 10
-- Group: 60
-- Input_boolean: 167
+- Group: 61
+- Input_boolean: 197
 - Input_button: 1
-- Input_datetime: 38
-- Input_number: 181
-- Input_select: 10
+- Input_datetime: 47
+- Input_number: 183
+- Input_select: 11
 - Input_text: 69
-- Light: 46
+- Light: 47
 - Lock: 4
-- Media_player: 26
-- Number: 23
+- Media_player: 42
+- Number: 487
 - Person: 1
 - Proximity: 1
 - Remote: 1
-- Scene: 9
-- Script: 79
-- Select: 74
-- Sensor: 993
+- Scene: 8
+- Script: 83
+- Select: 474
+- Sensor: 1392
+- Siren: 2
 - Sun: 1
-- Switch: 123
-- Timer: 55
-- Update: 127
+- Switch: 170
+- Timer: 54
+- Tts: 1
+- Update: 126
 - Weather: 8
 - Zone: 10
 
@@ -50,17 +52,20 @@
 
 ## INSTALLED ADDONS
 
+- Advanced SSH & Web Terminal
 - Chrony
+- Docker Wyze Bridge
 - File editor
 - Frigate NVR
 - Glances
 - Home Assistant Google Drive Backup
 - Log Viewer
-- MaryTTS
 - Mosquitto broker
+- MQTT Explorer
 - Music Assistant
-- Samba share
-- SSH & Web Terminal
+- Piper
+- Samba Share
+- SQite Web
 - Studio Code Server
 - UniFi Network Application
 - VLC
@@ -92,7 +97,6 @@
 - #ALARMO - alarmo issues/notes
 - #APEX - apex graph issues
 - #MASS - music assistant issues/notes
-- #SWITCH - state-switch issues
 - #INFO - info level log tag
 - #WARNING - warning level log tag
 - #ERROR - error level log tag

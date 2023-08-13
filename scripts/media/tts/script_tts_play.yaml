@@ -88,10 +88,10 @@ tts_play:
                 if is_state_attr(media_player,'type','group') else [media_player])
               |map(attribute='entity_id')|list }}
         tts_service: > # force local tts service if wan disconnected
-          {% if is_state('binary_sensor.wan_connected','off') %} {% set tts = 'tts.marytts_say' %}
+          {% if is_state('binary_sensor.wan_connected','off') %} {% set tts = 'tts.piper' %}
           {% elif alert %} {% set tts = 'tts.cloud_say' %}
           {% else %}
-            {% if is_state('input_select.tts_service','Mary TTS') %} {% set tts = 'tts.marytts_say' %}
+            {% if is_state('input_select.tts_service','Piper TTS') %} {% set tts = 'tts.piper' %}
             {% elif is_state('input_select.tts_service','Google Cloud') %} {% set tts = 'tts.google_cloud_say' %}
             {% else %} {% set tts = 'tts.cloud_say' %}
             {% endif %}
@@ -178,14 +178,6 @@ tts_play:
             stop_actions: false
           continue_on_error: true
 
-        # try to lower volume of google bloops
-        - service: media_player.volume_set
-          target:
-            entity_id: "{{ active_players }}"
-          data:
-            volume_level: 0
-          continue_on_error: true
-
         #ISSUE tts players must be paused to prevent volume jump
         - service: script.media_players_pause
           target:
@@ -232,31 +224,42 @@ tts_play:
                     volume_level: "{{ iif(is_state('binary_sensor.quiet_time','off'),0.9,0.6) }}"
 
         # play tts message
-        - if: "{{ tts_service == 'tts.cloud_say' }}"
-          then:
-            - service: tts.cloud_say
-              target:
-                entity_id: "{{ tts_player }}"
-              data:
-                message: "{{ message }}"
-                language: >
-                  {% if alert %} en-US
-                  {% else %}
-                    {% set voice = states('input_select.tts_cloud_voice') %}
-                    {% if 'en-AU' in voice %} {% set lang = 'en-AU' %}
-                    {% elif 'en-CA' in voice %} {% set lang = 'en-CA' %}
-                    {% elif 'en-IN' in voice %} {% set lang = 'en-IN' %}
-                    {% elif 'en-IE' in voice %} {% set lang = 'en-IE' %}
-                    {% elif 'en-GB' in voice %} {% set lang = 'en-GB' %}
-                    {% elif 'en-US' in voice %} {% set lang = 'en-US' %}
-                    {% else %} {% set lang = 'en-CA' %}
-                    {% endif %}
-                    {{ language|default(lang) }}
-                  {% endif %}
-                options:
-                  gender: "{{ gender|default('female' if 'Female' in states('input_select.tts_cloud_voice') else 'male') }}"
-              continue_on_error: true #ISSUE #MASS script does not continue if mass fails
-          else:
+        - choose:
+            - conditions: "{{ tts_service == 'tts.cloud_say' }}"
+              sequence:
+                - service: tts.cloud_say
+                  target:
+                    entity_id: "{{ tts_player }}"
+                  data:
+                    message: "{{ message }}"
+                    language: >
+                      {% if alert %} en-US
+                      {% else %}
+                        {% set voice = states('input_select.tts_cloud_voice') %}
+                        {% if 'en-AU' in voice %} {% set lang = 'en-AU' %}
+                        {% elif 'en-CA' in voice %} {% set lang = 'en-CA' %}
+                        {% elif 'en-IN' in voice %} {% set lang = 'en-IN' %}
+                        {% elif 'en-IE' in voice %} {% set lang = 'en-IE' %}
+                        {% elif 'en-GB' in voice %} {% set lang = 'en-GB' %}
+                        {% elif 'en-US' in voice %} {% set lang = 'en-US' %}
+                        {% else %} {% set lang = 'en-CA' %}
+                        {% endif %}
+                        {{ language|default(lang) }}
+                      {% endif %}
+                    options:
+                      gender: "{{ gender|default('female' if 'Female' in states('input_select.tts_cloud_voice') else 'male') }}"
+                  continue_on_error: true #ISSUE #MASS script does not continue if mass fails
+
+            - conditions: "{{ tts_service == 'tts.piper' }}"
+              sequence:
+                - service: tts.speak
+                  data:
+                    cache: true
+                    media_player_entity_id: "{{ tts_player }}"
+                    message: "{{ message }}"
+                  target:
+                    entity_id: tts.piper
+          default:
             - service: "{{ tts_service }}"
               target:
                 entity_id: "{{ tts_player }}"
@@ -267,7 +270,7 @@ tts_play:
         - delay: 1 # let mass queue clear
 
         # wait for tts to start playing
-        - wait_template: "{{ state_attr(media_player,'media_position') > 0 }}"
+        - wait_template: "{{ state_attr(media_player,'media_position')|float(-1) > 0 }}"
           timeout: 10
 
         # wait for media player to start playing
@@ -291,7 +294,7 @@ tts_play:
             # wait for tts to stop playing
             - wait_template: >
                 {{ state_attr(media_player,'media_position') == none
-                    or is_state_attr(media_player,'media_position',0) }}
+                    or state_attr(media_player,'media_position')|float(-1) == 0 }}
               timeout: 100 # + 20 (wait templates) is effectively the max tts message time
               continue_on_timeout: false # tts finished triggered
 

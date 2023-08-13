@@ -30,84 +30,81 @@
     - condition: template
       value_template: "{{ iif(camera == 'front_door','porch' in entered_zones,true) }}"
   action:
-    - if:
-        - condition: template
-          value_template: >
-            {{ is_state('input_boolean.object_tts_notifications','on')
-                and is_state('binary_sensor.someone_home','on')
-                and (is_state('binary_sensor.camera_object_tod','on')
-                  or camera in ['front_door','side_door']) }}
-      then:
-        - service: script.turn_on
-          target:
-            entity_id: script.tts_play
-          data:
-            variables:
-              media_player: media_player.kiosk_internal
-              min_volume: 60
-              quiet_play: true
-              night_play: true
-              tts_service: tts.cloud_say
-              gender: male
-              language: en-GB
-              message: >
-                {% if camera in ['front_door','side_door','back_door','patio_door','back_house',
-                    'side_gate_front','side_gate_back'] %}
-                  There is a {{ object }} at the {{ camera|replace('_',' ') }}!
-                {% elif camera in ['side_drive','front_drive'] %}
-                  There is a {{ object }} in the {{ camera|replace('_',' ') }}way!
-                {% elif camera in ['front_yard','back_yard'] %}
-                  There is a {{ object }} in the {{ camera|replace('_',' ') }}!
-                {% elif camera == 'garage_inside' %}
-                  There is a {{ object }} inside the garage!
-                {% else %}
-                  An object was detected!
-                {% endif %}
-          continue_on_error: true
+    - parallel:
+        - sequence:
+            - if:
+                - condition: template
+                  value_template: >
+                    {{ is_state('input_boolean.object_tts_notifications','on')
+                        and is_state('binary_sensor.someone_home','on')
+                        and (is_state('binary_sensor.camera_object_tod','on')
+                          or camera in ['front_door','side_door']) }}
+              then:
+                - service: script.tts_play
+                  data:
+                    media_player: media_player.kiosk_internal
+                    min_volume: 60
+                    quiet_play: true
+                    night_play: true
+                    tts_service: tts.piper
+                    gender: male
+                    language: en-GB
+                    message: >
+                      {% if camera in ['front_door','side_door','back_door','patio_door','back_house',
+                          'side_gate_front','side_gate_back'] %}
+                        There is a {{ object }} at the {{ camera|replace('_',' ') }}!
+                      {% elif camera in ['side_drive','front_drive'] %}
+                        There is a {{ object }} in the {{ camera|replace('_',' ') }}way!
+                      {% elif camera in ['front_yard','back_yard'] %}
+                        There is a {{ object }} in the {{ camera|replace('_',' ') }}!
+                      {% elif camera == 'garage_inside' %}
+                        There is a {{ object }} inside the garage!
+                      {% else %}
+                        An object was detected!
+                      {% endif %}
+                  continue_on_error: true
 
-        - service: script.turn_on
-          target:
-            entity_id: script.cast_camera
-          data:
-            variables:
-              camera: "{{ camera }}"
-          continue_on_error: true
+                - service: script.cast_camera
+                  data:
+                    camera: "{{ camera }}"
+                  continue_on_error: true
 
-    - if:
-        - condition: state
-          entity_id: input_boolean.object_mobile_notifications
-          state: "on"
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.object_mobile_notifications
+                  state: "on"
 
-        - condition: template
-          value_template: "{{ object != 'dog' }}"
-      then:
-        - service: notify.jason
-          data:
-            title: "{{ camera|replace('_',' ')|title }} Camera"
-            message: "A {{ object }} was detected @ {{ start_time|timestamp_custom('%-I:%M %p') }}."
-            data:
-              tag: "{{ id }}"
-              group: Alarm
-              channel: Alert
-              importance: max
-              ttl: 0
-              priority: high
-              visibility: public
-              when: "{{ start_time }}"
-              notification_icon: mdi:cctv
-              icon_url: !secret ALARM_ICON
-              image: "{{ states('input_text.base_url') }}/api/frigate/notifications/{{ id }}/thumbnail.jpg?format=android"
-              ledColor: !secret WARNING_COLOR
-              color: !secret WARNING_COLOR
-              vibrationPattern: !secret ALERT_VIBRATION
-              clickAction: "/lovelace/{{ camera|replace('_','-') ~ '-camera' }}"
-              actions:
-                - title: "Cameras"
-                  action: URI
-                  uri: !secret LOREX_URI
+                - condition: template
+                  value_template: "{{ object != 'dog' }}"
+              then:
+                - service: notify.jason
+                  data:
+                    title: "{{ camera|replace('_',' ')|title }} Camera"
+                    message: "A {{ object }} was detected @ {{ start_time|timestamp_custom('%-I:%M %p') }}."
+                    data:
+                      tag: "{{ id }}"
+                      group: Alarm
+                      channel: Alert
+                      importance: max
+                      ttl: 0
+                      priority: high
+                      visibility: private
+                      when: "{{ start_time }}"
+                      notification_icon: mdi:cctv
+                      icon_url: !secret ALARM_ICON
+                      image: "{{ states('input_text.base_url') }}/api/frigate/notifications/{{ id }}/thumbnail.jpg?format=android"
+                      ledColor: !secret WARNING_COLOR
+                      color: !secret WARNING_COLOR
+                      vibrationPattern: !secret ALERT_VIBRATION
+                      clickAction: "/lovelace/{{ camera|replace('_','-') ~ '-camera' }}"
+                      actions:
+                        - title: "Cameras"
+                          action: URI
+                          uri: !secret LOREX_URI
 
-                - title: "Disable Cam"
-                  action: "{{ camera }}_detection_off"
+                        - title: "Disable Cam"
+                          action: "{{ camera }}_detection_off"
 
-                - title: "Pause Alerts"
-                  action: pause_camera_object_notifications
+                        - title: "Pause Alerts"
+                          action: pause_camera_object_notifications

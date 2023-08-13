@@ -85,13 +85,17 @@
                 activate_timer: >
                   {{ is_state(entity,'off')
                       and now() - states[entity].last_changed > timedelta(seconds=2) }}
+                bypass_timer: true
+                reset: true
 
         # 1x up events
         - conditions: "{{ key_value == 'KeyPressed' and key_name == '002' }}"
           sequence:
+            #TEMP rgb lights turned on here until zwave group assostion
             - if: >
-                {{ is_state(entity,'on') and has_value(timer)
-                    and now() - states[entity].last_changed > timedelta(seconds=2) }}
+                {{ (is_state(entity,'on') and has_value(timer)
+                      and now() - states[entity].last_changed > timedelta(seconds=2))
+                    or entity in ['light.dining_room_light_rgb','light.bathroom_vanity_light_rgb'] }}
               then:
                 # required light state not changed for in_use_timer trigger
                 - service: timer.start
@@ -105,14 +109,6 @@
                     activate_timer: true
                     bypass_timer: true
 
-            - if: "{{ entity in ['light.dining_room_light_rgb','light.bathroom_vanity_light_rgb'] }}"
-              then:
-                - service: script.turn_light_on
-                  data:
-                    lights: "{{ entity }}"
-                    override: true
-                    activate_timer: true
-
         # 2x down events
         - conditions: "{{ key_value == 'KeyPressed2x' and key_name == '001' }}"
           sequence:
@@ -125,9 +121,20 @@
 
                 - conditions: "{{ entity == 'light.side_entrance_light' }}"
                   sequence:
-                    - service: input_boolean.toggle
-                      target:
-                        entity_id: input_boolean.charlie_home_alone
+                    - if: "{{ is_state('input_boolean.charlie_home_alone','on') }}"
+                      then:
+                        - service: input_boolean.turn_off
+                          target:
+                            entity_id: input_boolean.charlie_home_alone
+                      else:
+                        - wait_template: "{{ is_state('input_select.occupancy_mode','away') }}"
+                          timeout:
+                            minutes: 15
+                          continue_on_timeout: false
+
+                        - service: input_boolean.turn_on
+                          target:
+                            entity_id: input_boolean.charlie_home_alone
               default:
                 - service: script.turn_room_off
                   data:
@@ -307,6 +314,7 @@
                     - service: script.turn_light_off
                       data:
                         bypass_timer: true
+                        reset: true
 
                 - conditions: "{{ entity == 'light.dining_room_potlights' }}"
                   sequence:
