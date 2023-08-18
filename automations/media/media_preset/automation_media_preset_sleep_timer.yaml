@@ -1,14 +1,41 @@
 ###############################################################################
-## Media Preset - Sleep Finished
+## Media Preset - Sleep Preset Play
 ###############################################################################
-- id: media_preset_sleep_finished
-  alias: "[Media Preset] Sleep Timer Finished"
-  description: "Turn off preset booleans."
+- id: media_preset_sleep_preset_play
+  alias: "[Media Preset] Sleep Preset Play"
+  description: "Turn on sleep preset media player."
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to: Night
+      for: 60 # allow media player auto off to run
+  condition:
+    - condition: state
+      entity_id: input_boolean.media_preset_enabled_sleep
+      state: "on"
+  action:
+    - service: script.media_play
+      data:
+        preset: sleep
+
+###############################################################################
+## Media Preset - Stop
+###############################################################################
+- id: media_preset_stop
+  alias: "[Media Preset] Stop"
+  description: "Turn off preset media player."
   trigger:
     - platform: event
+      id: sleep
       event_type: timer.finished
       event_data:
         entity_id: timer.media_preset_sleep
+
+    - platform: event
+      id: wake
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.media_preset_wake
   condition:
     - condition: state
       entity_id: script.media_play
@@ -18,43 +45,60 @@
       data:
         entity_id: > # turns of both reg and mass players
           {{ states.media_player
-            |selectattr('name','eq',states('select.media_preset_speaker_sleep'))
+            |selectattr('name','eq',states('select.media_preset_speaker_' ~ trigger.id))
             |map(attribute='entity_id')|list }}
 
 ###############################################################################
-## Media Preset - Sleep Player Turned Off
+## Media Preset - Preset Player Turned Off
 ###############################################################################
-- id: media_preset_sleep_player_turned_off
-  alias: "[Media Preset] Sleep Player Turned Off"
-  description: "Turn off sleep player timer."
+- id: media_preset_preset_player_turned_off
+  alias: "[Media Preset] Preset Player Turned Off"
+  description: "Turn off preset timer."
   trigger:
     - platform: template
+      id: sleep
       value_template: >
         {% set sleep_player = expand('group.media_players')
           |selectattr('name','eq',states('select.media_preset_speaker_sleep'))
           |map(attribute='entity_id')|join('') %}
         {{ states(sleep_player) not in ['playing','paused']
             and is_state('timer.media_preset_sleep','active') }}
+      for: 5
+
+    - platform: template
+      id: wake
+      value_template: >
+        {% set sleep_player = expand('group.media_players')
+          |selectattr('name','eq',states('select.media_preset_speaker_wake'))
+          |map(attribute='entity_id')|join('') %}
+        {{ states(sleep_player) not in ['playing','paused']
+            and is_state('timer.media_preset_wake','active') }}
+      for: 5
   action:
     - service: timer.cancel
       data:
-        entity_id: timer.media_preset_sleep
+        entity_id: "timer.media_preset_{{ trigger.id }}"
 
 ###############################################################################
-## Media Preset - Sleep Time Changed
+## Media Preset - Preset Timer Changed
 ###############################################################################
-- id: media_preset_sleep_time_changed
-  alias: "[Media Preset] Sleep Time Changed"
-  description: "Restart sleep timer when sleep time control changed."
+- id: media_preset_preset_timer_changed
+  alias: "[Media Preset] Preset Timer Changed"
+  description: "Restart timer when time control changed."
   mode: restart
   trigger:
     - platform: state
+      id: sleep
       entity_id: input_number.media_preset_sleep_time
       to: ~
+
+    - platform: state
+      id: wake
+      entity_id: input_number.media_preset_wake_time
+      to: ~
   condition:
-    - condition: state
-      entity_id: timer.media_preset_sleep
-      state: active
+    - condition: template
+      value_template: "{{ is_state('timer.media_preset_' ~ trigger.id,'active') }}"
 
     - condition: state
       entity_id: script.media_play
@@ -62,7 +106,7 @@
   action:
     - service: timer.start
       target:
-        entity_id: timer.media_preset_sleep
+        entity_id: "timer.media_preset_{{ trigger.id }}"
       data:
         duration:
-          minutes: "{{ states('input_number.media_preset_sleep_time')|int(0) }}"
+          minutes: "{{ states('input_number.media_preset_' ~ trigger.id ~ '_time')|int(0) }}"

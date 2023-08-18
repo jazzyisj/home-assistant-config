@@ -87,11 +87,15 @@
       unique_id: camera_tamper_alert
       icon: mdi:cctv-off
       device_class: tamper
-      delay_on: 15
+      delay_on: 60
       state: >
-        {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ entities|count > 0 and is_state('input_boolean.camera_tamper_detection','on')
-            if entities != none else none }}
+        {% if now() - states('sensor.uptime')|as_datetime > timedelta(minutes=5) %}
+          {% set entities = state_attr(this.entity_id,'entity_id') %}
+          {{ entities|count > 0
+              and is_state('input_boolean.camera_tamper_detection','on')
+              and is_state('input_boolean.camera_alerts','on')
+                if entities != none else false }}
+        {% endif %}
       attributes:
         entity_id: >
           {{ expand('group.camera_tamper')
@@ -102,10 +106,12 @@
       unique_id: camera_stream_alert
       icon: mdi:cctv-off
       device_class: problem
-      delay_on: 15
       state: >
-        {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ entities|count > 0 if entities != none else none }}
+        {% if now() - states('sensor.uptime')|as_datetime > timedelta(minutes=5) %}
+          {% set entities = state_attr(this.entity_id,'entity_id') %}
+          {{ entities|count > 0 if entities != none
+              and is_state('input_boolean.camera_alerts','on') else false }}
+        {% endif %}
       attributes:
         entity_id: >
           {{ expand(integration_entities('frigate'))
@@ -119,32 +125,40 @@
       unique_id: camera_offline_alert
       icon: mdi:cctv-off
       device_class: problem
-      delay_on: 15
       state: >
-        {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ entities|count > 0 if entities != none else none }}
+        {% if now() - states('sensor.uptime')|as_datetime > timedelta(minutes=5) %}
+          {% set entities = state_attr(this.entity_id,'entity_id') %}
+          {{ entities|count > 0 if entities != none
+              and is_state('input_boolean.camera_alerts','on') else false }}
+        {% endif %}
       attributes:
-        entity_id: >
+        entity_id: > # wyze cams ignored - turned off when somebody home
           {% set frigate = expand(integration_entities('frigate'))
               |selectattr('domain','eq','camera')
               |rejectattr('entity_id','search','_person|_dog|_car')
               |map(attribute='entity_id')|reject('has_value')|list %}
-          {% set others = expand(['camera.charlie_crate','camera.living_room','camera.kiosk_internal'])
+          {% set ipcams = states.device_tracker|selectattr('name','search','IPCAM')
+              |selectattr('state','ne','home')|map(attribute='entity_id')|list %}
+          {% set wyze = expand(['camera.charlie_crate','camera.living_room'])
               |map(attribute='entity_id')|reject('has_value')|list %}
-          {{ (frigate + others)|sort }}
+          {% set others = expand(['camera.kiosk_internal'])
+              |map(attribute='entity_id')|reject('has_value')|list %}
+          {{ (frigate + ipcams + others)|sort }}
 
     - name: "Camera Object Detected"
       unique_id: camera_object_detected
       icon: mdi:motion-sensor
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ entities|count > 0 if entities != none else none }}
+        {{ entities|count > 0 if entities != none
+            and is_state('input_boolean.camera_alerts','on') else none }}
       attributes:
         entity_id: >
           {{ expand(integration_entities('frigate'))
               |selectattr('entity_id','search','_all_count')
               |selectattr('state','gt','0')
               |map(attribute='entity_id')|list|sort }}
+
 - sensor:
     - name: "Frigate Clips Size Status"
       unique_id: frigate_clips_size_status

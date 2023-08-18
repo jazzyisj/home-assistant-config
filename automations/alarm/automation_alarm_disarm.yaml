@@ -63,103 +63,111 @@
     - condition: state
       entity_id: input_boolean.alarm_enabled
       state: "on"
-
-    - condition: template
-      alias: "An alarm zones is not disarmed"
-      value_template: >
-        {{ not is_state('alarm_control_panel.house','disarmed')
-            or not is_state('alarm_control_panel.garage','disarmed') }}
   action:
     - if:
-        - condition: trigger
-          alias: "Alarm was disarmed with a lock keypad"
-          id: lock
+        - condition: template
+          alias: "An alarm zones is not disarmed"
+          value_template: >
+            {{ not is_state('alarm_control_panel.house','disarmed')
+                or not is_state('alarm_control_panel.garage','disarmed') }}
       then:
-        - service: script.disarm_alarm
-          data:
-            person: "{{ person }}"
-            zone: master
-      else:
-        - wait_template: > #TEMP #ISSUE locked sensor not updating fast enough
-            {% if person == 'jason' %}
-              {{ (states('binary_sensor.jphone_device_locked') in ['on','off']
-                    and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')))
-                  or is_state('alarm_control_panel.master','disarmed') }}
-            {% endif %}
+        - if:
+            - condition: trigger
+              alias: "Alarm was disarmed with a lock keypad"
+              id: lock
+          then:
+            - service: script.disarm_alarm
+              data:
+                person: "{{ person }}"
+                zone: master
+          else:
+            - wait_template:
+                > #TEMP #ISSUE locked sensor not updating fast enough
+                {% if person == 'jason' %}
+                  {{ (states('binary_sensor.jphone_device_locked') in ['on','off']
+                        and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')))
+                      or is_state('alarm_control_panel.master','disarmed') }}
+                {% endif %}
+              timeout:
+                minutes: 5
+
+            - if:
+                - not:
+                    - condition: state
+                      entity_id: alarm_control_panel.master
+                      state: disarmed
+              then:
+                - if: "{{ wait.completed }}" # device unlocked
+                  then:
+                    - service: script.disarm_alarm
+                      data:
+                        person: "{{ person }}"
+                        zone: master
+                  else:
+                    - service: browser_mod.notification
+                      data:
+                        duration: 30000
+                        message: "{{ person|title }} attempted to disarm the alarm with a locked device."
+
+                    - service: notify.jason
+                      data:
+                        title: "Locked Device"
+                        message: "{{ person|title }} attempted to disarm the alarm with a locked device."
+                        data:
+                          tag: "{{ person }}_locked_device"
+                          group: Alarm
+                          channel: Alert
+                          importance: max
+                          ttl: 0
+                          priority: high
+                          visibility: private
+                          timeout: 3600
+                          notification_icon: mdi:shield-alert
+                          icon_url: !secret ALERT_ICON
+                          ledColor: !secret WARNING_COLOR
+                          color: !secret WARNING_COLOR
+                          vibrationPattern: !secret ALERT_VIBRATION
+                          clickAction: /ui-mobile/alarm
+                          actions:
+                            - title: "Alarm"
+                              action: URI
+                              uri: !secret ALARM_URI
+
+                            - title: "Cameras"
+                              action: URI
+                              uri: !secret LOREX_URI
+
+        # wait, then rearm alarm if nobody home/night mode and not already rearmed
+        - wait_template: >
+            {{ not is_state('alarm_control_panel.house','disarmed') if trigger.id == 'lock'
+                else not is_state('alarm_control_panel.master','disarmed') }}
           timeout:
             minutes: 5
 
-        - if:
-            - not:
+        - choose:
+            - conditions:
                 - condition: state
-                  entity_id: alarm_control_panel.master
-                  state: disarmed
-          then:
-            - if: "{{ wait.completed }}" # device unlocked
-              then:
-                - service: script.disarm_alarm
+                  entity_id: binary_sensor.someone_home
+                  state: "off"
+              sequence:
+                - service: script.arm_alarm
                   data:
-                    person: "{{ person }}"
-                    zone: master
-              else:
-                - service: browser_mod.notification
+                    mode: away
+
+            - conditions:
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Night
+              sequence:
+                - service: script.arm_alarm
                   data:
-                    duration: 30000
-                    message: "{{ person|title }} attempted to disarm the alarm with a locked device."
-
-                - service: notify.jason
-                  data:
-                    title: "Locked Device"
-                    message: "{{ person|title }} attempted to disarm the alarm with a locked device."
-                    data:
-                      tag: "{{ person }}_locked_device"
-                      group: Alarm
-                      channel: Alert
-                      importance: max
-                      ttl: 0
-                      priority: high
-                      visibility: private
-                      timeout: 3600
-                      notification_icon: mdi:shield-alert
-                      icon_url: !secret ALERT_ICON
-                      ledColor: !secret WARNING_COLOR
-                      color: !secret WARNING_COLOR
-                      vibrationPattern: !secret ALERT_VIBRATION
-                      clickAction: /ui-mobile/alarm
-                      actions:
-                        - title: "Alarm"
-                          action: URI
-                          uri: !secret ALARM_URI
-
-                        - title: "Cameras"
-                          action: URI
-                          uri: !secret LOREX_URI
-
-    # wait, then rearm alarm if nobody home/night mode and not already rearmed
-    - wait_template: >
-        {{ not is_state('alarm_control_panel.house','disarmed') if trigger.id == 'lock'
-            else not is_state('alarm_control_panel.master','disarmed') }}
-      timeout:
-        minutes: 5
-
-    - choose:
-        - conditions:
-            - condition: state
-              entity_id: binary_sensor.someone_home
-              state: "off"
-          sequence:
-            - service: script.arm_alarm
-              data:
-                mode: away
-
-        - conditions:
-            - condition: state
-              entity_id: input_select.occupancy_mode
-              state: Night
-          sequence:
-            - service: script.arm_alarm
-              data:
-                mode: night
+                    mode: night
+      else:
+        - service: "notify.{{ person }}"
+          data:
+            message: clear_notification
+            data:
+              tag: "{{ person }}_arriving_home"
 
 ###############################################################################
 ## Alarm - Danger Warning Disarm
