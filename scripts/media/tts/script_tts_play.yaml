@@ -165,6 +165,13 @@ tts_play:
           target:
             entity_id: input_boolean.tts
 
+        # store tts players for tts queue finished
+        - service: input_text.set_value
+          target:
+            entity_id: input_text.tts_active_players
+          data:
+            value: "{{ media_players|join(',') }}"
+
         #MASS media playing on tts player, turn on resume boolean
         - if:
             - condition: state
@@ -216,44 +223,35 @@ tts_play:
                 entity_id: input_boolean.resume_mass
 
             # create queue snapshot for mass players
-            - repeat:
-                for_each: "{{ mass_queues }}"
-                sequence:
-                  - service: mass.queue_command
-                    data:
-                      player_id: "{{ mass_queues[repeat.index-1] }}"
-                      command: snapshot_create #MASS #TODO not working
+            # - repeat:
+            #     for_each: "{{ mass_queues }}"
+            #     sequence:
+            #       - service: mass.queue_command
+            #         data:
+            #           player_id: "{{ mass_queues[repeat.index-1] }}"
+            #           command: snapshot_create #MASS #TODO not working
 
         - service: script.media_player_set_volumes
           data:
             source: tts_all # lower active media player volumes for tts
           continue_on_error: true
 
-        - service: automation.turn_off
-          target:
-            entity_id: automation.media_player_save_volume
+        - service: script.media_players_pause
           data:
-            stop_actions: false
+            entity_id: "{{ media_player }}"
+          continue_on_error: true
+
+        - service: script.turn_media_player_on
+          data:
+            entity_id: "{{ media_player }}"
           continue_on_error: true
 
         # filter out muted media players so we don't unmute (player must be on for is_volume_muted)
         - variables:
-            muted_players: >
-              {{ expand(media_players)|selectattr('attributes.is_volume_muted','defined')|selectattr('attributes.is_volume_muted','eq',true)|map(attribute='entity_id')|list }}
             active_players: >
+              {% set muted_players = expand(media_players)|selectattr('attributes.is_volume_muted','defined')
+                |selectattr('attributes.is_volume_muted','eq',true)|map(attribute='entity_id')|list %}
               {{ expand(media_players)|rejectattr('entity_id','in',muted_players)|map(attribute='entity_id')|list }}
-
-        #ISSUE tts players must be paused to prevent volume jump
-        - service: script.media_players_pause
-          target:
-            entity_id: "{{ active_players }}"
-          continue_on_error: true
-
-        # wait until all tts tts players are idle state to prevent volume jump
-        - wait_template: "{{ expand(active_players)|selectattr('state','in',['playing','buffering'])|list|count == 0 }}"
-          timeout: 10
-
-        - delay: 1 # still getting a volume jump, player buffer?
 
         # set volume before player override volumes
         #ISSUE no way to avoid google home volume pops here
@@ -287,6 +285,8 @@ tts_play:
                     entity_id: media_player.bathroom_speaker
                   data:
                     volume_level: "{{ iif(is_state('binary_sensor.quiet_time','off'),0.9,0.6) }}"
+
+        - delay: 1 # allow volumes to set
 
         # play tts message
         - choose:
@@ -332,15 +332,9 @@ tts_play:
                 message: "{{ message }}"
               continue_on_error: true #ISSUE #MASS script does not continue if mass fails
 
-        - delay: 1 # let mass queue clear
-
-        # wait for tts player media position to zero
-        - wait_template: "{{ state_attr(media_player,'media_position')|float(-1) > 0 }}"
-          timeout: 10
-
         # wait for media player to start playing
         - wait_template: "{{ is_state(media_player,'playing') }}"
-          timeout: 10
+          timeout: 30
 
         # tts failed script if announcement is not playing after wait timeout
         - if: "{{ not is_state(media_player,'playing') }}"
@@ -356,9 +350,6 @@ tts_play:
                   message: "{{ message }}"
               continue_on_error: true
           else:
-            # wait for tts to stop playing
-            - wait_template: >
-                {{ state_attr(media_player,'media_position') == none
-                    or state_attr(media_player,'media_position')|float(-1) == 0 }}
-              timeout: 100 # + 20 (wait templates) is effectively the max tts message time
-              continue_on_timeout: false # tts finished triggered
+            # wait for media player to stop playing
+            - wait_template: "{{ not is_state(media_player,'playing') }}"
+              timeout: 120 # longest possible tts message

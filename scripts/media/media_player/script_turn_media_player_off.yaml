@@ -1,8 +1,8 @@
 ###############################################################################
-## Media Players Off
+## Turn Media Player Off
 ###############################################################################
-media_players_off:
-  alias: "Media Players Off"
+turn_media_player_off:
+  alias: "Turn Media Player Off"
   description: "Stop/turn off media players."
   mode: parallel
   fields:
@@ -12,31 +12,27 @@ media_players_off:
     ignore_players:
       description: "List of media players to ignore"
       example: "['media_player.bedroom_tv','media_player.office_tv']"
+    reset_volume:
+      description: "Reset player volumes to default"
+      example: "true"
     mass:
       description: "MASS players only"
       example: "true"
   variables:
-    mass: "{{ mass|default(false) }}"
-    ignore_players: "{{ ignore_players|default([]) }}"
     media_players: >
-      {% if mass %}
-        {{ expand(entity_id|default(state_attr('binary_sensor.mass_media','entity_id')))
-            |selectattr('state','in',['playing','paused','buffering','on','idle'])
-            |rejectattr('entity_id','in',ignore_players)
-            |map(attribute='entity_id')|list }}
-      {% else %}
-        {{ expand(entity_id|default(state_attr('group.single_media_players','entity_id')))
-            |rejectattr('entity_id','in',ignore_players)
-            |map(attribute='entity_id')|list }}
-      {% endif %}
+      {{ expand(entity_id
+          |default(state_attr(iif(mass|default(false)
+            ,'binary_sensor.mass_media','group.single_media_players'),'entity_id')))
+          |selectattr('state','in',['playing','paused','buffering','on','idle'])
+          |rejectattr('entity_id','in',ignore_players|default([]))
+          |map(attribute='entity_id')|list }}
   sequence:
-    #BITWISE bitwise_and filter https://community.home-assistant.io/t/need-test-for-bitwise-and/412986
     - if: "{{ media_players|count > 0 }}"
       then:
         - variables:
             players_off: > #BITWISE
               {% set players = namespace(entity_id=[]) %}
-              {% for item in expand(media_players)|selectattr('state','in',['playing','paused','buffering','on','idle']) %}
+              {% for item in expand(media_players) %}
                 {% if item.attributes.supported_features|bitwise_and(256) %}
                   {% set players.entity_id = players.entity_id + [item.entity_id] %}
                 {% endif %}
@@ -72,14 +68,15 @@ media_players_off:
                   target:
                     entity_id: "{{ players_stop }}"
 
-        # keep script on until all players are off
-        # don't include idle/standby state - vlc, browser players always idle, roku - standby
+        # prevent volume jump, wait until all players are off
         - wait_template: >
             {{ expand(media_players)|selectattr('state','in',['playing','paused','buffering','on'])
                 |map(attribute='entity_id')|list|count == 0 }}
           timeout: 10
 
-        - service: script.media_player_set_volumes
-          data:
-            entity_id: "{{ media_players }}"
-            source: reset
+        - if: "{{ reset_volume|default(true) }}"
+          then:
+            - service: script.media_player_set_volumes
+              data:
+                entity_id: "{{ media_players }}"
+                source: reset

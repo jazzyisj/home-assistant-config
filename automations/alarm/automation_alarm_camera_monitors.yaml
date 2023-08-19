@@ -21,13 +21,16 @@
     - if: "{{ not danger }}"
       then:
         - service: media_player.turn_on
-          entity_id: media_player.bedroom_tv
+          target:
+            entity_id: media_player.bedroom_tv
 
-        # if office tv unavailable - Error while executing automation automation.alarm_camera_monitors: Unable to find service remote.turn_on
+        #ISSUE roku sometimes unavailable
         - if: "{{ has_value('media_player.office_tv') }}"
           then:
-            - service: remote.turn_on
-              entity_id: remote.office_tv
+            - service: media_player.turn_on
+              target:
+                entity_id: media_player.office_tv
+              continue_on_error: true
 
     # wait for source lists to be available
     - if: "{{ danger }}"
@@ -49,19 +52,10 @@
             entity_id: media_player.bedroom_hub
             view_path: danger
 
-        - wait_template: "{{ 'HDMI 2' in state_attr('media_player.living_room_tv','source_list') }}"
-          timeout: 60 #BUG wait for connection #IDEA wired connection for TV's
-      else:
-        - wait_template: >
-            {{ 'HDMI 1' in state_attr('media_player.living_room_tv','source_list')
-                and 'HDMI 1' in state_attr('media_player.bedroom_tv','source_list')
-                and 'Camera' in state_attr('media_player.office_tv','source_list') }}
-          timeout: 60 #BUG wait for connection #IDEA wired connection for TV's
+        - wait_template: "{{ 'HDMI 2' in state_attr('media_player.living_room_tv','source_list')}}"
+          timeout: 90
 
-    #BUG #TV webos tv's won't turn off after alarm if source not changed
-    - if: "{{ danger }}"
-      then:
-        - if: "{{ 'HDMI 2' in state_attr('media_player.living_room_tv','source_list') }}"
+        - if: "{{ wait.completed }}"
           then:
             - service: media_player.select_source
               target:
@@ -74,62 +68,59 @@
                 dashboard_path: lovelace-cast
                 entity_id: media_player.living_room_chromecast
                 view_path: danger
+
+      # tv's won't turn off after alarm if source didn't change here
       else:
-        - if: "{{ 'HDMI 1' in state_attr('media_player.living_room_tv','source_list') }}"
-          then:
-            - service: media_player.select_source
-              target:
-                entity_id: media_player.living_room_tv
-              data:
-                source: HDMI 1 # security cameras
+        - parallel:
+            - sequence:
+                - wait_template: >
+                    {{ is_state('media_player.living_room_tv','on')
+                        and 'HDMI 1' in state_attr('media_player.living_room_tv','source_list') }}
+                  timeout: 90
 
-        - if: "{{ 'HDMI 1' in state_attr('media_player.bedroom_tv','source_list') }}"
-          then:
-            - service: media_player.select_source
-              target:
-                entity_id: media_player.bedroom_tv
-              data:
-                source: HDMI 1 # security cameras
+                - if: "{{ wait.completed }}"
+                  then:
+                    - delay: 5
 
-        - if: "{{ 'Camera' in state_attr('media_player.office_tv','source_list') }}"
-          then:
-            - service: media_player.select_source
-              target:
-                entity_id: media_player.office_tv
-              data:
-                source: Camera # security cameras
+                    - service: media_player.select_source
+                      target:
+                        entity_id: media_player.living_room_tv
+                      data:
+                        source: HDMI 1 # security cameras
 
-        - enabled: false #DISABLED #BUG lovelace cast not working on office chromecast
-          service: cast.show_lovelace_view
-          data:
-            dashboard_path: lovelace-cast
-            entity_id: media_player.office_chromecast
-            view_path: danger
+            - sequence:
+                - wait_template: >
+                    {{ is_state('media_player.bedroom_tv','on')
+                        and 'HDMI 1' in state_attr('media_player.bedroom_tv','source_list') }}
+                  timeout: 90
 
-        #ERROR (SyncWorker_11) [homeassistant.util.logging] Exception in _handle_signal_show_view when dispatching 'cast_show_view': (<pychromecast.controllers.homeassistant.HomeAssistantController object at 0xffff43704d90>, 'media_player.office_chromecast', 'front_door', 'lovelace-cast')
-        # Traceback (most recent call last):
-        #   File "/usr/src/homeassistant/homeassistant/components/cast/media_player.py", line 875, in _handle_signal_show_view
-        #     self._hass_cast_controller.show_lovelace_view(view_path, url_path)
-        #   File "/usr/local/lib/python3.9/site-packages/pychromecast/controllers/homeassistant.py", line 118, in show_lovelace_view
-        #     self._send_connected_message(
-        #   File "/usr/local/lib/python3.9/site-packages/pychromecast/controllers/homeassistant.py", line 129, in _send_connected_message
-        #     self._connect_hass(
-        #   File "/usr/local/lib/python3.9/site-packages/pychromecast/controllers/homeassistant.py", line 102, in _connect_hass
-        #     raise PyChromecastError()
-        # pychromecast.error.PyChromecastError
+                - if: "{{ wait.completed }}"
+                  then:
+                    - delay: 5
+
+                    - service: media_player.select_source
+                      target:
+                        entity_id: media_player.bedroom_tv
+                      data:
+                        source: HDMI 1 # security cameras
+
+            - sequence:
+                - wait_template: "{{ 'Camera' in state_attr('media_player.office_tv','source_list')}}"
+                  timeout: 90
+
+                - if: "{{ wait.completed }}"
+                  then:
+                    - delay: 1
+
+                    - service: media_player.select_source
+                      target:
+                        entity_id: media_player.office_tv
+                      data:
+                        source: Camera # security cameras
 
     - wait_template: >
         {{ is_state('input_boolean.alarm_triggered','off')
             and is_state('binary_sensor.danger_alarm','off') }}
-
-    #TV source changes not detected on webos
-    - service: homeassistant.update_entity
-      target:
-        entity_id:
-          - media_player.living_room_tv
-          - media_player.bedroom_tv
-
-    - delay: 10 # wait for update
 
     # if tv source still camera/chromecast, turn it off
     - if: "{{ state_attr('media_player.living_room_tv','source') in ['HDMI 1','HDMI 2'] }}"
@@ -170,6 +161,5 @@
           target:
             entity_id:
               - media_player.living_room_chromecast
-              # - media_player.office_chromecast #DISABLED #BUG lovelace cast not working on office chromecast
-              - media_player.dining_room_hub # stop casting
-              - media_player.bedroom_hub # stop casting
+              - media_player.dining_room_hub # stops casting
+              - media_player.bedroom_hub # stops casting

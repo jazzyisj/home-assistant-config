@@ -93,76 +93,80 @@
           entity_id: *alarms
           state: *bad_states
 
-    - if:
-        - "{{ is_state('input_boolean.occupancy_announcements','on')
-          if trigger.id == 'occupancy' else true }}"
-        - "{{ is_state('input_boolean.alarm_announcements','on')
-          if trigger.id in ['armed','disarmed'] else true }}"
-      then:
-        - service: script.turn_on
-          target:
-            entity_id: script.tts_play
-          data:
-            variables:
-              message: >
-                {%- if occupancy_changed -%}
-                The house is now in {{ states('input_select.occupancy_mode') }} mode
-                {%- endif %}
-                {%- if occupancy_changed and alarm_changed %}, and the{% elif occupancy_changed %}.{% elif alarm_changed %} The{% endif %}
-                {%- if alarm_changed %} {{ iif(zone != 'master',zone,'') }} alarm is {{ states('sensor.master_alarm_status') }}.{% endif %}
-                {{ 'Personalized occupant automations are disabled in Guest mode.' if states('input_select.occupancy_mode') == 'Guest' }}
-              ignore_away: true
-          continue_on_error: true
+    - parallel:
+        - sequence:
+            - if:
+                - "{{ is_state('input_boolean.occupancy_announcements','on')
+                  if trigger.id == 'occupancy' else true }}"
+                - "{{ is_state('input_boolean.alarm_announcements','on')
+                  if trigger.id in ['armed','disarmed'] else true }}"
+              then:
+                - service: script.tts_play
+                  data:
+                    message: >
+                      {%- if occupancy_changed -%}
+                      The house is now in {{ states('input_select.occupancy_mode') }} mode
+                      {%- endif %}
+                      {%- if occupancy_changed and alarm_changed %}, and the{% elif occupancy_changed %}.{% elif alarm_changed %} The{% endif %}
+                      {%- if alarm_changed %} {{ iif(zone != 'master',zone,'') }} alarm is {{ states('sensor.master_alarm_status') }}.{% endif %}
+                      {{ 'Personalized occupant automations are disabled in Guest mode.' if states('input_select.occupancy_mode') == 'Guest' }}
+                    ignore_away: true
+                  continue_on_error: true
 
-    - if:
-        - condition: state
-          entity_id: input_boolean.occupancy_notifications
-          state: "on"
-      then:
-        - service: notify.jason
-          data:
-            title: "{{ iif(is_state('input_boolean.alarm_triggered','on'),'Alarm Triggered','House Mode') }}"
-            message: > # font color doesn't work on some devices
-              <b>Occupancy Mode:</b> {{ states('input_select.occupancy_mode') }}<br/><b>Home:</b>
-              {%- if is_state('binary_sensor.someone_home','off') %} Nobody{% endif -%}
-              {%- if is_state('binary_sensor.jason_home','on') %} Jason{% endif -%}
-              {%- if is_state('binary_sensor.jason_home','on') and is_state('input_boolean.guest_home','on') %},{% endif -%}
-              {%- if is_state('input_boolean.guest_home','on') %} Guest{% endif -%}
-              {%- if is_state('input_boolean.charlie_home_alone','on') %}<br/><b>Charlie Alone:</b> On!{% endif -%}
-              <br/><b>Alarm Mode:</b> {{ states('sensor.master_alarm_status') }}
-              {%- if is_state('input_boolean.alarm_triggered','on') -%}
-                <br/><b>Alarm Trigger</b>: <span style="color:red">{{ states('input_text.current_alarm') }}</span>
-                <br/><b>Disarmed By</b>: {{ states('input_text.alarm_disarmed_by') -}}
-              {%- endif -%}
-              {%- if zone != 'master' -%}
-                <br/><b>House Alarm</b>: <span style="color:red">{{ states('sensor.house_alarm_status') }}</span><br/><b>Garage Alarm</b>: <span style="color:red">{{ states('sensor.garage_alarm_status') }}</span>
-              {%- endif -%}
+                - wait_template: "{{ is_state('input_boolean.tts','off') }}"
+                  timeout: 60
 
-            data:
-              subject: "Occupancy Mode: {{ states('input_select.occupancy_mode') }}"
-              tag: occupancy_notification
-              group: General
-              channel: General
-              importance: max
-              ttl: 0
-              priority: high
-              visibility: private
-              notification_icon: "{{ states.input_select.occupancy_mode.attributes.icon }}"
-              icon_url: !secret OCCUPANCY_ICON
-              ledColor: !secret NOTIFY_COLOR
-              color: !secret NOTIFY_COLOR
-              vibrationPattern: !secret GENERAL_VIBRATION
-              clickAction: /ui-mobile/presence
-              actions:
-                - title: "Home"
-                  action: set_home_mode
+                - event: occupancy_notification
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.occupancy_notifications
+                  state: "on"
+              then:
+                - service: notify.jason
+                  data:
+                    title: "{{ iif(is_state('input_boolean.alarm_triggered','on'),'Alarm Triggered','House Mode') }}"
+                    message: > # font color doesn't work on some devices
+                      <b>Occupancy Mode:</b> {{ states('input_select.occupancy_mode') }}<br/><b>Home:</b>
+                      {%- if is_state('binary_sensor.someone_home','off') %} Nobody{% endif -%}
+                      {%- if is_state('binary_sensor.jason_home','on') %} Jason{% endif -%}
+                      {%- if is_state('binary_sensor.jason_home','on') and is_state('input_boolean.guest_home','on') %},{% endif -%}
+                      {%- if is_state('input_boolean.guest_home','on') %} Guest{% endif -%}
+                      {%- if is_state('input_boolean.charlie_home_alone','on') %}<br/><b>Charlie Alone:</b> On!{% endif -%}
+                      <br/><b>Alarm Mode:</b> {{ states('sensor.master_alarm_status') }}
+                      {%- if is_state('input_boolean.alarm_triggered','on') -%}
+                        <br/><b>Alarm Trigger</b>: <span style="color:red">{{ states('input_text.current_alarm') }}</span>
+                        <br/><b>Disarmed By</b>: {{ states('input_text.alarm_disarmed_by') -}}
+                      {%- endif -%}
+                      {%- if zone != 'master' -%}
+                        <br/><b>House Alarm</b>: <span style="color:red">{{ states('sensor.house_alarm_status') }}</span><br/><b>Garage Alarm</b>: <span style="color:red">{{ states('sensor.garage_alarm_status') }}</span>
+                      {%- endif -%}
+                    data:
+                      subject: "Occupancy Mode: {{ states('input_select.occupancy_mode') }}"
+                      tag: occupancy_notification
+                      group: General
+                      channel: General
+                      importance: max
+                      ttl: 0
+                      priority: high
+                      visibility: private
+                      notification_icon: "{{ states.input_select.occupancy_mode.attributes.icon }}"
+                      icon_url: !secret OCCUPANCY_ICON
+                      ledColor: !secret NOTIFY_COLOR
+                      color: !secret NOTIFY_COLOR
+                      vibrationPattern: !secret GENERAL_VIBRATION
+                      clickAction: /ui-mobile/presence
+                      actions:
+                        - title: "Home"
+                          action: set_home_mode
 
-                - title: "Away"
-                  action: set_away_mode
+                        - title: "Away"
+                          action: set_away_mode
 
-                - title: "Alarm"
-                  action: URI
-                  uri: !secret ALARM_URI
+                        - title: "Alarm"
+                          action: URI
+                          uri: !secret ALARM_URI
+                  continue_on_error: true
 
 ###############################################################################
 ## Presence - Turn Off Occupancy Notifications
