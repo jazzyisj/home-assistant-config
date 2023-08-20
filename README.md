@@ -7,46 +7,46 @@
 
 ## ENTITY COUNTS
 
-##### <font color='cyan'>Updated 23-08-19</font>
+##### <font color='cyan'>Updated 23-08-20</font>
 
-- alarm_control_panel: 3
-- alert: 107
-- automation: 298
-- binary_sensor: 500
-- button: 98
-- calendar: 15
-- camera: 51
-- climate: 5
-- counter: 1
-- cover: 1
-- device_tracker: 71
-- fan: 10
-- group: 27
-- input_boolean: 198
-- input_button: 1
-- input_datetime: 47
-- input_number: 182
-- input_select: 11
-- input_text: 71
-- light: 47
-- lock: 4
-- media_player: 42
-- number: 493
-- person: 1
-- proximity: 1
-- remote: 1
-- scene: 8
-- script: 84
-- select: 474
-- sensor: 1418
-- siren: 2
-- sun: 1
-- switch: 185
-- timer: 55
-- tts: 1
-- update: 125
-- weather: 8
-- zone: 10
+- alarm_control_panel - 3
+- alert - 107
+- automation - 298
+- binary_sensor - 497
+- button - 99
+- calendar - 15
+- camera - 51
+- climate - 5
+- counter - 1
+- cover - 1
+- device_tracker - 71
+- fan - 10
+- group - 61
+- input_boolean - 198
+- input_button - 1
+- input_datetime - 47
+- input_number - 182
+- input_select - 11
+- input_text - 71
+- light - 48
+- lock - 4
+- media_player - 42
+- number - 493
+- person - 1
+- proximity - 1
+- remote - 1
+- scene - 8
+- script - 84
+- select - 474
+- sensor - 1418
+- siren - 2
+- sun - 1
+- switch - 184
+- timer - 55
+- tts - 1
+- update - 125
+- weather - 8
+- zone - 10
 
 ---
 
