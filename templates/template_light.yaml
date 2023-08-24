@@ -53,21 +53,32 @@
               |map(attribute='entity_id')|list|sort }}
 
     # delay on/off prevent trigger when ill sensor <> threshold rapidly
+    # cloud factor = cloud percent * (1 - 10 adjustment) * 20 up to 20000 lux reduction
     - name: "Daytime Illuminance Lights"
       unique_id: daytime_illuminance_lights
       icon: mdi:brightness-7
-      delay_on:
-        minutes: 2
-      delay_off:
-        minutes: 15
-      # cloud factor = 100% = 20,000 lux #VERIFY
+      delay_on: >
+        {% set update = true if now() - states('sensor.uptime')|as_datetime < timedelta(minutes=5)
+              or now() - states.input_boolean.day_lights_enabled.last_changed < timedelta(seconds=60)
+              or now() - states.input_number.day_illuminance_cloud_factor.last_changed < timedelta(seconds=60)
+              or now() - states.input_number.day_illuminance_threshold.last_changed < timedelta(seconds=60)
+            else false %}
+        {{ iif(update,0,120) }}
+      delay_off: >
+        {% set update = true if now() - states('sensor.uptime')|as_datetime < timedelta(minutes=5)
+              or now() - states.input_boolean.day_lights_enabled.last_changed < timedelta(seconds=60)
+              or now() - states.input_number.day_illuminance_cloud_factor.last_changed < timedelta(seconds=60)
+              or now() - states.input_number.day_illuminance_threshold.last_changed < timedelta(seconds=60)
+            else false %}
+        {{ iif(update,0,900) }}
       state: >
         {% if is_state('input_boolean.day_lights_enabled','on')
             and is_state('binary_sensor.nighttime_illuminance_lights','off')
             and is_number(states('sensor.outdoor_illuminance'))
             and is_state('sun.sun','above_horizon' ) %}
-          {% set cloud_factor = states('sensor.cloud_cover')|int(0) * 200 %}
-          {{ (states('sensor.outdoor_illuminance')|int - cloud_factor)
+          {% set cloud_factor = states('sensor.cloud_cover')|int(0)
+              * states('input_number.day_illuminance_cloud_factor')|int * 20 %}
+          {{ (states('sensor.outdoor_illuminance')|int - cloud_factor|int(0))
               <= states('input_number.day_illuminance_threshold')|int }}
         {% endif %}
       availability: "{{ is_number(states('sensor.outdoor_illuminance')) }}"
@@ -147,3 +158,20 @@
       availability: >
         {{ is_number(states('sensor.weatherflow_brightness'))
             or is_number(states('sensor.weatherflow_local_illuminance')) }}
+
+    - name: "Kitchen Cabinet Lights Power"
+      unique_id: kitchen_cabinet_lights_power
+      icon: mdi:lightning-bolt
+      device_class: power
+      state_class: measurement
+      unit_of_measurement: W
+      state: >
+        {{ states('sensor.kitchen_cabinet_lights_channel_1_power')|float(0)
+            + states('sensor.kitchen_cabinet_lights_channel_2_power')|float(0)
+            + states('sensor.kitchen_cabinet_lights_channel_3_power')|float(0)
+            + states('sensor.kitchen_cabinet_lights_channel_4_power')|float(0) }}
+      availability: >
+        {{ is_number(states('sensor.kitchen_cabinet_lights_channel_1_power'))
+            or is_number(states('sensor.kitchen_cabinet_lights_channel_2_power'))
+            or is_number(states('sensor.kitchen_cabinet_lights_channel_3_power'))
+            or is_number(states('sensor.kitchen_cabinet_lights_channel_4_power')) }}

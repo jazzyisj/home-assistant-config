@@ -25,14 +25,19 @@ turn_light_off:
       {% set entities = expand(lights|default(all))|map(attribute='entity_id')|list %}
       {{ entities }}
     activate_timer: "{{ activate_timer|default(false) }}"
-    bypass_timer: "{{ bypass_timer|default(false) }}"
     reset: "{{ reset|default(false) }}"
   sequence:
     - if:
         - condition: template
           value_template: "{{ entities == none or entities|count == 0 }}"
       then:
-        - stop: "No entities specified."
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: error
+            message: "No valid entities."
+
+        - stop: "No valid entities."
           error: true
 
     - service: automation.turn_off
@@ -70,9 +75,9 @@ turn_light_off:
 
           - if:
               - condition: template
-                alias: "Reset, timer bypassed, or no timer, or timer idle and not manual mode"
+                alias: "Reset, timer bypassed or no timer, or timer is idle and not manual mode"
                 value_template: >
-                  {{ reset or (bypass_timer or timer == none)
+                  {{ reset or (bypass_timer|default(false) or timer == none)
                       or (not manual and is_state(timer,'idle')) }}
 
               - condition: template
@@ -116,6 +121,11 @@ turn_light_off:
                   lights: "{{ repeat.item }}"
                   manual_control: false
                 continue_on_error: true
+
+    - wait_template: >
+        {{ states.light|selectattr('entity_id','in',entities)
+            |selectattr('state','eq','on')|list|count == 0 }}
+      timeout: 30
 
     - service: automation.turn_on
       target:

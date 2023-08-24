@@ -94,8 +94,11 @@
     - name: "Strong Wind Alert"
       unique_id: strong_wind_alert
       icon: mdi:weather-windy
-      delay_on: 20
-      delay_off: "{{ iif(now() - states('sensor.uptime')|as_datetime < timedelta(minutes=5),0,14400) }}"
+      delay_on: 300
+      delay_off: >
+        {% set update = true if now() - states('sensor.uptime')|as_datetime < timedelta(minutes=5)
+              or now() - states.input_number.wind_alert_threshold.last_changed < timedelta(seconds=60) else false %}
+        {{ iif(update,0,3600) }}
       state: >
         {% set thresh = states('input_number.wind_alert_threshold')|int %}
         {{ (states('sensor.wind_speed')|int(-1) >= thresh or states('sensor.wind_gust')|int(-1) >= thresh)
@@ -105,7 +108,7 @@
     - name: "Storm Aproaching Alert"
       unique_id: storm_approaching_alert
       icon: mdi:weather-lightning-rainy
-      delay_off: "{{ iif(now() - states('sensor.uptime')|as_datetime < timedelta(minutes=5),0,14400) }}"
+      delay_off: "{{ iif(now() - states('sensor.uptime')|as_datetime < timedelta(minutes=5),0,3600) }}"
       state: >
         {{ states('sensor.precipitation_probability')|int >= 30
             and states('sensor.nearest_storm_distance')|int < 5
@@ -174,18 +177,34 @@
         > #BUG icon template not working in glance card #BUGFIX set icon here
         {% if is_state('binary_sensor.outdoor_high_temperature_alert','on') %} mdi:snowflake-thermometer
         {% elif is_state('binary_sensor.outdoor_low_temperature_alert','on') %} mdi:sun-thermometer
-        {% elif is_state('binary_sensor.temperature_rising','on') %} mdi:thermometer-chevron-up
-        {% elif is_state('binary_sensor.temperature_falling','on') %} mdi:thermometer-chevron-down
+        {% elif is_state(this.entity_id,'rising') %} mdi:thermometer-chevron-up
+        {% elif is_state(this.entity_id,'falling') %} mdi:thermometer-chevron-down
         {% else %} mdi:thermometer
         {% endif %}
       state: >
-        {% if is_state('binary_sensor.temperature_rising','on') %} Rising
-        {% elif is_state('binary_sensor.temperature_falling','on') %} Falling
-        {% else %} Steady
+        {% if is_state('binary_sensor.temperature_rising','on') %} rising
+        {% elif is_state('binary_sensor.temperature_falling','on') %} falling
+        {% else %} steady
         {% endif %}
       availability: >
         {{ has_value('binary_sensor.temperature_rising')
             and has_value('binary_sensor.temperature_falling') }}
+
+    - name: "Outdoor Temperature Trend Test"
+      unique_id: outdoor_temperature_trend_test #TEST
+      icon:
+        > #BUG icon template not working in glance card #BUGFIX set icon here
+        {% if is_state(this.entity_id,'rising') %} mdi:thermometer-chevron-up
+        {% elif is_state(this.entity_id,'falling') %} mdi:thermometer-chevron-down
+        {% else %} mdi:thermometer
+        {% endif %}
+      state: >
+        {% set change = states('sensor.outdoor_temperature_hourly_change')|int %}
+        {% if change > 0.25 %} rising
+        {% elif change < -0.25 %} falling
+        {% else %} steady
+        {% endif %}
+      availability: "{{ is_number(states('sensor.outdoor_temperature_hourly_change')) }}"
 
     - name: "Moon Phase"
       unique_id: moon_phase
