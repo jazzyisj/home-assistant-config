@@ -77,7 +77,7 @@ tts_play:
             {% else %} {{ iif(alert,states('sensor.tts_alert_media_player'),states('sensor.tts_media_player')) }}
             {% endif %}
           {% endif %}
-        tts_player: >
+        tts_player: > #MASS not using snapshot not working
           {% if is_state('binary_sensor.mass_media','on') %}
             {{ iif(has_value(media_player ~ '_2'),media_player ~ '_2',media_player) }}
           {% else %}
@@ -89,10 +89,10 @@ tts_play:
               |map(attribute='entity_id')|list }}
         tts_service: > # force local tts service if wan disconnected
           {% if is_state('binary_sensor.wan','off') %} {% set tts = 'tts.piper' %}
-          {% elif alert %} {% set tts = 'tts.cloud_say' %}
           {% else %}
             {% if is_state('input_select.tts_service','Piper TTS') %} {% set tts = 'tts.piper' %}
             {% elif is_state('input_select.tts_service','Google Cloud') %} {% set tts = 'tts.google_cloud_say' %}
+            {% elif is_state('input_select.tts_service','Broadcast') %} {% set tts = 'broadcast' %}
             {% else %} {% set tts = 'tts.cloud_say' %}
             {% endif %}
           {% endif %}
@@ -121,36 +121,55 @@ tts_play:
               or media_players|count == 0
               or volume == 0 }}
 
-    - if: "{{ mute_tts }}"
-      then:
-        # prevents mass resume / volume reset
-        - service: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.tts_muted
-
-        - if: >
-            {{ is_state('input_boolean.jason_phone_tts_enabled','on')
-                and is_state('binary_sensor.jason_home','on')
-                and (quiet_play or night_play) }}
-          then:
-            - service: notify.jason
-              data:
-                message: TTS
-                data:
-                  tts_text: "{{ message }}"
-                  channel: alarm_stream
-
-        # save message if message is flagged for save
-        - if:
-            - "{{ save_msg }}"
-          then:
-            - service: script.turn_on
+    - choose:
+        - conditions: "{{ mute_tts }}"
+          sequence:
+            # prevents mass resume / volume reset
+            - service: input_boolean.turn_on
               target:
-                entity_id: script.tts_save_message
+                entity_id: input_boolean.tts_muted
+
+            - if: >
+                {{ is_state('input_boolean.jason_phone_tts_enabled','on')
+                    and is_state('binary_sensor.jason_home','on')
+                    and (quiet_play or night_play) }}
+              then:
+                - service: notify.jason
+                  data:
+                    message: TTS
+                    data:
+                      tts_text: "{{ message }}"
+                      channel: alarm_stream
+
+            # save message if message is flagged for save
+            - if:
+                - "{{ save_msg }}"
+              then:
+                - service: script.turn_on
+                  target:
+                    entity_id: script.tts_save_message
+                  data:
+                    variables:
+                      message: "{{ message }}"
+
+        - conditions: "{{ tts_service == 'broadcast' }}"
+          sequence:
+            # don't reset volumes etc.
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.tts_muted
+
+            - service: notify.google_assistant_sdk
               data:
-                variables:
-                  message: "{{ message }}"
-      else:
+                message: "{{ message }}"
+                target: >
+                  {{ states.media_player
+                    |selectattr('entity_id','eq',media_player)
+                    |map(attribute='name')|join }}
+
+            - delay: 10 # keep script running for a few seconds
+
+      default:
         - variables:
             mass_players: >
               {{ states.media_player|selectattr('attributes.group_members','defined')
@@ -229,7 +248,7 @@ tts_play:
             #       - service: mass.queue_command
             #         data:
             #           player_id: "{{ mass_queues[repeat.index-1] }}"
-            #           command: snapshot_create #MASS #TODO not working
+            #           command: snapshot_create #MASS not working
 
         - service: script.media_player_set_volumes
           data:
