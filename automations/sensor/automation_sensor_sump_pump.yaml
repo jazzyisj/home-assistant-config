@@ -10,15 +10,19 @@
       event_data:
         action: turn_indoor_sump_on
   action:
-    - alias: "Wait for indoor sump switch to connect"
-      wait_template: "{{ has_value('switch.indoor_sump') }}"
+    - wait_template: "{{ has_value('switch.indoor_sump') }}"
       timeout:
         minutes: 10
-      continue_on_timeout: false
 
-    - service: switch.turn_on
-      target:
-        entity_id: switch.indoor_sump
+    - if: "{{ wait.completed }}"
+      then:
+        - service: switch.turn_on
+          target:
+            entity_id: switch.indoor_sump
+      else:
+        - service: script.sump_error_notification
+          data:
+            sump: indoor
 
 ###############################################################################
 ## Sensor - Outdoor Sump On
@@ -29,24 +33,28 @@
   trigger:
     - platform: numeric_state
       entity_id: sensor.outdoor_temperature
-      above: 5
+      above: 0
       for:
-        days: 1
+        days: 1 # takes a while for pit / lines to thaw
 
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
         action: turn_outdoor_sump_on
   action:
-    - alias: "Wait for outdoor sump switch to connect"
-      wait_template: "{{ has_value('switch.outdoor_sump') }}"
+    - wait_template: "{{ has_value('switch.outdoor_sump') }}"
       timeout:
         minutes: 10
-      continue_on_timeout: false
 
-    - service: switch.turn_on
-      target:
-        entity_id: switch.outdoor_sump
+    - if: "{{ wait.completed }}"
+      then:
+        - service: switch.turn_on
+          target:
+            entity_id: switch.outdoor_sump
+      else:
+        - service: script.sump_error_notification
+          data:
+            sump: outdoor
 
 ###############################################################################
 ## Sensor - Outdoor Sump Off
@@ -59,16 +67,26 @@
       entity_id: sensor.outdoor_temperature
       below: 0
       for:
-        days: 1
+        days: 1 # takes a while for pit / lines to freeze
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_outdoor_sump_off
   action:
     - wait_template: "{{ has_value('switch.outdoor_sump') }}"
       timeout:
         minutes: 10
-      continue_on_timeout: false
 
-    - service: switch.turn_off
-      target:
-        entity_id: switch.outdoor_sump
+    - if: "{{ wait.completed }}"
+      then:
+        - service: switch.turn_off
+          target:
+            entity_id: switch.outdoor_sump
+      else:
+        - service: script.sump_error_notification
+          data:
+            sump: outdoor
 
 ###############################################################################
 ## Sensor - Outdoor Sump Hass Restart
@@ -80,30 +98,27 @@
     - platform: homeassistant
       event: start
   action:
-    - wait_template: "{{ has_value('switch.outdoor_sump') }}"
+    - wait_template: >
+        {{ has_value('switch.outdoor_sump')
+          and is_number(states('sensor.outdoor_temperature')) }}
       timeout:
         minutes: 10
-      continue_on_timeout: false
 
-    - if:
-        - condition: numeric_state
-          entity_id: sensor.outdoor_temperature
-          above: 5
+    - if: "{{ wait.completed }}"
       then:
-        - service: switch.turn_on
-          target:
-            entity_id: switch.outdoor_sump
-      else:
-        - service: switch.turn_off
-          target:
-            entity_id: switch.outdoor_sump
-
-        - wait_template: "{{ states('sensor.outdoor_temperature')|int(-1) >= 5 }}"
-          timeout:
-            hours: 12
-
-        - if: "{{ wait.completed }}"
+        - if:
+            - condition: numeric_state
+              entity_id: sensor.outdoor_temperature
+              below: 0
           then:
+            - service: switch.turn_off
+              target:
+                entity_id: switch.outdoor_sump
+          else:
             - service: switch.turn_on
               target:
                 entity_id: switch.outdoor_sump
+      else:
+        - service: script.sump_error_notification
+          data:
+            sump: outdoor

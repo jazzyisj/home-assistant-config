@@ -14,28 +14,14 @@
         - unknown
         - unavailable
       for:
-        hours: 2
+        minutes: 15
 
     - platform: state
-      id: keypad
-      entity_id: sensor.garage_door_lock_status
-      to: #LOCK_USER
-        - Locked (Keypad)
-        - Locked (Jason)
-        - Locked (Sheri) #SHERI
-      not_from:
-        - unknown
-        - unavailable
-
-    - platform: state
-      id: manual
-      entity_id: sensor.garage_door_lock_status
-      to: Locked (Manual)
+      id: lock
+      entity_id: lock.garage_door_lock
+      to: locked
       for:
-        minutes: 5 # allow occupant to leave garage, door close
-      not_from:
-        - unknown
-        - unavailable
+        minutes: 2 # allow master to arm first
 
     - platform: event
       id: mobile
@@ -43,32 +29,40 @@
       event_data:
         action: arm_garage_alarm
   condition:
-    - condition: template
-      alias: "Alarm is enabled if not mobile action trigger"
-      value_template: >
-        {{ is_state('input_boolean.alarm_enabled','on')
-            if trigger.id != 'mobile' else true }}
+    - condition: state
+      entity_id: input_boolean.alarm_enabled
+      state: "on"
 
     - condition: template
       alias: "Occupancy override is off if occupancy trigger"
       value_template: "{{ iif(trigger.id == 'occupancy',is_state('input_boolean.occupancy_override','off'),true) }}"
 
-    - condition: state
-      entity_id: alarm_control_panel.garage
-      state: disarmed
+    - or:
+        - condition: template
+          alias: "Triggered by mobile action"
+          value_template: "{{ trigger.id == 'mobile' }}"
 
-    - condition: state
-      alias: "House alarm is armed."
-      entity_id: alarm_control_panel.house
-      state:
-        - armed_home
-        - armed_night
-        - armed_away
+        - and:
+            - condition: state
+              alias: "Auto arming is enabled"
+              entity_id: input_boolean.alarm_enabled
+              state: "on"
+
+            - condition: template
+              alias: "House is armed and garage not already in same arm mode as house"
+              value_template: >
+                {% set house = states('alarm_control_panel.house') %}
+                {{ house in ['armed_home','armed_night','armed_away']
+                    and house != states('alarm_control_panel.garage') }}
   action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.garage_alarm_override
+
     - service: script.arm_alarm
       data:
         zone: garage
         mode: >
           {% set house = states('alarm_control_panel.house') %}
-          {{ iif(house in ['armed_home','armed_away','armed_night'],house,'away') }}
+          {{ iif(house in ['armed_home','armed_away','armed_night'],house|replace('armed_',''),'away') }}
         override: "{{ trigger.id == 'mobile' }}"

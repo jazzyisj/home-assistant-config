@@ -1,0 +1,87 @@
+###############################################################################
+## Alarm - Mode Reset
+###############################################################################
+- id: alarm_mode_reset
+  alias: "[Alarm] Mode Reset"
+  description: "Reset alarm mode on restart."
+  trigger:
+    - platform: homeassistant
+      id: startup
+      event: start
+
+    - platform: state
+      id: alarm
+      entity_id:
+        - input_boolean.alarm_enabled
+        - input_boolean.alarm_auto_arming
+      to: "on"
+  condition:
+    - condition: template
+      value_template: >
+        {{ ((is_state('binary_sensor.someone_home','off')
+                or is_state('input_select.occupancy_mode','Away'))
+              and not is_state('alarm_control_panel.master','armed_away'))
+            or (is_state('binary_sensor.someone_home','on')
+              and is_state('alarm_control_panel.master','armed_away'))
+            or (is_state('input_select.occupancy_mode','Night')
+              and not is_state('alarm_control_panel.master','armed_night')) }}
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - input_boolean.alarm_pending
+      state: "off"
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_enabled
+        - input_boolean.alarm_auto_arming
+      state: "on"
+  action:
+    - if: "{{ trigger.id == 'startup' }}"
+      then:
+        - delay: 60 # automation.presence_occupancy_mode_reset should always run first
+
+    - wait_template: "{{ not is_state('alarm_control_panel.master','arming') }}"
+
+    - choose:
+        - conditions:
+            - or:
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Away
+
+            - not:
+                - condition: state
+                  entity_id: alarm_control_panel.master
+                  state: Away
+          sequence:
+            - service: script.arm_alarm
+              data:
+                mode: away
+
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.someone_home
+              state: "on"
+
+            - condition: state
+              entity_id: alarm_control_panel.master
+              state: Away
+          sequence:
+            - service: script.arm_alarm
+              data:
+                mode: home
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+          sequence:
+            - service: script.arm_alarm
+              data:
+                mode: night
