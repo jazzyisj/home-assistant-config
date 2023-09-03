@@ -70,8 +70,11 @@ tts_play:
 
     - variables:
         media_player: >
-          {% if is_state('binary_sensor.wan','off') %}
-            media_player.kiosk_internal
+          {% if is_state('binary_sensor.wan','off') %} media_player.kiosk_internal
+          {% elif states('select.tts_media_player_manual') not in ['None Selected','unknown','unavailable'] %}
+            {{ expand('group.tts_media_players')
+                |selectattr('name','eq',states('select.tts_media_player_manual'))
+                |map(attribute='entity_id')|join('') }}
           {% else %}
             {% if media_player is defined %} {{ media_player }}
             {% else %} {{ iif(alert,states('sensor.tts_alert_media_player'),states('sensor.tts_media_player')) }}
@@ -88,20 +91,26 @@ tts_play:
                 if is_state_attr(media_player,'type','group') else [media_player])
               |map(attribute='entity_id')|list }}
         tts_service: > # force local tts service if wan disconnected
-          {% if is_state('binary_sensor.wan','off') %} {% set tts = 'tts.piper' %}
+          {% if is_state('binary_sensor.wan','off') %} tts.piper
+          {% elif states('input_select.tts_service_manual') not in ['None Selected','unknown','unavailable'] %}
+            {% if is_state('input_select.tts_service_manual','Piper TTS') %} tts.piper
+            {% elif is_state('input_select.tts_service_manual','Google Cloud') %} tts.google_cloud_say
+            {% elif is_state('input_select.tts_service_manual','Broadcast') %} broadcast
+            {% else %} tts.cloud_say
+            {% endif %}
           {% else %}
             {% if is_state('input_select.tts_service','Piper TTS') %} {% set tts = 'tts.piper' %}
             {% elif is_state('input_select.tts_service','Google Cloud') %} {% set tts = 'tts.google_cloud_say' %}
             {% elif is_state('input_select.tts_service','Broadcast') %} {% set tts = 'broadcast' %}
             {% else %} {% set tts = 'tts.cloud_say' %}
             {% endif %}
+            {{ tts_service|default(tts) }}
           {% endif %}
-          {{ tts_service|default(tts) }}
         volume: >
-          {% if alert %}
-            {% set volume = states('input_number.tts_volume_alert')|int %}
-          {% elif is_state('input_boolean.tts_override','on') %}
+          {% if states('input_number.tts_volume_manual')|int > 0 %}
             {% set volume = states('input_number.tts_volume_manual')|int %}
+          {% elif alert %}
+            {% set volume = states('input_number.tts_volume_alert')|int %}
           {% elif is_state('input_select.occupancy_mode','Night') %}
             {% set volume = states('input_number.tts_volume_night')|int %}
           {% elif is_state('binary_sensor.quiet_time','on') %}
@@ -154,7 +163,6 @@ tts_play:
 
         - conditions: "{{ tts_service == 'broadcast' }}"
           sequence:
-            #TODO how is announcement volume determined?
             # don't reset volumes etc.
             - service: input_boolean.turn_on
               target:
@@ -169,7 +177,6 @@ tts_play:
                     |map(attribute='name')|join }}
 
             - delay: 10 # keep script running for a few seconds
-
       default:
         - variables:
             mass_players: >
