@@ -19,12 +19,9 @@ tts_play:
     tts_service:
       description: "Override service to use for TTS."
       example: "tts.cloud_say"
-    gender:
-      description: "Override gender to use for TTS (Nabu Casa only)."
-      example: "male"
-    language:
-      description: "Override languagle to use for TTS (Nabu Casa only)."
-      example: "en-CA"
+    tts_voice:
+      description: "Override voice to use for TTS (Nabu Casa only)."
+      example: "English (Canada) en-CA Female"
     media_player:
       description: "Override default media player."
       example: "media_player.broadcast_speakers"
@@ -71,7 +68,7 @@ tts_play:
     - variables:
         media_player: >
           {% if is_state('binary_sensor.wan','off') %} media_player.kiosk_internal
-          {% elif states('select.tts_media_player_manual') not in ['None Selected','unknown','unavailable'] %}
+          {% elif states('select.tts_media_player_manual') != 'None Selected' %}
             {{ expand('group.tts_media_players')
                 |selectattr('name','eq',states('select.tts_media_player_manual'))
                 |map(attribute='entity_id')|join('') }}
@@ -92,12 +89,13 @@ tts_play:
               |map(attribute='entity_id')|list }}
         tts_service: > # force local tts service if wan disconnected
           {% if is_state('binary_sensor.wan','off') %} tts.piper
-          {% elif states('input_select.tts_service_manual') not in ['None Selected','unknown','unavailable'] %}
+          {% elif states('input_select.tts_service_manual') != 'None Selected' %}
             {% if is_state('input_select.tts_service_manual','Piper TTS') %} tts.piper
             {% elif is_state('input_select.tts_service_manual','Google Cloud') %} tts.google_cloud_say
             {% elif is_state('input_select.tts_service_manual','Broadcast') %} broadcast
             {% else %} tts.cloud_say
             {% endif %}
+          {% elif alert %} tts.cloud_say
           {% else %}
             {% if is_state('input_select.tts_service','Piper TTS') %} {% set tts = 'tts.piper' %}
             {% elif is_state('input_select.tts_service','Google Cloud') %} {% set tts = 'tts.google_cloud_say' %}
@@ -319,27 +317,39 @@ tts_play:
         - choose:
             - conditions: "{{ tts_service == 'tts.cloud_say' }}"
               sequence:
+                - variables:
+                    voice: >
+                      {% if states('input_select.tts_service_manual') == 'Nabu Casa' %}
+                        {% set voice = states('input_select.tts_cloud_voice_manual') %}
+                      {% elif tts_voice is defined %}
+                        {% set voice = tts_voice %}
+                      {% elif alert %}
+                        {% set voice = 'English (United States) en-US Male' %}
+                      {% elif is_state('input_select.occupancy_mode','Night') %}
+                        {% set voice = states('input_select.tts_cloud_voice_night') %}
+                      {% elif is_state('binary_sensor.quiet_hours','on') %}
+                        {% set voice = states('input_select.tts_cloud_voice_quiet') %}
+                      {% else %}
+                        {% set voice = states('input_select.tts_cloud_voice') %}
+                      {% endif %}
+                      {{ voice }}
+
                 - service: tts.cloud_say
                   target:
                     entity_id: "{{ media_player }}"
                   data:
                     message: "{{ message }}"
                     language: >
-                      {% if alert %} en-US
-                      {% else %}
-                        {% set voice = states('input_select.tts_cloud_voice') %}
-                        {% if 'en-AU' in voice %} {% set lang = 'en-AU' %}
-                        {% elif 'en-CA' in voice %} {% set lang = 'en-CA' %}
-                        {% elif 'en-IN' in voice %} {% set lang = 'en-IN' %}
-                        {% elif 'en-IE' in voice %} {% set lang = 'en-IE' %}
-                        {% elif 'en-GB' in voice %} {% set lang = 'en-GB' %}
-                        {% elif 'en-US' in voice %} {% set lang = 'en-US' %}
-                        {% else %} {% set lang = 'en-CA' %}
-                        {% endif %}
-                        {{ language|default(lang) }}
+                      {% if 'en-AU' in voice %} en-AU
+                      {% elif 'en-CA' in voice %} en-CA
+                      {% elif 'en-IN' in voice %} en-IN
+                      {% elif 'en-IE' in voice %} en-IE
+                      {% elif 'en-GB' in voice %} en-GB
+                      {% elif 'en-US' in voice %} en-US
+                      {% else %} en-CA
                       {% endif %}
                     options:
-                      gender: "{{ gender|default('female' if 'Female' in states('input_select.tts_cloud_voice') else 'male') }}"
+                      gender: "{{ iif('female' in voice|lower,'female', 'male') }}"
                   continue_on_error: true #ISSUE #MASS script does not continue if mass fails
 
             - conditions: "{{ tts_service == 'tts.piper' }}"

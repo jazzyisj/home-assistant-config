@@ -16,14 +16,33 @@
       event_data:
         action: open_garage_jason
   action:
-    - wait_template: > #TEMP #ISSUE locked sensor not updating fast enough
-        {% if person == 'jason' %}
-          {{ states('binary_sensor.jphone_device_locked') in ['on','off'] and is_state('alarm_control_panel.garage','disarmed')
-              and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')) }}
-        {% endif %}
-      timeout: 600
+    - choose:
+        - conditions: "{{ person == 'jason' }}"
+          sequence:
+            - wait_template: >
+                {{ is_state('binary_sensor.jason_home','on')
+                    or is_state('input_boolean.jason_almost_home','on')
+                    or is_state('alarm_control_panel.garage','disarmed') }}
+              timeout:
+                minutes: 5
+      default:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: error
+            message: "Invalid person."
 
-    - if: "{{ wait.completed }}"
+        - stop: "Invalid person."
+          error: true
+
+    - if:
+        - condition: template
+          value_template: "{{ wait.completed }}"
+
+        - not:
+            - condition: state
+              entity_id: cover.garage_bay_door
+              state: closed
       then:
         - service: script.garage_door_open
           data:

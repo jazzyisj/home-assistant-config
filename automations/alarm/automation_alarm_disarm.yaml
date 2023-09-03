@@ -82,15 +82,24 @@
                 person: "{{ person }}"
                 zone: master
           else:
-            - wait_template:
-                > #TEMP #ISSUE locked sensor not updating fast enough
-                {% if person == 'jason' %}
-                  {{ (states('binary_sensor.jphone_device_locked') in ['on','off']
-                        and (is_state('binary_sensor.jason_home','on') or is_state('input_boolean.jason_almost_home','on')))
-                      or is_state('alarm_control_panel.master','disarmed') }}
-                {% endif %}
-              timeout:
-                minutes: 5
+            - choose:
+                - conditions: "{{ person == 'jason' }}"
+                  sequence:
+                    - wait_template: >
+                        {{ is_state('binary_sensor.jason_home','on')
+                            or is_state('input_boolean.jason_almost_home','on')
+                            or is_state('alarm_control_panel.master','disarmed') }}
+                      timeout:
+                        minutes: 5
+              default:
+                - service: system_log.write
+                  data:
+                    logger: "{{ this.entity_id }}"
+                    level: error
+                    message: "Invalid person."
+
+                - stop: "Invalid person."
+                  error: true
 
             - if:
                 - not:
@@ -98,7 +107,7 @@
                       entity_id: alarm_control_panel.master
                       state: disarmed
               then:
-                - if: "{{ wait.completed }}" # device unlocked
+                - if: "{{ wait.completed }}"
                   then:
                     - service: script.disarm_alarm
                       data:
@@ -108,14 +117,20 @@
                     - service: browser_mod.notification
                       data:
                         duration: 30000
-                        message: "{{ person|title }} attempted to disarm the alarm with a locked device."
+                        message: "{{ person|title }} attempted to disarm the alarm."
 
                     - service: notify.jason
                       data:
-                        title: "Locked Device"
-                        message: "{{ person|title }} attempted to disarm the alarm with a locked device."
+                        title: "Disarm Attemp"
+                        message: >
+                          {%- set person = 'jason' %}
+                          {{- person|title }} attempted to disarm the alarm.
+                          {{ person|title }} is
+                          {{- iif(is_state('binary_sensor.' ~ person ~ '_home','on'),
+                              ' home',iif(is_state('input_boolean.' ~ person ~ '_almost_home','on'),
+                                ' almost home',' not home')) }}.
                         data:
-                          tag: "{{ person }}_locked_device"
+                          tag: "{{ person }}_disarm_attemp"
                           group: Alarm
                           channel: Alert
                           importance: max
@@ -137,32 +152,6 @@
                             - title: "Cameras"
                               action: URI
                               uri: !secret LOREX_URI
-
-        # wait, then rearm alarm if nobody home/night mode and not already rearmed
-        - wait_template: >
-            {{ not is_state('alarm_control_panel.house','disarmed') if trigger.id == 'lock'
-                else not is_state('alarm_control_panel.master','disarmed') }}
-          timeout:
-            minutes: 5
-
-        - choose:
-            - conditions:
-                - condition: state
-                  entity_id: binary_sensor.someone_home
-                  state: "off"
-              sequence:
-                - service: script.arm_alarm
-                  data:
-                    mode: away
-
-            - conditions:
-                - condition: state
-                  entity_id: input_select.occupancy_mode
-                  state: Night
-              sequence:
-                - service: script.arm_alarm
-                  data:
-                    mode: night
       else:
         - if: "{{ person != 'hassio' }}"
           then:
