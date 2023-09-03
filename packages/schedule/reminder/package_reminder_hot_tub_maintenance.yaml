@@ -4,37 +4,39 @@
 input_boolean:
   hot_tub_maintenance_enabled:
     name: "Hot Tub Maintenance Enabled"
+    icon: mdi:hot-tub
   hot_tub_maintenance_active:
     name: "Hot Tub Maintenance Active"
+    icon: mdi:hot-tub
 
 input_datetime:
   hot_tub_maintenance_days:
-    name: "Hot Tub Maintenance: Days"
+    name: "Hot Tub Maintenance Days"
     icon: mdi:clock
     has_date: false
     has_time: true
   hot_tub_maintenance_afternoons:
-    name: "Hot Tub Maintenance: Afternoons"
+    name: "Hot Tub Maintenance Afternoons"
     icon: mdi:clock
     has_date: false
     has_time: true
   hot_tub_maintenance_weekends:
-    name: "Hot Tub Maintenance: Weekends"
+    name: "Hot Tub Maintenance Weekends"
     icon: mdi:clock
     has_date: false
     has_time: true
 
 input_number:
   hot_tub_maintenance_day_interval:
-    name: "Hot Tub Maintenance: Day Interval"
+    name: "Hot Tub Maintenance Day Interval"
     icon: mdi:calendar-range
     unit_of_measurement: days
     mode: slider
     min: 1
     max: 7
     step: 1
-  hot_tub_maintenance_reminder_interval:
-    name: "Hot Tub Maintenance: Reminder Interval"
+  hot_tub_maintenance_notification_interval:
+    name: "Hot Tub Maintenance Reminder Interval"
     icon: mdi:calendar-range
     unit_of_measurement: minutes
     mode: slider
@@ -43,66 +45,61 @@ input_number:
     step: 5
 
 template:
+  - button:
+      - name: "Hot Tub Maintenance Done"
+        unique_id: hot_tub_maintenance_done
+        icon: mdi:hot-tub
+        press:
+          - condition: state
+            entity_id: binary_sensor.hot_tub_maintenance_reminder
+            state: "on"
+
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.hot_tub_maintenance_active
+
+          - service: browser_mod.notification
+            data:
+              message: "Hot Tub Maintenance reminder has been turned off."
+              duration: 30000
+
+          - service: notify.jason
+            data:
+              message: clear_notification
+              data:
+                tag: hot_tub_maintenance_reminder
+
   - binary_sensor:
-      - name: "Hot Tub"
-        unique_id: hot_tub
-        picture: !secret HOT_TUB_ENTITY_ICON
-        state: "{{ is_state('input_boolean.hot_tub_maintenance_active','on') }}"
+      - name: "Hot Tub Maintenance Reminder"
+        unique_id: hot_tub_maintenance_reminder
+        icon: mdi:hot-tub
+        picture: >
+          {{ iif(is_state(this.entity_id,'on'),
+            '/local/images/entity_icons/hot_tub_maintenance.png',
+            '/local/images/entity_icons/hot_tub_maintenance_off.png') }}
+        state: >
+          {{ is_state('input_boolean.hot_tub_maintenance_enabled','on')
+                and is_state('input_boolean.hot_tub_maintenance_active','on') }}
 
 automation:
   ###############################################################################
-  ## Reminders - Turn Off Hot tub maintenance
+  ## Reminders - Turn On Hot Tub Maintenance
   ###############################################################################
-  - id: reminders_turn_off_hot_tub_maintenance
-    alias: "[Reminders] Turn Off Hot tub maintenance"
-    description: "Turn off reminder active boolean."
-    max_exceeded: silent
-    trigger:
-      - platform: state
-        entity_id: input_boolean.hot_tub_maintenance_enabled
-        to: "off"
-
-      - platform: state
-        entity_id: input_boolean.hot_tub_maintenance_active
-        to: "on"
-
-      - platform: event
-        id: action
-        event_type: mobile_app_notification_action
-        event_data:
-          action: hot_tub_maintenance_done
-    condition:
-      - or:
-          - condition: state
-            entity_id: input_boolean.hot_tub_maintenance_enabled
-            state: "off"
-
-          - "{{ trigger.id == 'action' }}"
-    action:
-      - service: input_boolean.turn_off
-        target:
-          entity_id: input_boolean.hot_tub_maintenance_active
-
-  ###############################################################################
-  ## Reminders - Activate Hot tub maintenance
-  ###############################################################################
-  - id: reminders_activate_hot_tub_maintenance
-    alias: "[Reminders] Activate Hot tub maintenance"
+  - id: reminders_turn_on_hot_tub_maintenance
+    alias: "[Reminders] Turn On Hot Tub Maintenance"
     description: "Turn on reminder active boolean."
     trigger:
       - platform: template
         value_template: >
           {% set time = states('sensor.time') %}
           {% set shift = states('sensor.time_trigger_shift') %}
+          {% set last_run = states('button.hot_tub_maintenance_done') %}
           {% if is_state('input_boolean.hot_tub_maintenance_enabled','on') %}
-            {% set switch_change = states.input_boolean.hot_tub_maintenance_active.last_changed %}
-            {% set last_run = state_attr('automation.reminders_activate_hot_tub_maintenance','last_triggered') %}
-            {% set latest = [last_run,switch_change]|max if last_run != none else switch_change%}
             {{ ((shift == 'days' and time == states('input_datetime.hot_tub_maintenance_days')[0:5])
                   or (shift == 'afts' and time == states('input_datetime.hot_tub_maintenance_afternoons')[0:5])
                   or (shift == 'wknd' and time == states('input_datetime.hot_tub_maintenance_weekends')[0:5]))
-                and (last_run is none or (now().date()
-                  - latest.date()).days >= states('input_number.hot_tub_maintenance_day_interval')|int(0)) }}
+                and (last_run == 'unknown' or (now().date()- (last_run|as_datetime).date()).days
+                  >= states('input_number.hot_tub_maintenance_day_interval')|int) }}
           {% endif %}
     action:
       - service: input_boolean.turn_on
@@ -110,21 +107,62 @@ automation:
           entity_id: input_boolean.hot_tub_maintenance_active
 
   ###############################################################################
-  ## Reminders - Hot tub maintenance Alert
+  ## Reminders - Hot Tub Maintenance Done
   ###############################################################################
-  - id: reminders_hot_tub_maintenance_alert
-    alias: "[Reminders] Hot tub maintenance Alert"
-    description: "Send notification until alert turns off."
+  - id: reminders_hot_tub_maintenance_done
+    alias: "[Reminders] Hot Tub Maintenance Done"
+    description: "Reset hot tub maintenance."
+    max_exceeded: silent
     trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: hot_tub_maintenance_done
+    condition:
+      - condition: state
+        entity_id: binary_sensor.hot_tub_maintenance_reminder
+        state: "on"
+    action:
+      - service: button.press
+        target:
+          entity_id: button.hot_tub_maintenance_done
+
+  ###############################################################################
+  ## Reminders - Reset Hot Tub Maintenance Active
+  ###############################################################################
+  - id: reminders_reset_hot_tub_maintenance_active
+    alias: "[Reminders] Reset Hot Tub Maintenance Active"
+    description: "Reset Hot Tub Maintenance Active boolean."
+    trigger:
+      - platform: state
+        entity_id: input_boolean.hot_tub_maintenance_active
+        to: "off"
+
       - platform: state
         entity_id: input_boolean.hot_tub_maintenance_active
         to: "on"
     condition:
       - condition: state
-        entity_id:
-          - input_boolean.hot_tub_maintenance_enabled
-          - input_boolean.schedule_alerts
-        state: "on"
+        entity_id: input_boolean.hot_tub_maintenance_enabled
+        state: "off"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.hot_tub_maintenance_active
+
+  ###############################################################################
+  ## Reminders - Hot Tub Maintenance Notification
+  ###############################################################################
+  - id: reminders_hot_tub_maintenance_notification
+    alias: "[Reminders] Hot Tub Maintenance Notification"
+    description: "Send notification until reminder is off."
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.hot_tub_maintenance_reminder
+        to: "on"
+        not_from:
+          - unknown
+          - unavailable
     action:
       - repeat:
           sequence:
@@ -132,7 +170,7 @@ automation:
               data:
                 message: "It's time for some hot tub maintanance!"
                 data:
-                  tag: hot_tub_maintenance
+                  tag: hot_tub_maintenance_reminder
                   group: Reminder
                   channel: General
                   importance: max
@@ -145,11 +183,11 @@ automation:
                   ledColor: !secret HASS_COLOR
                   color: !secret HASS_COLOR
                   vibrationPattern: !secret GENERAL_VIBRATION
-                  clickAction: /ui-mobile/presence
                   actions:
                     - title: "Done"
                       action: hot_tub_maintenance_done
 
+            # wait to see if turned off before tts
             - wait_template: "{{ is_state('input_boolean.hot_tub_maintenance_active','off') }}"
               timeout:
                 minutes: 2
@@ -169,39 +207,9 @@ automation:
                       quiet_play: true
 
             - wait_template: "{{ is_state('input_boolean.hot_tub_maintenance_active','off') }}"
-              timeout: # wait for alert to turned off/dismissed
-                minutes: "{{ states('input_number.hot_tub_maintenance_reminder_interval')|int }}"
+              timeout:
+                minutes: "{{ states('input_number.hot_tub_maintenance_notification_interval')|int }}"
           until:
             - condition: state
               entity_id: input_boolean.hot_tub_maintenance_active
               state: "off"
-
-  ###############################################################################
-  ## Reminders - Clear Hot Tub Maintenance Notification
-  ###############################################################################
-  - id: reminders_clear_hot_tub_maintenance_notification
-    alias: "[Reminders] Clear Hot Tub Maintenance Notification"
-    description: "Clear notification."
-    max_exceeded: silent
-    trigger:
-      - platform: state
-        entity_id: input_boolean.hot_tub_maintenance_active
-        to: "off"
-
-      - platform: event
-        event_type: mobile_app_notification_cleared
-        event_data:
-          tag: hot_tub_maintenance
-
-      - platform: event
-        event_type: mobile_app_notification_action
-        event_data:
-          action: hot_tub_maintenance_done
-    action:
-      - service: notify.jason
-        data:
-          message: clear_notification
-          data:
-            tag: hot_tub_maintenance
-
-      - delay: 30 # prevent multiple triggers
