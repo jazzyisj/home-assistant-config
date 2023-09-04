@@ -1,0 +1,94 @@
+###############################################################################
+## Lock - Unlock House Locks
+###############################################################################
+- id: lock_unlock_house_locks
+  alias: "[Lock] Unlock House Locks"
+  description: "Unlock house entry locks."
+  mode: queued
+  variables:
+    locks: >
+      {% if trigger.id == 'danger' %}
+        {% set locks = ['lock.side_door_lock','lock.back_door_lock','lock.front_door_lock'] %}
+      {% elif trigger.id == 'doorbell' %}
+        {% set locks = ['lock.front_door_lock'] %}
+      {% elif trigger.id == 'arriving' %}
+        {% set locks = ['lock.side_door_lock','lock.back_door_lock'] %}
+      {% endif %}
+      {{ expand(locks)|selectattr('state','eq','locked')|map(attribute='entity_id')|list|sort }}
+    person: >
+      {% if trigger.id =='arriving' and trigger.event is defined %}
+        {% set action = trigger.event.data['action'] %}
+        {% if action|lower|contains('jason') %} jason
+        {% endif %}
+      {% endif %}
+  trigger:
+    - platform: event
+      id: arriving
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arriving_home_jason
+
+    - platform: event
+      id: doorbell
+      event_type: mobile_app_notification_action
+      event_data:
+        action: doorbell_unlock_door
+
+    - platform: state
+      id: danger
+      entity_id: binary_sensor.danger_alarm
+      to: "on"
+  condition:
+    - "{{ locks|count > 0 }}"
+    - "{{ person != '' or trigger.id in ['danger','doorbell'] }}"
+  action:
+    - if: "{{ trigger.id != 'danger' }}"
+      then:
+        - wait_template: >
+            {{ is_state('binary_sensor.jason_home','on')
+                or is_state('input_boolean.jason_almost_home','on')
+                or is_state('alarm_control_panel.master','disarmed') }}
+          timeout:
+            minutes: 5
+
+        - if: "{{ not wait.completed }}"
+          then:
+            - service: notify.jason
+              data:
+                message: "{{ iif(person != '',person|title,'Someone') }} attempted to unlock the doors but the alarm did not disarm."
+                data:
+                  group: Alarm
+                  channel: Alert
+                  importance: max
+                  ttl: 0
+                  priority: high
+                  visibility: private
+                  notification_icon: mdi:lock-alert
+                  icon_url: !secret LOCK_ICON
+                  ledColor: !secret WARNING_COLOR
+                  color: !secret WARNING_COLOR
+                  vibrationPattern: !secret ALERT_VIBRATION
+                  clickAction: /ui-mobile/alarm
+                  actions:
+                    - title: "Unlock"
+                      action: arriving_home_jason
+
+                    - title: "Cameras"
+                      action: URI
+                      uri: !secret LOREX_URI
+
+            - stop: "Alarm not disarmed"
+
+    - if: "{{ person == 'jason' }}"
+      then:
+        - service: script.unlock_entry_locks
+          target:
+            entity_id: "{{ locks }}"
+          data:
+            code: !secret LOCK_JASON #LOCK_USER
+      else:
+        - service: script.unlock_entry_locks
+          target:
+            entity_id: "{{ locks }}"
+          data:
+            code: !secret LOCK_HASS #LOCK_USER
