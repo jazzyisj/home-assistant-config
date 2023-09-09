@@ -1,18 +1,46 @@
 ###############################################################################
+## Lock - Set Vacation Mode
+###############################################################################
+- id: lock_set_vacation_mode
+  alias: "[Lock] Set Vacation Mode"
+  description: "Set door locks vacation mode."
+  mode: queued
+  trigger:
+    - platform: state
+      entity_id: &alarms
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
+      to: armed_vacation
+      for: 300
+
+    - platform: state
+      entity_id: *alarms
+      from: armed_vacation
+  action:
+    - if: "{{ trigger.to_state.state == 'armed_vacation' }}"
+      then:
+        - service: select.select_option
+          target:
+            entity_id: &items >
+              {{ iif(trigger.entity_id == 'alarm_control_panel.garage', ['select.garage_door_lock_vacation_mode'],
+                ['select.back_door_lock_vacation_mode','select.front_door_lock_vacation_mode','select.side_door_lock_vacation_mode']) }}
+          data:
+            option: Enable Vacation Mode
+
+      else:
+        - service: select.select_option
+          target:
+            entity_id: *items
+          data:
+            option: Disable Vacation Mode
+
+###############################################################################
 ## Lock - Set Alarm Mode
 ###############################################################################
 - id: lock_set_alarm_mode
   alias: "[Lock] Set Alarm Mode"
   description: "Set door locks alarm mode."
   mode: queued
-  variables:
-    locks: >
-      {% if trigger.entity_id == 'alarm_control_panel.garage' %} lock.garage_door_lock
-      {% else %}
-        {{ expand('group.entry_locks')
-            |rejectattr('entity_id','eq','lock.garage_door_lock')
-            |map(attribute='entity_id')|select('has_value')|list }}
-      {% endif %}
   trigger:
     - platform: state
       entity_id:
@@ -24,9 +52,6 @@
         - armed_away
         - armed_vacation
         - disarmed
-  condition:
-    - condition: template
-      value_template: "{{ locks|count > 0 }}"
   action:
     - choose:
         - conditions: "{{ is_state(trigger.entity_id,'disarmed') }}"
@@ -34,11 +59,8 @@
             - service: select.select_option
               target:
                 entity_id: &alarm_mode >
-                  {% if trigger.entity_id == 'alarm_control_panel.garage' %}
-                    select.garage_door_lock_alarm_mode
-                  {% else %}
-                    ['select.back_door_lock_alarm_mode','select.front_door_lock_alarm_mode','select.side_door_lock_alarm_mode']
-                  {% endif %}
+                  {{ iif(trigger.entity_id == 'alarm_control_panel.garage', ['select.garage_door_lock_alarm_mode'],
+                    ['select.back_door_lock_alarm_mode','select.front_door_lock_alarm_mode','select.side_door_lock_alarm_mode']) }}
               data:
                 option: Alarm Off
 
@@ -53,12 +75,8 @@
             - service: select.select_option
               target:
                 entity_id: >
-                  {% if trigger.entity_id == 'alarm_control_panel.garage' %}
-                    select.garage_door_lock_alarm_alert_sensitivity
-                  {% else %}
-                    ['select.back_door_lock_alarm_alert_sensitivity','select.front_door_lock_alarm_alert_sensitivity'
-                      ,'select.side_door_lock_alarm_alert_sensitivity']
-                  {% endif %}
+                  {{ iif(trigger.entity_id == 'alarm_control_panel.garage', ['select.garage_door_lock_alarm_alert_sensitivity'],
+                    ['select.back_door_lock_alarm_alert_sensitivity','select.front_door_lock_alarm_alert_sensitivity','select.side_door_lock_alarm_alert_sensitivity']) }}
               data:
                 option: Less Sensitive
 
@@ -73,16 +91,26 @@
             - service: select.select_option
               target:
                 entity_id: &kick >
-                  {% if trigger.entity_id == 'alarm_control_panel.garage' %}
-                    select.garage_door_lock_alarm_kick_sensitivity
-                  {% else %}
-                    ['select.back_door_lock_alarm_kick_sensitivity','select.front_door_lock_alarm_kick_sensitivity'
-                      ,'select.side_door_lock_alarm_kick_sensitivity']
-                  {% endif %}
+                  {{ iif(trigger.entity_id == 'alarm_control_panel.garage', ['select.garage_door_lock_alarm_kick_sensitivity'],
+                    ['select.back_door_lock_alarm_kick_sensitivity','select.front_door_lock_alarm_kick_sensitivity','select.side_door_lock_alarm_kick_sensitivity']) }}
               data:
                 option: Most Sensitive
 
-        - conditions: "{{ states(trigger.entity_id) in ['armed_away','armed_vacation'] }}"
+        - conditions: "{{ states(trigger.entity_id) == 'armed_away' }}"
+          sequence:
+            - service: select.select_option
+              target:
+                entity_id: *alarm_mode
+              data:
+                option: Forced Entry
+
+            - service: select.select_option
+              target:
+                entity_id: *kick
+              data:
+                option: Most Sensitive
+
+        - conditions: "{{ states(trigger.entity_id) == 'armed_vacation' }}"
           sequence:
             - service: select.select_option
               target:

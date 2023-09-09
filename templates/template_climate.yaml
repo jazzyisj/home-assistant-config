@@ -43,70 +43,83 @@
         {{ is_state('binary_sensor.nest_connected','off')
             and is_state('input_boolean.climate_alerts','on') }}
 
+    # set time_limit to true if unknown so state will get set
     - name: "HVAC Filter Alert"
       unique_id: hvac_filter_alert
       icon: mdi:air-filter
       device_class: problem
       state: >
-        {% set time_limit = false %}
         {% set filter_hours = states('sensor.hvac_filter_hours')|int(-1) > 250 %}
-        {% if has_value('button.hvac_filter_reset') %}
-          {% set reset_time = states('button.hvac_filter_reset') %}
-          {% set time_limit = now() - reset_time|as_datetime > timedelta(days=90) %}
-        {% endif %}
+        {% set time_limit = now() - states('button.hvac_filter_reset')|as_datetime
+            > timedelta(days=90) if has_value('button.hvac_filter_reset') else false %}
         {{ filter_hours or time_limit }}
 
     - name: "Indoor Low Temperature Alert"
       unique_id: indoor_low_temperature_alert
+      icon: mdi:snowflake-alert
       device_class: cold
-      delay_on: 1800
+      delay_on: 900 # allow fans to come on, temp to stabalize
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ false if entities == none else entities|count > 0 }}
+        {{ entities|count > 0 if entities not in ['[]',none] else false }}
       attributes:
         entity_id: >
-          {% set thresh = states('input_number.low_temperature_threshold') %}
-          {% set temps = ['sensor.thermostat_temperature','sensor.bathroom_sensor_air_temperature',
-              'sensor.living_room_temperature','sensor.bedroom_temperature'] %}
-          {{ expand(temps)|selectattr('state','<',thresh)|map(attribute='entity_id')|list|sort }}
+          {% set entities = namespace(value=[]) %}
+          {% set thresh = states('input_number.low_temperature_threshold')|int %}
+          {% set sensors = expand(['sensor.thermostat_temperature','sensor.bathroom_sensor_air_temperature',
+              'sensor.living_room_temperature','sensor.bedroom_temperature']) %}
+          {% for item in sensors if states(item.entity_id)|int(-1) < thresh|int %}
+          {% set entities.value = entities.value + [item.entity_id] %}
+          {% endfor %}
+          {{ entities.value }}
 
     - name: "Indoor High Temperature Alert"
       unique_id: indoor_high_temperature_alert
+      icon: mdi:sun-thermometer-outline
       device_class: heat
-      delay_on: 1800
+      delay_on: 900 # allow fans to come on, temp to stabalize
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ false if entities == none else entities|count > 0 }}
+        {{ entities|count > 0 if entities not in ['[]',none] else false }}
       attributes:
         entity_id: >
-          {% set thresh = states('input_number.high_temperature_threshold') %}
-          {% set temps = ['sensor.thermostat_temperature','sensor.bathroom_sensor_air_temperature',
-              'sensor.living_room_temperature','sensor.bedroom_temperature'] %}
-          {{ expand(temps)|selectattr('state','>',thresh)|map(attribute='entity_id')|list|sort }}
+          {% set entities = namespace(value=[]) %}
+          {% set thresh = states('input_number.high_temperature_threshold')|int %}
+          {% set sensors = expand(['sensor.thermostat_temperature','sensor.bathroom_sensor_air_temperature',
+              'sensor.living_room_temperature','sensor.bedroom_temperature']) %}
+          {% for item in sensors if states(item.entity_id)|int(-1) > thresh|int %}
+          {% set entities.value = entities.value + [item.entity_id] %}
+          {% endfor %}
+          {{ entities.value }}
 
     - name: "Indoor High Humidity Alert"
       unique_id: indoor_high_humidity_alert
+      icon: mdi:water-alert
       device_class: moisture
-      delay_on: 3600
+      delay_on: 900 # allow fans to come on, humidity to stabalize
       state: >
         {% set entities = state_attr(this.entity_id,'entity_id') %}
-        {{ false if entities == none else entities|count > 0 }}
+        {{ entities|count > 0 if entities not in ['[]',none] else false }}
       attributes:
         entity_id: >
-          {% set thresh = states('input_number.high_humidity_threshold') %}
-          {% set temps = ['sensor.thermostat_humidity','sensor.bathroom_sensor_humidity',
-              'sensor.living_room_humidity','sensor.bedroom_humidity'] %}
-          {{ expand(temps)|selectattr('state','>',thresh)|map(attribute='entity_id')|list|sort }}
+          {% set entities = namespace(value=[]) %}
+          {% set thresh = states('input_number.high_humidity_threshold')|int %}
+          {% set sensors = expand(['sensor.thermostat_humidity','sensor.bathroom_sensor_humidity',
+              'sensor.living_room_humidity','sensor.bedroom_humidity']) %}
+          {% for item in sensors if states(item.entity_id)|int(-1) > thresh|int %}
+          {% set entities.value = entities.value + [item.entity_id] %}
+          {% endfor %}
+          {{ entities.value }}
 
     - name: "Bathroom Mold Risk Alert"
       unique_id: bathroom_mold_risk_alert
+      icon: mdi:mushroom
       device_class: moisture
       delay_on: 3600
       state: >
-        {{ states('sensor.bathroom_mold_risk')|int
+        {{ states('sensor.bathroom_mold_risk')|int(-1)
               > states('input_number.mold_risk_threshold')|int
             and is_state('input_boolean.climate_alerts','on') }}
-      availability: "{{ is_number(states('sensor.bathroom_mold_risk')) }}"
 
     - name: "HVAC Window Door Open Alert"
       unique_id: hvac_window_door_open_alert

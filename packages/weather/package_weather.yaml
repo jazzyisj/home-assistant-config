@@ -22,12 +22,14 @@ homeassistant:
     alert.tomorrow_io_connected:
       icon: mdi:weather-partly-rainy
       category: weather
-    alert.gdacs_connected:
-      icon: mdi:home-flood
-      category: weather
 
     sensor.tomorrow_io_home_fire_index:
       icon: mdi:fire
+
+    sensor.pirateweather_precip_accumulation_0d: #TEMP https://github.com/alexander0042/pirate-weather-ha/issues/138
+      state_class: measurement
+    sensor.pirateweather_precip_intensity:
+      state_class: measurement
 
 weather:
   - platform: template
@@ -129,9 +131,6 @@ input_boolean:
   morning_weather_enabled:
     name: "Morning Weather Report"
     icon: mdi:weather-partly-rainy
-  display_gdacs:
-    name: "Display GDACS"
-    icon: mdi:pulse
 
 input_number:
   outdoor_high_temperature_threshold:
@@ -181,11 +180,11 @@ sensor:
         precision: 1
 
   - platform: derivative # https://www.home-assistant.io/integrations/derivative/
-    source: sensor.outdoor_temperature #TEST
-    name: " Outdoor Temperature Hourly Change"
+    source: sensor.outdoor_temperature_filtered #TEST
+    name: "Outdoor Temperature Change"
     round: 1
     unit_time: h # °C/h
-    time_window: "00:15:00" #TEST
+    time_window: "00:10:00" #TEST
 
   - platform: statistics
     name: "Outdoor Temperature Daily Average"
@@ -266,34 +265,55 @@ sensor:
     precision: 0
 
   - platform: statistics
-    name: "Precipitation 24 Hours"
-    entity_id: sensor.precipitation_today
-    state_characteristic: change
+    name: "Precipitation Duration 24 Hours"
+    entity_id: sensor.precipitation_duration_today #TEST
+    state_characteristic: sum_differences_nonnegative
     max_age:
       hours: 24
     sampling_size: 5000
+    precision: 1
+
+  - platform: statistics
+    name: "Precipitation 24 Hours"
+    entity_id: sensor.precipitation_today
+    state_characteristic: sum_differences_nonnegative
+    max_age:
+      hours: 24
+    sampling_size: 5000
+    precision: 1
 
   - platform: statistics
     name: "Precipitation Week"
     entity_id: sensor.precipitation_today
-    state_characteristic: change
+    state_characteristic: sum_differences_nonnegative
     max_age:
       days: 7
     sampling_size: 5000
+    precision: 1
 
   - platform: statistics
     name: "Precipitation Month"
     entity_id: sensor.precipitation_today
-    state_characteristic: change
+    state_characteristic: sum_differences_nonnegative
     max_age:
       days: 30
     sampling_size: 5000
+    precision: 1
+
+  - platform: statistics
+    name: "Rain Max (Date)"
+    unique_id: outdoor_temperature_daily_high_time
+    entity_id: sensor.outdoor_temperature
+    state_characteristic: datetime_value_max
+    sampling_size: 5000
+    max_age:
+      days: 1
 
 alert:
   outdoor_high_temperature:
     name: "Outdoor High Temperature"
     title: "High Temperature"
-    message: "Humidex: {{ states('sensor.outdoor_apparent_temperature') }}"
+    message: "Humidex: {{ states('sensor.outdoor_apparent_temperature',with_unit=true) }}"
     done_message: clear_notification
     entity_id: binary_sensor.outdoor_high_temperature_alert
     state: "on"
@@ -320,7 +340,7 @@ alert:
   outdoor_low_temperature:
     name: "Outdoor Low Temperature"
     title: "Low Temperature"
-    message: "Windchill: {{ states('sensor.outdoor_apparent_temperature') }}"
+    message: "Windchill: {{ states('sensor.outdoor_apparent_temperature',with_unit=true) }}"
     done_message: clear_notification
     entity_id: binary_sensor.outdoor_low_temperature_alert
     state: "on"
@@ -348,8 +368,8 @@ alert:
     name: "Strong Wind"
     title: "Strong Wind"
     message: |
-      Wind Gust: {{ states('sensor.wind_gust') }}
-      Wind Speed: {{ states('sensor.wind_speed') }}
+      Wind Gust: {{ states('sensor.wind_gust',with_unit=true) }}
+      Wind Speed: {{ states('sensor.wind_speed',with_unit=true) }}
     done_message: clear_notification
     entity_id: binary_sensor.strong_wind_alert
     state: "on"
@@ -383,6 +403,8 @@ alert:
       There is a {{ states('sensor.precipitation_type')|replace('none','') }} storm
       {{- iif(dist >= 1,dist|int ~ iif(dist|int == 1,' kilometer',' kilometers') ~ ' away',' in the immediate vicinity') }}
       {{- iif(dir != none,' approaching from the ' ~ dir,'') }}.
+      {%- set time = state_attr('binary_sensor.rain_soon','start_time') -%}
+      {%- if time != none %} Rain is expected at {{ time }}.{% endif -%}
       {%- endif -%}
     done_message: clear_notification
     entity_id: binary_sensor.storm_approaching_alert
@@ -416,13 +438,3 @@ alert:
     repeat: 999999
     data:
       tag: tomorrow_io_connected
-
-  gdacs_connected:
-    name: "GDACS Connected"
-    entity_id: binary_sensor.gdacs_connected_alert
-    state: "on"
-    notifiers: log
-    skip_first: false
-    repeat: 999999
-    data:
-      tag: gdacs_connected

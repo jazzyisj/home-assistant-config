@@ -6,21 +6,12 @@
   description: "Determine who arrived home and run arrive home script."
   mode: parallel
   variables:
-    people: "{{ ['jason'] }}"
     person: "{{ trigger.entity_id.split('.')[1]|replace('_home','') }}"
-    owner: "{{ person|lower in ['jason'] }}"
     first_home: >
-      {% set home = namespace(val=false) %}
-      {% for item in people %}
-        {% if item != person %}
-          {% if is_state('binary_sensor.' ~ item ~ '_home','on') %}
-            {% set home.val = true %}
-            {% break %}
-          {% endif %}
-        {% endif %}
-      {% endfor %}
-      {{ (person == 'guest' and is_state('binary_sensor.owner_home','off'))
-          or (not home.val and is_state('input_boolean.guest_home','off')) }}
+      {% set home = states.person
+          |rejectattr('entity_id','eq','person.' ~ person)
+          |selectattr('state','eq','home')|list %}
+      {{ home|count == 0 and is_state('input_boolean.guest_home','off') }}
   trigger:
     - platform: state
       entity_id: binary_sensor.jason_home
@@ -35,7 +26,7 @@
   action:
     - parallel:
         - sequence: # arrive home actions, notification
-            - if: "{{ owner }}"
+            - if: "{{ person != 'guest' }}"
               then:
                 - service: input_boolean.turn_off
                   target:
@@ -69,11 +60,8 @@
                 entity_id: input_select.occupancy_mode
               data:
                 option: >
-                  {% if is_state('input_select.occupancy_mode','Night') %} Night
-                  {% elif is_state('binary_sensor.owner_home','on') %} Home
-                  {% else %} Guest
-                  {% endif %}
-
+                  {% from 'format.jinja' import occupancy_mode %}
+                  {{ occupancy_mode() }}
             - if:
                 - condition: state
                   entity_id: input_boolean.occupancy_announcements
@@ -84,7 +72,7 @@
                     entity_id: script.tts_play
                   data:
                     variables:
-                      message: "{{ person|title ~ ' is home' if owner else 'A guest has arrived.' }}"
+                      message: "{{ 'A guest has arrived.' if person == 'guest' else person|title ~ ' is home' }}"
                   continue_on_error: true
 
             - delay: 120 # let person get in house
@@ -152,8 +140,8 @@
               match: any
               state: "on"
 
-            # not restoring if nobody else was home (lights were off)
-            - if: "{{ not first_home }}"
+            # not restoring if nobody else was home or night mode (lights were off)
+            - if: "{{ not first_home or is_state('input_select.occupancy_mode',['Away','Guest']) }}"
               then:
                 - service: scene.create
                   data:
@@ -184,20 +172,25 @@
                   entity_id: timer.arrive_home_lights
                   to: "idle"
 
-            # don't restore if nobody else was home (lights were off) or nobody is still home
+            # don't restore in away/night mode
+            # arrive lights were turned off by away mode or night no lights were likely on, don't get left in dark!
             - if:
-                - condition: template
-                  value_template: "{{ not first_home }}"
-
                 - condition: state
                   entity_id: input_select.occupancy_mode
                   match: any
                   state:
                     - Home
                     - Guest
-                    - Night
               then:
-                - service: script.light_scene_on
-                  data:
-                    scene: arrive_home_lights_restore
-                  continue_on_error: true
+                - if: "{{ first_home }}"
+                  then:
+                    - if: # dark out leave arrive lights on
+                        - condition: state
+                          entity_id: binary_sensor.nighttime_illuminance_lights
+                          state: "off"
+                      then:
+                        - service: script.turn_light_off
+                  else: # return to light settings before arrive lights
+                    - service: script.light_scene_on
+                      data:
+                        scene: arrive_home_lights_restore

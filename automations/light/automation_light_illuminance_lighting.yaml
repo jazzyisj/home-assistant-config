@@ -54,6 +54,7 @@
         minutes: 2 # allow scene_active to turn off, occupant to exit
 
     - platform: state
+      id: night
       entity_id: input_select.occupancy_mode
       to: Night
       for: 5 # allow scene_active to turn off
@@ -75,15 +76,28 @@
           timeout: 300
 
     - variables:
-        day_lights: >
+        day_lux: >
           {{ expand('group.lights')
             |selectattr('attributes.day_lux','defined')
             |selectattr('attributes.day_lux','eq',true)
             |map(attribute='entity_id')|list }}
-        night_lights: >
+        night_lux: >
           {{ expand('group.lights')
             |selectattr('attributes.night_lux','defined')
             |selectattr('attributes.night_lux','eq',true)
+            |map(attribute='entity_id')|list }}
+        night_lights: >
+          {{ expand('group.lights')
+            |selectattr('attributes.night','defined')
+            |selectattr('attributes.night','eq',true)
+            |map(attribute='entity_id')|list }}
+        away_lights: >
+          {{ expand('group.lights')
+            |selectattr('attributes.away','eq',true)
+            |map(attribute='entity_id')|list }}
+        timed_lights: >
+          {{ expand('group.lights')
+            |selectattr('attributes.timed','eq',true)
             |map(attribute='entity_id')|list }}
 
     - choose:
@@ -107,12 +121,12 @@
               then:
                 - service: script.turn_light_on
                   data:
-                    lights: "{{ day_lights }}"
+                    lights: "{{ day_lux }}"
                     activate_timer: false
               else:
                 - service: script.turn_light_off
                   data:
-                    lights: "{{ day_lights }}"
+                    lights: "{{ day_lux }}"
                     activate_timer: false
       default:
         - if:
@@ -141,7 +155,7 @@
                         # turn on night lights
                         - service: script.turn_light_on
                           data:
-                            lights: "{{ night_lights }}"
+                            lights: "{{ night_lux }}"
                             activate_timer: false
 
                 - conditions:
@@ -155,10 +169,7 @@
                     # turn on away lights
                     - service: script.turn_light_on
                       data:
-                        lights: >
-                          {{ expand('group.lights')
-                              |selectattr('attributes.away','eq',true)
-                              |map(attribute='entity_id')|list }}
+                        lights: "{{ away_lights }}"
                         activate_timer: false
                         bypass_timer: true
                         reset: true
@@ -168,7 +179,8 @@
                       data:
                         lights: >
                           {{ expand('group.lights')
-                              |rejectattr('attributes.away','eq',true)
+                              |rejectattr('entity_id','in',away_lights)
+                              |selectattr('state','eq','on')
                               |map(attribute='entity_id')|list }}
                         activate_timer: false
                         bypass_timer: true
@@ -182,20 +194,22 @@
                     # turn on night lights
                     - service: script.turn_light_on
                       data:
-                        lights: >
-                          {{ expand('group.lights')
-                              |selectattr('attributes.night','eq',true)
-                              |map(attribute='entity_id')|list }}
+                        lights: "{{ night_lights }}"
                         activate_timer: false
                         bypass_timer: true
 
-                    # turn off all lights except night/timed lights
+                    # turn off all lights except night/timed/arrive lights
                     - service: script.turn_light_off
                       data:
-                        lights: >
+                        lights:
+                          > #VERIFY don't turn off arrive home lights if coming from away mode
+                          {% set ignored = state_attr('scene.arrive_home','entity_id')
+                              if trigger.id == 'night' and trigger.from_state.state == 'Away' else '' %}
                           {{ expand('group.lights')
-                              |rejectattr('attributes.night','eq',true)
-                              |rejectattr('attributes.timed','eq',true)
+                              |rejectattr('entity_id','in',night_lights)
+                              |rejectattr('entity_id','in',timed_lights)
+                              |rejectattr('entity_id','in',ignored)
+                              |selectattr('state','eq','on')
                               |map(attribute='entity_id')|list }}
                         activate_timer: false
                         bypass_timer: true
@@ -215,7 +229,7 @@
                 # turn on day lights
                 - service: script.turn_light_on
                   data:
-                    lights: "{{ day_lights }}"
+                    lights: "{{ day_lux }}"
                     activate_timer: false
 
                 # turn off all lights except day/timed lights
@@ -223,8 +237,9 @@
                   data:
                     lights: >
                       {{ expand('group.lights')
-                          |rejectattr('attributes.day','eq',true)
-                          |rejectattr('attributes.timed','eq',true)
+                          |rejectattr('entity_id','in',day_lux)
+                          |rejectattr('entity_id','in',timed_lights)
+                          |selectattr('state','eq','on')
                           |map(attribute='entity_id')|list }}
                     activate_timer: false
               else:
@@ -232,5 +247,5 @@
                 - service: script.turn_light_off
                   data:
                     activate_timer: false
-                    bypass_timer: "{{ states('input_select.occupancy_mode') in ['Night','Away','Vacation'] }}"
-                    reset: "{{ states('input_select.occupancy_mode') in ['Night','Away','Vacation'] }}"
+                    bypass_timer: "{{ is_state('input_select.occupancy_mode',['Night','Away','Vacation']) }}"
+                    reset: "{{ is_state('input_select.occupancy_mode',['Night','Away','Vacation']) }}"
