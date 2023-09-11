@@ -1,43 +1,20 @@
 ###############################################################################
 ## Hass - Kiosk Screen On
 ###############################################################################
-- id: hass_kiosk_screen_on #TODO
+- id: hass_kiosk_screen_on
   alias: "[Hass] Kiosk Screen On"
-  description: "Turn kiosk screen on and adjust brightness."
+  description: "Turn kiosk screen on."
   max_exceeded: silent
-  variables:
-    brightness: >
-      {% if is_state('input_select.occupancy_mode','Night') %} 50
-      {% elif is_state('binary_sensor.quiet_time','on') %} 125
-      {% else %} 255
-      {% endif %}
   trigger:
     - platform: state
-      entity_id: input_select.occupancy_mode
-      to:
-        - Home
-        - Guest
-
-    - platform: state
-      entity_id: binary_sensor.kiosk_online
-      to: "on"
-
-    - platform: state
       id: motion
-      entity_id: binary_sensor.kiosk_internal
+      entity_id: binary_sensor.kiosk_motion
       to: "on"
 
     - platform: state
-      entity_id: binary_sensor.quiet_time
-      to:
-        - "on"
-        - "off"
-      not_from:
-        - unknown
-        - unavailable
-
-    - platform: state
-      entity_id: input_boolean.alarm_triggered
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
       to: "on"
   condition:
     - condition: state
@@ -53,14 +30,6 @@
         entity_id: switch.fire_tablet_screen
       continue_on_error: true
 
-    - if: "{{ states('number.fire_tablet_screen_brightness')|int(0) != brightness }}"
-      then:
-        - service: number.set_value
-          target:
-            entity_id: number.fire_tablet_screen_brightness
-          data:
-            value: "{{ brightness }}"
-
 ###############################################################################
 ## Hass - Kiosk Screen Off
 ###############################################################################
@@ -70,30 +39,28 @@
   max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: input_select.occupancy_mode
-      to:
-        - Away
-        - Vacation
+      id: motion
+      entity_id: binary_sensor.kiosk_motion
+      to: "off"
       for:
         minutes: 5
 
     - platform: state
-      id: motion
-      entity_id: binary_sensor.kiosk_internal
+      entity_id:
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
       to: "off"
-      not_from:
-        - unknown
-        - unavailable
-      for:
-        minutes: 5
   condition:
     - condition: state
       entity_id: binary_sensor.kiosk_online
       state: "on"
 
-    - condition: template
-      alias: "Occupancy mode is Night, Away, or Vacation"
-      value_template: "{{ is_state('input_select.occupancy_mode',['Night','Away','Vacation']) }}"
+    - condition: state
+      entity_id:
+        - binary_sensor.kiosk_motion
+        - input_boolean.alarm_pending
+        - input_boolean.alarm_triggered
+      state: "off"
   action:
     - wait_template: "{{ has_value('switch.fire_tablet_screen') }}"
       timeout: 300
@@ -102,3 +69,40 @@
     - service: switch.turn_off
       target:
         entity_id: switch.fire_tablet_screen
+
+###############################################################################
+## Hass - Kiosk Screen Brightness
+###############################################################################
+- id: hass_kiosk_screen_brightness
+  alias: "[Hass] Kiosk Screen Brightness"
+  description: "Adjust kiosk screen brightness."
+  max_exceeded: silent
+  variables:
+    brightness: >
+      {% if is_state('input_select.occupancy_mode','Night') %} 50
+      {% elif is_state('binary_sensor.quiet_time','on') %} 125
+      {% else %} 200
+      {% endif %}
+  trigger:
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+        - Night
+
+    - platform: state
+      entity_id: binary_sensor.quiet_time
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+  condition: "{{ states('number.fire_tablet_screen_brightness')|int(0) != brightness }}"
+  action:
+    - service: number.set_value
+      target:
+        entity_id: number.fire_tablet_screen_brightness
+      data:
+        value: "{{ brightness }}"

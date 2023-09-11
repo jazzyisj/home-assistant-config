@@ -77,12 +77,13 @@
 
 ## TAGS USED IN CODE
 
-- #TODO - to be completed
 - #VERIFY - to be verifed
 - #TEST - test value
-- #TEMP - temporary option/code
-- #ISSUE - unresolved issue
+- #TODO - to be completed
+- #NEXT - next feature/fix to complete
 - #IDEA - idea for future option/function
+- #ISSUE - unresolved issue
+- #TEMP - temporary option/code
 - #STYLE - css styling needs work
 - #IMAGE - new image required
 - #QUESTION - question I need to answer
