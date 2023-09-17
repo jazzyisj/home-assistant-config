@@ -5,8 +5,6 @@
 
 ##### <font color='cyan'>Updated 23-09-17</font>
 
----
-
 ## INSTALLED ADDONS (20)
 
 - Advanced SSH & Web Terminal
@@ -30,8 +28,6 @@
 - Z-Wave JS
 - Z-Wave JS UI
 
----
-
 ## CUSTOM INTEGRATIONS (17)
 
 - Adaptive Lighting
@@ -51,8 +47,6 @@
 - Virtual
 - Watchman
 - Weatherflow
-
----
 
 ## UI Plugins (42)
 
@@ -99,8 +93,6 @@
 - Weather Chart Card
 - Windrose Card
 
----
-
 ## ENTITY COUNTS
 
 - alarm_control_panel - 3
@@ -141,8 +133,6 @@
 - update - 128
 - weather - 9
 - zone - 10
-
----
 
 ## TAGS USED IN CODE
 
