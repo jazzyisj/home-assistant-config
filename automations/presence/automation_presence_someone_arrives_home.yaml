@@ -24,173 +24,104 @@
       entity_id: input_boolean.guest_home
       to: "on"
   action:
-    - parallel:
-        - sequence: # arrive home actions, notification
-            - if: "{{ person != 'guest' }}"
+    - service: script.turn_on
+      target:
+        entity_id: script.arrive_home_lighting
+
+    - if: "{{ person != 'guest' }}"
+      then:
+        - service: input_boolean.turn_off
+          target:
+            entity_id: "input_boolean.{{ person }}_almost_home"
+
+        - service: "notify.{{ person }}"
+          data:
+            message: clear_notification
+            data:
+              tag: "{{ person }}_heading_home"
+
+        - service: script.update_traffic_sensors # update traffic sensors to ensure time to home is zeroed out
+          continue_on_error: true
+
+    # clear last_person_to_arrive so last_changed attribute gets updated if set value didn't change
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.last_person_to_arrive
+      data:
+        option: none
+
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.last_person_to_arrive
+      data:
+        option: "{{ person|title }}"
+
+    # if already in selected mode, state won't change, occupancy automations won't trigger
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: >
+          {% from 'value.jinja' import occupancy_mode %}
+          {{ occupancy_mode() }}
+    - if:
+        - condition: state
+          entity_id: input_boolean.occupancy_announcements
+          state: "on"
+      then:
+        - service: script.turn_on
+          target:
+            entity_id: script.tts_play
+          data:
+            variables:
+              message: "{{ 'A guest has arrived.' if person == 'guest' else person|title ~ ' is home' }}"
+          continue_on_error: true
+
+    - delay: 120 # let person get in house
+
+    # only if person still home (may have come and gone)
+    - if:
+        - condition: template
+          alias: "Person is still home"
+          value_template: >
+            {{ is_state('input_boolean.guest_home','on') if person == 'guest'
+                else is_state('binary_sensor.' ~ person ~ '_home','on') }}
+
+        - condition: state
+          entity_id: input_boolean.occupancy_announcements
+          state: "on"
+      then:
+        - service: script.turn_on
+          target:
+            entity_id: script.tts_play
+          data:
+            variables:
+              message: >
+                Good {{ states('sensor.tod_greeting') }} {{person|title if person != 'guest' }}!
+                Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
+          continue_on_error: true
+
+        - delay: 1 # ensure welcome home before media play
+
+        - if: "{{ first_home }}"
+          then:
+            - if:
+                - condition: numeric_state
+                  entity_id: sensor.tts_saved_messages
+                  above: 0
               then:
-                - service: input_boolean.turn_off
-                  target:
-                    entity_id: "input_boolean.{{ person }}_almost_home"
-
-                - service: "notify.{{ person }}"
-                  data:
-                    message: clear_notification
-                    data:
-                      tag: "{{ person }}_heading_home"
-
-                - service: script.update_traffic_sensors # update traffic sensors to ensure time to home is zeroed out
+                - service: script.tts_play_saved_messages
                   continue_on_error: true
 
-            # clear last_person_to_arrive so last_changed attribute gets updated if set value didn't change
-            - service: input_select.select_option
-              target:
-                entity_id: input_select.last_person_to_arrive
-              data:
-                option: none
+                - delay: 1 # let saved messages start
 
-            - service: input_select.select_option
-              target:
-                entity_id: input_select.last_person_to_arrive
-              data:
-                option: "{{ person|title }}"
+                - wait_template: "{{ is_state('script.tts_play_saved_messages','off') }}"
+                  timeout:
+                    minutes: 5
 
-            # if already in selected mode, state won't change, occupancy automations won't trigger
-            - service: input_select.select_option
-              target:
-                entity_id: input_select.occupancy_mode
-              data:
-                option: >
-                  {% from 'value.jinja' import occupancy_mode %}
-                  {{ occupancy_mode() }}
-            - if:
-                - condition: state
-                  entity_id: input_boolean.occupancy_announcements
-                  state: "on"
+            - if: "{{ is_state('input_boolean.media_preset_enabled_' ~ person,'on') }}"
               then:
-                - service: script.turn_on
-                  target:
-                    entity_id: script.tts_play
+                - service: script.media_play
                   data:
-                    variables:
-                      message: "{{ 'A guest has arrived.' if person == 'guest' else person|title ~ ' is home' }}"
+                    preset: "{{ person }}"
                   continue_on_error: true
-
-            - delay: 120 # let person get in house
-
-            # only if person still home (may have come and gone)
-            - if:
-                - condition: template
-                  alias: "Person is still home"
-                  value_template: >
-                    {{ is_state('input_boolean.guest_home','on') if person == 'guest'
-                        else is_state('binary_sensor.' ~ person ~ '_home','on') }}
-
-                - condition: state
-                  entity_id: input_boolean.occupancy_announcements
-                  state: "on"
-              then:
-                - service: script.turn_on
-                  target:
-                    entity_id: script.tts_play
-                  data:
-                    variables:
-                      message: >
-                        Good {{ states('sensor.tod_greeting') }} {{person|title if person != 'guest' }}!
-                        Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
-                  continue_on_error: true
-
-                - delay: 1 # ensure welcome home before media play
-
-                - if: "{{ first_home }}"
-                  then:
-                    - if:
-                        - condition: numeric_state
-                          entity_id: sensor.tts_saved_messages
-                          above: 0
-                      then:
-                        - service: script.tts_play_saved_messages
-                          continue_on_error: true
-
-                        - delay: 1 # let saved messages start
-
-                        - wait_template: "{{ is_state('script.tts_play_saved_messages','off') }}"
-                          timeout:
-                            minutes: 5
-
-                    - if: "{{ is_state('input_boolean.media_preset_enabled_' ~ person,'on') }}"
-                      then:
-                        - service: script.media_play
-                          data:
-                            preset: "{{ person }}"
-                          continue_on_error: true
-
-        - sequence: # arrive home lighting
-            - service: script.turn_light_on
-              data:
-                lights: light.side_entrance_light
-                activate_timer: true # force timer to restart
-                bypass_timer: true
-                override: true
-              continue_on_error: true
-
-            - condition: state
-              entity_id:
-                - binary_sensor.daytime_illuminance_lights
-                - binary_sensor.nighttime_illuminance_lights
-              match: any
-              state: "on"
-
-            # not restoring if nobody else was home or night mode (lights were off)
-            - if: "{{ not first_home or is_state('input_select.occupancy_mode',['Away','Guest']) }}"
-              then:
-                - service: scene.create
-                  data:
-                    scene_id: arrive_home_lights_restore # no side entrance, timer turns it off
-                    entities:
-                      light.kitchen_potlights:
-                        state: "{{ states('light.kitchen_potlights') }}"
-                        brightness: "{{ state_attr('light.kitchen_potlights','brightness')|int(0) }}"
-                      light.dining_room_potlights:
-                        state: "{{ states('light.dining_room_potlights') }}"
-                        brightness: "{{ state_attr('light.dining_room_potlights','brightness')|int(0) }}"
-                      light.hallway_potlights:
-                        state: "{{ states('light.hallway_potlights') }}"
-                        brightness: "{{ state_attr('light.hallway_potlights','brightness')|int(0) }}"
-
-            - service: timer.start
-              entity_id: timer.arrive_home_lights
-
-            - service: script.light_scene_on
-              data:
-                scene: arrive_home
-              continue_on_error: true
-
-            # if someone else arrives timer restarts to keep lights on longer
-            - alias: "Wait for arrive home timer to finish"
-              wait_for_trigger:
-                - platform: state
-                  entity_id: timer.arrive_home_lights
-                  to: "idle"
-
-            # don't restore in away/night mode
-            # arrive lights were turned off by away mode or night no lights were likely on, don't get left in dark!
-            - if:
-                - condition: state
-                  entity_id: input_select.occupancy_mode
-                  match: any
-                  state:
-                    - Home
-                    - Guest
-              then:
-                - if: "{{ first_home }}"
-                  then:
-                    - if: # dark out leave arrive lights on
-                        - condition: state
-                          entity_id: binary_sensor.nighttime_illuminance_lights
-                          state: "off"
-                      then:
-                        - service: script.turn_light_off
-                  else: # return to light settings before arrive lights
-                    - service: script.light_scene_on
-                      data:
-                        scene: arrive_home_lights_restore
