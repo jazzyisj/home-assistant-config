@@ -3,11 +3,105 @@
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_dark.png)
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_light.png)
 
+##### <font color='cyan'>Updated 23-09-17</font>
+
+---
+
+## INSTALLED ADDONS (20)
+
+- Advanced SSH & Web Terminal
+- Chrony
+- Docker Wyze Bridge
+- File editor
+- Frigate NVR
+- Glances
+- Home Assistant Google Drive Backup
+- Log Viewer
+- Mosquitto broker
+- MQTT Explorer
+- Music Assistant
+- Piper
+- Samba Share
+- SQite Web
+- Studio Code Server
+- UniFi Network Application
+- VLC
+- WeatherFlow to MQTT
+- Z-Wave JS
+- Z-Wave JS UI
+
+---
+
+## CUSTOM INTEGRATIONS (17)
+
+- Adaptive Lighting
+- Alarmo
+- Asus Router
+- Balboa
+- Browser Mod
+- Frigate
+- Google Home
+- HACS
+- Music Assistant
+- Nest Protect
+- Ontario Energy Board
+- Pirate Weather
+- Smart ThinQ Sensors
+- Variable
+- Virtual
+- Watchman
+- Weatherflow
+
+---
+
+## UI Plugins (42)
+
+- Apex Charts
+- Auto Entities
+- Bar Card
+- Battery State Card
+- Big Slider Card
+- Button Card
+- Browser Mod
+- Card Mod
+- Card Tools
+- Digital Clock
+- Entity Attributes Card
+- Fold Entity Row
+- Frigate Hass Card
+- Github Flexi Card
+- Horizon Card
+- Hourly Weather
+- HTML Template Card
+- HUI Element
+- Layout Card
+- LG WebOS Remote Control
+- Mini Media Player
+- Multiple Entity Row
+- Multi Line Entity Card
+- Mushroom Cards
+- Numberbox Card
+- Pirate Weather
+- Plotly Graph Card
+- Rain Gauge Card
+- Roku Card
+- Slider Entity Row
+- Smart ThinQ Sensors
+- State Switch
+- Swipe Card
+- Template Entity Row
+- Time Picker Card
+- Timer Bar Card
+- Variable
+- Vertical Stack In Card
+- Weather Card
+- Weather Radar Card
+- Weather Chart Card
+- Windrose Card
+
 ---
 
 ## ENTITY COUNTS
-
-##### <font color='cyan'>Updated 23-09-17</font>
 
 - alarm_control_panel - 3
 - alert - 106
@@ -47,31 +141,6 @@
 - update - 128
 - weather - 9
 - zone - 10
-
----
-
-## INSTALLED ADDONS
-
-- Advanced SSH & Web Terminal
-- Chrony
-- Docker Wyze Bridge
-- File editor
-- Frigate NVR
-- Glances
-- Home Assistant Google Drive Backup
-- Log Viewer
-- Mosquitto broker
-- MQTT Explorer
-- Music Assistant
-- Piper
-- Samba Share
-- SQite Web
-- Studio Code Server
-- UniFi Network Application
-- VLC
-- WeatherFlow to MQTT
-- Z-Wave JS
-- Z-Wave JS UI
 
 ---
 
