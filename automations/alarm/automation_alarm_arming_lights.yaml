@@ -8,60 +8,70 @@
     - platform: state
       entity_id: alarm_control_panel.house
       to: arming
+
+    - platform: state
+      entity_id: alarm_control_panel.house
+      from: arming
   condition:
     - condition: state
-      entity_id:
-        - input_boolean.alarm_enabled
-        - binary_sensor.someone_home
+      entity_id: input_boolean.alarm_enabled
       state: "on"
 
     - condition: state
-      entity_id:
-        - binary_sensor.daytime_illuminance_lights
-        - binary_sensor.nighttime_illuminance_lights
+      entity_id: binary_sensor.nighttime_illuminance_lights
       match: any
       state: "on"
-
-    - condition: template
-      value_template: "{{ state_attr(trigger.entity_id,'arm_mode') ['armed_away','armed_vacation'] }}"
   action:
-    - service: scene.create
-      data:
-        scene_id: alarm_arming_lights_restore
-        entities:
-          light.side_entrance_light:
-            state: "{{ states('light.side_entrance_light') }}"
-            brightness: "{{ state_attr('light.side_entrance_light','brightness')|int(0) }}"
-          light.kitchen_potlights:
-            state: "{{ states('light.kitchen_potlights') }}"
-            brightness: "{{ state_attr('light.kitchen_potlights','brightness')|int(0) }}"
-          light.dining_room_potlights:
-            state: "{{ states('light.dining_room_potlights') }}"
-            brightness: "{{ state_attr('light.dining_room_potlights','brightness')|int(0) }}"
-
-    - service: script.turn_light_on
-      data:
-        lights:
-          - light.side_entrance_light
-          - light.kitchen_potlights
-          - light.dining_room_potlights
-        activate_timer: false
-
-    - wait_template: "{{ not is_state(trigger.entity_id,'arming') }}"
-      timeout: "{{ state_attr(trigger.entity_id,'delay')|int(0) }}"
-
-    - if: "{{ is_state('input_select.occupancy_mode',['Home','Guest']) }}"
+    - if:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: arming
       then:
-        - service: script.turn_on
-          target:
-            entity_id: script.light_scene_on
+        - service: scene.create
           data:
-            variables:
-              scene: alarm_arming_lights_restore
-      else:
-        - service: light.turn_off
-          target:
-            entity_id:
+            scene_id: alarm_arming_lights_restore
+            snapshot_entities:
               - light.side_entrance_light
               - light.kitchen_potlights
               - light.dining_room_potlights
+
+        - delay: 1
+
+        - condition: state
+          entity_id: alarm_control_panel.house
+          attribute: arm_mode
+          match: any
+          state:
+            - armed_away
+            - armed_vacation
+
+        - condition: state
+          entity_id: binary_sensor.someone_home
+          state: "on"
+
+        - service: script.turn_light_on
+          data:
+            lights:
+              - light.side_entrance_light
+              - light.kitchen_potlights
+              - light.dining_room_potlights
+            activate_timer: false
+      else:
+        - if:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              match: any
+              state:
+                - Home
+                - Guest
+          then:
+            - service: script.light_scene_on
+              data:
+                scene: alarm_arming_lights_restore
+          else:
+            - service: light.turn_off
+              target:
+                entity_id:
+                  - light.side_entrance_light
+                  - light.kitchen_potlights
+                  - light.dining_room_potlights

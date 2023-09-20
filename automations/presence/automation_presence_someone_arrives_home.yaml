@@ -7,11 +7,7 @@
   mode: parallel
   variables:
     person: "{{ trigger.entity_id.split('.')[1]|replace('_home','') }}"
-    first_home: >
-      {% set home = states.person
-          |rejectattr('entity_id','eq','person.' ~ person)
-          |selectattr('state','eq','home')|list %}
-      {{ home|count == 0 and is_state('input_boolean.guest_home','off') }}
+    first_home: "{{ state_attr('binary_sensor.someone_home','home')|count == 1 }}"
   trigger:
     - platform: state
       entity_id: binary_sensor.jason_home
@@ -24,10 +20,6 @@
       entity_id: input_boolean.guest_home
       to: "on"
   action:
-    - service: script.turn_on
-      target:
-        entity_id: script.arrive_home_lighting
-
     - if: "{{ person != 'guest' }}"
       then:
         - service: input_boolean.turn_off
@@ -40,10 +32,11 @@
             data:
               tag: "{{ person }}_heading_home"
 
-        - service: script.update_traffic_sensors # update traffic sensors to ensure time to home is zeroed out
+        # update traffic sensors to ensure time to home is zeroed out
+        - service: script.update_traffic_sensors
           continue_on_error: true
 
-    # clear last_person_to_arrive so last_changed attribute gets updated if set value didn't change
+    # clear last_person_to_arrive so last_changed attribute gets updated if even if value didn't change
     - service: input_select.select_option
       target:
         entity_id: input_select.last_person_to_arrive
@@ -96,12 +89,12 @@
             entity_id: script.tts_play
           data:
             variables:
-              message: >
-                Good {{ states('sensor.tod_greeting') }} {{person|title if person != 'guest' }}!
+              message: |
+                Good {{ states('sensor.tod_greeting') }} {{ person|title if person != 'guest' }}!
                 Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
           continue_on_error: true
 
-        - delay: 1 # ensure welcome home before media play
+        - delay: 1 # ensure welcome home before media plays
 
         - if: "{{ first_home }}"
           then:
@@ -124,4 +117,3 @@
                 - service: script.media_play
                   data:
                     preset: "{{ person }}"
-                  continue_on_error: true

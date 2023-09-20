@@ -3,7 +3,7 @@
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_dark.png)
 ![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_light.png)
 
-##### <font color='cyan'>Updated 23-09-17</font>
+##### <font color='cyan'>Updated 23-09-19</font>
 
 ## INSTALLED ADDONS (20)
 
@@ -97,17 +97,17 @@
 
 - alarm_control_panel - 3
 - alert - 106
-- automation - 311
-- binary_sensor - 476
-- button - 101
+- automation - 314
+- binary_sensor - 475
+- button - 100
 - calendar - 15
-- camera - 39
+- camera - 41
 - climate - 5
 - counter - 1
 - cover - 1
 - device_tracker - 73
 - fan - 10
-- group - 64
+- group - 66
 - input_boolean - 199
 - input_button - 2
 - input_datetime - 41
@@ -116,19 +116,19 @@
 - input_text - 45
 - light - 48
 - lock - 4
-- media_player - 43
-- number - 78
+- media_player - 44
+- number - 77
 - person - 1
 - proximity - 1
 - remote - 1
 - scene - 8
-- script - 82
-- select - 115
-- sensor - 959
+- script - 81
+- select - 120
+- sensor - 963
 - siren - 2
 - sun - 1
-- switch - 170
-- timer - 55
+- switch - 175
+- timer - 54
 - tts - 1
 - update - 128
 - weather - 9

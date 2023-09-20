@@ -1,4 +1,87 @@
 ###############################################################################
+## Camera - Contrast Control
+###############################################################################
+- id: camera_contrast_control
+  alias: "[Camera] Contrast Control"
+  description: "Control camera contrast mode."
+  trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: state
+      entity_id: binary_sensor.nighttime_illuminance_lights
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+  action:
+    - service: >
+        {{ iif(is_state('binary_sensor.nighttime_illuminance_lights','on')
+            ,'switch.turn_on','switch.turn_off') }}
+      target:
+        entity_id: group.frigate_contrast_controls
+
+###############################################################################
+## Camera - Object Detection Control
+###############################################################################
+- id: camera_object_detection_control
+  alias: "[Camera] Object Detection Control"
+  description: "Control camera detection mode."
+  mode: queued
+  variables:
+    state: "{{ states('alarm_control_panel.master') }}"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: "off"
+
+    - platform: state
+      entity_id: alarm_control_panel.master
+      to:
+        - disarmed
+        - armed_home
+        - armed_night
+        - armed_away
+        - armed_vacation
+  action:
+    - wait_template: "{{ is_state('binary_sensor.frigate_connected','on') }}"
+      timeout:
+        minutes: 10
+      continue_on_timeout: false
+
+    - service: switch.turn_on
+      target:
+        entity_id: >
+          {% set state = states('alarm_control_panel.master')
+              |replace('armed_vacation','armed_away')|replace('armed_','') %}
+          {% set cams = expand('group.frigate_cameras')|selectattr('attributes.' ~ state,'eq',true)
+              |rejectattr('attributes.location','eq','indoor')|map(attribute='object_id')|list %}
+          {% set detect = cams|map('regex_replace',
+              find='(.*)_frigate',replace='switch.\\1_frigate_detect', ignorecase=False)|list %}
+          {% set motion = cams|map('regex_replace',
+              find='(.*)_frigate',replace='switch.\\1_frigate_motion', ignorecase=False)|list %}
+          {% set snapshots = cams|map('regex_replace',
+              find='(.*)_frigate',replace='switch.\\1_frigate_snapshots', ignorecase=False)|list %}
+          {{ detect + motion + snapshots }}
+
+    - service: switch.turn_off
+      target:
+        entity_id: >
+          {% set state = states('alarm_control_panel.master')
+              |replace('armed_vacation','armed_away')|replace('armed_','') %}
+          {% set cams = expand('group.frigate_cameras')|rejectattr('attributes.' ~ state,'eq',true)
+              |rejectattr('attributes.location','eq','indoor')|map(attribute='object_id')|list %}
+          {% set detect = cams|map('regex_replace',
+              find='(.*)_frigate',replace='switch.\\1_frigate_detect', ignorecase=False)|list %}
+          {% set motion = cams|map('regex_replace',
+              find='(.*)_frigate',replace='switch.\\1_frigate_motion', ignorecase=False)|list %}
+          {% set snapshots = cams|map('regex_replace',
+              find='(.*)_frigate',replace='switch.\\1_frigate_snapshots', ignorecase=False)|list %}
+          {{ detect + motion + snapshots }}
+
+###############################################################################
 ## Camera - Pause Object Detection
 ###############################################################################
 - id: camera_pause_object_detection
@@ -46,131 +129,3 @@
     - service: switch.turn_off
       target:
         entity_id: "switch.{{ trigger.event.data['action'][:-14] }}_frigate_detect"
-
-###############################################################################
-## Camera - Object Detection Control
-###############################################################################
-- id: camera_object_detection_control
-  alias: "[Camera] Object Detection Control"
-  description: "Control camera detection mode."
-  mode: queued
-  variables:
-    state: "{{ states('alarm_control_panel.master') }}"
-  trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: state
-      entity_id: alarm_control_panel.master
-      to:
-        - disarmed
-        - armed_home
-        - armed_night
-        - armed_away
-        - armed_vacation
-  action:
-    - wait_template: "{{ is_state('binary_sensor.frigate_connected','on') }}"
-      timeout:
-        minutes: 5
-      continue_on_timeout: false
-
-    - choose:
-        - conditions: "{{ state == 'disarmed' }}"
-          sequence:
-            - service: switch.turn_on
-              target:
-                entity_id:
-                  - switch.front_door_frigate_detect
-                  - switch.front_door_frigate_motion
-
-            - service: switch.turn_off
-              target:
-                entity_id:
-                  - switch.side_drive_frigate_detect
-                  - switch.side_door_frigate_detect
-                  - switch.front_drive_frigate_detect
-                  - switch.front_yard_frigate_detect
-                  - switch.side_gate_front_frigate_detect
-                  - switch.side_gate_back_frigate_detect
-                  - switch.back_yard_frigate_detect
-                  - switch.back_door_frigate_detect
-                  - switch.patio_door_frigate_detect
-                  - switch.back_house_frigate_detect
-
-                  - switch.side_drive_frigate_motion
-                  - switch.side_door_frigate_motion
-                  - switch.front_drive_frigate_motion
-                  - switch.front_yard_frigate_motion
-                  - switch.side_gate_front_frigate_motion
-                  - switch.side_gate_back_frigate_motion
-                  - switch.back_yard_frigate_motion
-                  - switch.back_door_frigate_motion
-                  - switch.patio_door_frigate_motion
-                  - switch.back_house_frigate_motion
-
-                  - group.frigate_contrast_controls
-
-        - conditions: "{{ state == 'armed_home' }}"
-          sequence:
-            - service: switch.turn_on
-              target:
-                entity_id:
-                  - switch.side_drive_frigate_detect
-                  - switch.side_door_frigate_detect
-                  - switch.front_door_frigate_detect
-                  - switch.front_drive_frigate_detect
-
-                  - switch.side_drive_frigate_motion
-                  - switch.side_door_frigate_motion
-                  - switch.front_door_frigate_motion
-                  - switch.front_drive_frigate_motion
-
-            - service: switch.turn_off
-              target:
-                entity_id:
-                  - switch.front_yard_frigate_detect
-                  - switch.side_gate_front_frigate_detect
-                  - switch.side_gate_back_frigate_detect
-                  - switch.back_yard_frigate_detect
-                  - switch.back_door_frigate_detect
-                  - switch.patio_door_frigate_detect
-                  - switch.back_house_frigate_detect
-
-                  - switch.front_yard_frigate_motion
-                  - switch.side_gate_front_frigate_motion
-                  - switch.side_gate_back_frigate_motion
-                  - switch.back_yard_frigate_motion
-                  - switch.back_door_frigate_motion
-                  - switch.patio_door_frigate_motion
-                  - switch.back_house_frigate_motion
-
-        - conditions: "{{ state in ['armed_night','armed_away','armed_vacation'] }}"
-          sequence:
-            - service: switch.turn_on
-              target:
-                entity_id:
-                  - switch.side_drive_frigate_detect
-                  - switch.side_door_frigate_detect
-                  - switch.front_door_frigate_detect
-                  - switch.front_drive_frigate_detect
-                  - switch.back_door_frigate_detect
-                  - switch.patio_door_frigate_detect
-                  - switch.back_house_frigate_detect
-
-                  - switch.side_drive_frigate_motion
-                  - switch.side_door_frigate_motion
-                  - switch.front_door_frigate_motion
-                  - switch.front_drive_frigate_motion
-                  - switch.back_door_frigate_motion
-                  - switch.patio_door_frigate_motion
-                  - switch.back_house_frigate_motion
-
-    - if: "{{ state in ['armed_night','armed_away','armed_vacation'] }}"
-      then:
-        - service: switch.turn_off
-          target:
-            entity_id: group.frigate_contrast_controls
-      else:
-        - service: switch.turn_on
-          target:
-            entity_id: group.frigate_contrast_controls
