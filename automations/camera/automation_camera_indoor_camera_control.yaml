@@ -5,6 +5,13 @@
   alias: "[Camera] Indoor Camera Control"
   description: "Turn indoor cameras on and off."
   mode: restart
+  variables:
+    entities: >
+      {{ expand('group.wyze_cameras')
+          |select('in',expand('group.indoor_cameras'))
+          |map(attribute='object_id')|list
+          |map('regex_replace',find='(.*)_frigate',
+            replace='switch.\\1_camera_power', ignorecase=False)|list }}
   trigger:
     - platform: homeassistant
       event: start
@@ -26,17 +33,31 @@
       not_from:
         - unknown
         - unavailable
-  action:
-    - if: "{{ is_state('binary_sensor.someone_home','on') }}"
-      then:
-        - service: switch.turn_off
-          target:
-            entity_id: "{{ state_attr('group.indoor_cameras','entity_id') }}"
 
+    - platform: state
+      entity_id: group.indoor_cameras
+      attribute: entity_id
+      to: ~
+  action:
+    - if: "{{ entities == none or entities|count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: info
+            message: "No valid entities."
+
+        - stop: "No valid entities."
       else:
-        - service: switch.turn_on
-          target:
-            entity_id: "{{ state_attr('group.indoor_cameras','entity_id') }}"
+        - if: "{{ is_state('binary_sensor.someone_home','on') }}"
+          then:
+            - service: switch.turn_off
+              target:
+                entity_id: "{{ entities }}"
+          else:
+            - service: switch.turn_on
+              target:
+                entity_id: "{{ entities }}"
 
 ###############################################################################
 ## Camera - Restart Wyze
