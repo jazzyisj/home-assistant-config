@@ -5,6 +5,8 @@
   alias: "[Alarm] Arming"
   description: "Start/cancel alarm arming timer."
   mode: queued
+  trace:
+    stored_traces: 50 #TEST
   trigger:
     - platform: state
       id: arming
@@ -23,12 +25,30 @@
       entity_id: input_boolean.alarm_enabled
       state: "on"
   action:
+    - wait_template: "{{ state_attr(trigger.entity_id,'arm_mode') != none }}" #TEST
+      timeout: 1 # takes a couple seconds for arm_mode to populate sometimes?
+
+    - if: "{{ not wait.completed }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: error
+            message: "Stop: arm_mode == {{ state_attr(trigger.entity_id,'arm_mode') }}"
+
+        - stop: "arm_mode == {{ state_attr(trigger.entity_id,'arm_mode') }}"
+          error: true
+
     - if: "{{ is_state(trigger.entity_id,'arming') }}"
       then:
         #ALARMO save arm mode for alarm_open_sensors, done here in case alarm armed directly
         # only master - forces zone to master alarm mode on rearm
         - if: "{{ trigger.entity_id == 'alarm_control_panel.master' }}"
           then:
+            - wait_template: "{{ state_attr(trigger.entity_id,'arm_mode') != none }}"
+              timeout: 10
+              continue_on_timeout: false
+
             - service: input_select.select_option
               target:
                 entity_id: input_select.current_arm_mode
