@@ -1,0 +1,147 @@
+###############################################################################
+## Templates - Network
+###############################################################################
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: sensor.time
+  binary_sensor:
+    - name: "Asus Router Connected"
+      unique_id: asus_router_connected
+      icon: mdi:router-wireless
+      device_class: connectivity
+      state: "{{ integration_entities('asusrouter') | select('has_value') | list | count > 0 }}"
+
+- binary_sensor:
+    - name: "Asus Router Connected Alert"
+      unique_id: asus_router_connected_alert
+      icon: mdi:router-wireless
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.asus_router_connected', 'off')
+            and is_state('input_boolean.network_alerts', 'on') }}
+
+    - name: "Speedtest Connected"
+      unique_id: speedtest_connected
+      icon: mdi:speedometer
+      device_class: connectivity
+      state: "{{ integration_entities('speedtestdotnet') | select('has_value') | list | count > 0 }}"
+
+    - name: "Speedtest Connected Alert"
+      unique_id: speedtest_connected_alert
+      icon: mdi:speedometer
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.speedtest_connected', 'off')
+            and is_state('input_boolean.network_alerts', 'on') }}
+
+    - name: "WIFI AP Upstairs Offline Alert"
+      unique_id: wifi_ap_upstairs_offline_alert
+      icon: mdi:wifi
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ not is_state('device_tracker.wifi_ap_upstairs', 'home')
+            and is_state('input_boolean.network_alerts', 'on') }}
+
+    - name: "WIFI AP Garage Offline Alert"
+      unique_id: wifi_ap_garage_offline_alert
+      icon: mdi:wifi
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ not is_state('device_tracker.wifi_ap_garage', 'home')
+            and is_state('input_boolean.network_alerts', 'on') }}
+
+    - name: "WAN"
+      unique_id: wan
+      icon: mdi:wan
+      device_class: connectivity
+      state: >
+        {{ is_state('binary_sensor.rt_ax58u_wan', 'on')
+            or is_state('binary_sensor.wan_ping', 'on') }}
+
+    - name: "WAN Offline Alert"
+      unique_id: wan_offline_alert
+      icon: mdi:wan
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.wan', 'off')
+            and is_state('input_boolean.network_alerts', 'on') }}
+      availability: "{{ has_value('binary_sensor.wan') }}"
+
+    - name: "Unknown Device Alert"
+      unique_id: unknown_device_alert
+      device_class: problem
+      delay_on: 60 # triggers at startup if asus integration slow to connect
+      state: >
+        {{ states('sensor.unknown_devices') | int(0) > 0
+            and is_state('input_boolean.network_alerts', 'on')
+            and is_state('input_boolean.startup_pending', 'off') }}
+
+- sensor:
+    - name: "Network Status"
+      unique_id: network_status
+      icon: mdi:home-assistant
+      state: >
+        {% if is_state('binary_sensor.wan', 'off') %} critical
+        {% elif  is_state('sensor.pi_hole_status', 'Disconnected')
+            or states('sensor.speedtest_download') | int(-1) < 50
+            or states ('sensor.speedtest_upload') | int(-1) < 50
+            or states('sensor.speedtest_ping') | int(-1) > 75  %} severe
+        {% elif is_state('sensor.pi_hole_status', 'Disabled')
+            or states('sensor.speedtest_download') | int(-1) < 100
+            or states ('sensor.speedtest_upload') | int(-1) < 100
+            or states('sensor.speedtest_ping') | int(-1) > 50 %} warning
+        {% elif states('sensor.speedtest_download') | int(-1) < 150
+            or states ('sensor.speedtest_upload') | int(-1) < 150
+            or states('sensor.speedtest_ping') | int(-1) > 25 %} minor
+        {% else %} ok
+        {% endif %}
+
+    - name: "Unknown Devices"
+      unique_id: unknown_devices
+      icon: mdi:devices
+      unit_of_measurement: devices
+      state: >
+        {{ state_attr(this.entity_id, 'entity_id') | count
+            if state_attr(this.entity_id, 'entity_id') != none else none }}
+      attributes:
+        entity_id: >
+          {{ states.device_tracker
+              | rejectattr('attributes.device_type', 'in', ['bluetooth', 'wired', 'wireless', 'location', 'bluetooth_le'])
+              | map(attribute='entity_id') | select('has_value') | list | sort }}
+
+    - name: "Wireless Network Devices"
+      unique_id: wireless_network_devices
+      icon: mdi:access-point-network
+      state: >
+        {{ state_attr(this.entity_id, 'entity_id') | count
+            if state_attr(this.entity_id, 'entity_id') != none else none }}
+      attributes:
+        entity_id: >
+          {{ states.device_tracker
+              | selectattr('attributes.device_type', 'defined')
+              | selectattr('attributes.device_type', 'eq', 'wireless')
+              | map(attribute='entity_id') | list | sort }}
+
+    - name: "Wired Network Devices"
+      unique_id: wired_network_devices
+      icon: mdi:router-network
+      state: >
+        {{ state_attr(this.entity_id, 'entity_id') | count
+            if state_attr(this.entity_id, 'entity_id') != none else none }}
+      attributes:
+        entity_id: >
+          {{ states.device_tracker
+              | selectattr('attributes.device_type', 'defined')
+              | selectattr('attributes.device_type', 'eq', 'wired')
+              | map(attribute='entity_id') | list | sort }}

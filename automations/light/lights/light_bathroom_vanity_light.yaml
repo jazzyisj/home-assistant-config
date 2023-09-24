@@ -1,0 +1,169 @@
+###############################################################################
+## Light - Bathroom Vanity Light Auto On
+###############################################################################
+- id: light_bathroom_vanity_light_auto_on
+  alias: "[Light] Bathroom Vanity Light Auto On"
+  description: "Turn on light."
+  mode: restart
+  trigger:
+    - platform: state
+      id: motion
+      entity_id: binary_sensor.bathroom_sensor_motion #IDEA Inovelli mmwave light
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+  condition:
+    - or:
+        - condition: state
+          entity_id: light.bathroom_vanity_light_rgb
+          state: "off"
+
+        - condition: state
+          entity_id: input_select.occupancy_mode
+          state: Night
+
+    - condition: state
+      entity_id:
+        - binary_sensor.nighttime_illuminance_lights
+        - binary_sensor.daytime_illuminance_lights
+        - binary_sensor.bathroom_illuminance_lights
+      match: any
+      state: "on"
+  action:
+    - if:
+        - condition: state
+          entity_id: switch.adaptive_lighting_bathroom_lights
+          state: "on"
+
+        - condition: state
+          entity_id: switch.shower_scene
+          state: "off"
+      then:
+        - if:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+          then:
+            - service: script.turn_light_on
+              data:
+                lights: light.bathroom_vanity_light_rgb
+                brightness: 70
+                activate_timer: true
+          else:
+            - service: script.turn_light_on
+              data:
+                lights: light.bathroom_vanity_light_rgb
+                activate_timer: true
+      else:
+        - service: script.turn_light_on
+          data:
+            lights: light.bathroom_vanity_light_rgb
+            profile: >
+              {{ iif( is_state('switch.shower_scene', 'off') and
+                  is_state('input_select.occupancy_mode', 'Night'), 'night', 'default') }}
+            activate_timer: true
+
+###############################################################################
+## Light - Bathroom Vanity Light Auto Off
+###############################################################################
+- id: light_bathroom_vanity_light_auto_off
+  alias: "[Light] Bathroom Vanity Light Auto Off"
+  description: "Turn off light."
+  mode: restart
+  trigger:
+    # req if motion/timer expired during restart
+    - platform: homeassistant
+      event: start
+
+    - platform: state
+      id: motion
+      entity_id: binary_sensor.bathroom_sensor_motion
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+      for:
+        minutes: 5
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      from: Night
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bathroom_vanity_light
+  condition:
+    - condition: state
+      entity_id: light.bathroom_vanity_light_rgb
+      state: "on"
+
+    - condition: state
+      entity_id:
+        - input_boolean.alarm_triggered
+        - switch.shower_scene
+      state: "off"
+
+    - condition: state
+      entity_id: binary_sensor.bathroom_sensor_motion
+      state: "off"
+      for:
+        minutes: 5
+  action:
+    - service: script.turn_light_on
+      data:
+        lights: light.bathroom_vanity_light_rgb
+        activate_timer: false
+
+###############################################################################
+## Light - Bathroom Vanity Night Light On
+###############################################################################
+- id: light_bathroom_vanity_night_light_on
+  alias: "[Light] Bathroom Vanity Night Light"
+  description: "Turn bathroom vanity night lighting on."
+  mode: restart
+  trigger:
+    - platform: state
+      entity_id: light.bathroom_vanity_light_rgb
+      to: "off"
+      for: 5 # allow timer to cancel, turn off on night mode for adaptive sleep
+
+    - platform: state
+      entity_id: input_select.occupancy_mode
+      to: Night
+  condition:
+    - condition: state
+      entity_id:
+        - binary_sensor.nighttime_illuminance_lights
+        - binary_sensor.daytime_illuminance_lights
+        - binary_sensor.bathroom_illuminance_lights
+      match: any
+      state: "on"
+
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      state: Night
+
+    - condition: state
+      entity_id:
+        - binary_sensor.bathroom_sensor_motion
+        - input_boolean.alarm_triggered
+        - switch.shower_scene
+      state: "off"
+  action:
+    - if:
+        - condition: state
+          entity_id: switch.adaptive_lighting_bathroom_lights
+          state: "on"
+      then:
+        - service: script.turn_light_on
+          data:
+            lights: light.bathroom_vanity_light_rgb
+            activate_timer: false
+      else:
+        - service: script.turn_light_on
+          data:
+            lights: light.bathroom_vanity_light_rgb
+            profile: night_dim
+            activate_timer: false

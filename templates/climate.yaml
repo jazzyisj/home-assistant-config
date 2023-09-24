@@ -1,0 +1,270 @@
+###############################################################################
+## Templates - Climate
+###############################################################################
+- button:
+    - name: "HVAC Filter Reset"
+      unique_id: hvac_filter_reset
+      icon: mdi:air-filter
+      press:
+        - service: browser_mod.notification
+          data:
+            message: "Resetting HVAC filter hours."
+            duration: 30000
+
+    - name: "Reset Thermostat"
+      unique_id: reset_thermostat
+      icon: mdi:thermostat
+      press:
+        - service: script.set_thermostat
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: sensor.time
+  binary_sensor:
+    - name: "Nest Connected"
+      unique_id: nest_connected
+      icon: mdi:home-circle
+      device_class: connectivity
+      state: "{{ integration_entities('nest') | select('has_value') | list | count > 0 }}"
+
+- binary_sensor:
+    - name: "Nest Connected Alert"
+      unique_id: nest_connected_alert
+      icon: mdi:home-circle
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.nest_connected', 'off')
+            and is_state('input_boolean.climate_alerts', 'on') }}
+
+    # set time_limit to true if unknown so state will get set
+    - name: "HVAC Filter Alert"
+      unique_id: hvac_filter_alert
+      icon: mdi:air-filter
+      device_class: problem
+      state: >
+        {% set filter_hours = states('sensor.hvac_filter_hours') | int(-1) > 250 %}
+        {% set time_limit = now() - states('button.hvac_filter_reset') | as_datetime
+            > timedelta(days=90) if has_value('button.hvac_filter_reset') else false %}
+        {{ filter_hours or time_limit }}
+
+    - name: "Indoor Low Temperature Alert"
+      unique_id: indoor_low_temperature_alert
+      icon: mdi:snowflake-alert
+      device_class: cold
+      delay_on: 900 # allow fans to come on, temp to stabalize
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count > 0 if entities not in ['[]', none] else false }}
+      attributes:
+        entity_id: >
+          {% set entities = namespace(value=[]) %}
+          {% set thresh = states('input_number.low_temperature_threshold') | int %}
+          {% set sensors = expand(['sensor.thermostat_temperature', 'sensor.bathroom_sensor_air_temperature',
+              'sensor.living_room_temperature', 'sensor.bedroom_temperature']) %}
+          {% for item in sensors if states(item.entity_id) | int(-1) < thresh | int %}
+          {% set entities.value = entities.value + [item.entity_id] %}
+          {% endfor %}
+          {{ entities.value }}
+
+    - name: "Indoor High Temperature Alert"
+      unique_id: indoor_high_temperature_alert
+      icon: mdi:sun-thermometer-outline
+      device_class: heat
+      delay_on: 900 # allow fans to come on, temp to stabalize
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count > 0 if entities not in ['[]', none] else false }}
+      attributes:
+        entity_id: >
+          {% set entities = namespace(value=[]) %}
+          {% set thresh = states('input_number.high_temperature_threshold') | int %}
+          {% set sensors = expand(['sensor.thermostat_temperature', 'sensor.bathroom_sensor_air_temperature',
+              'sensor.living_room_temperature', 'sensor.bedroom_temperature']) %}
+          {% for item in sensors if states(item.entity_id) | int(-1) > thresh | int %}
+          {% set entities.value = entities.value + [item.entity_id] %}
+          {% endfor %}
+          {{ entities.value }}
+
+    - name: "Indoor High Humidity Alert"
+      unique_id: indoor_high_humidity_alert
+      icon: mdi:water-alert
+      device_class: moisture
+      delay_on: 900 # allow fans to come on, humidity to stabalize
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count > 0 if entities not in ['[]', none] else false }}
+      attributes:
+        entity_id: >
+          {% set entities = namespace(value=[]) %}
+          {% set thresh = states('input_number.high_humidity_threshold') | int %}
+          {% set sensors = expand(['sensor.thermostat_humidity', 'sensor.bathroom_sensor_humidity',
+              'sensor.living_room_humidity', 'sensor.bedroom_humidity']) %}
+          {% for item in sensors if states(item.entity_id) | int(-1) > thresh | int %}
+          {% set entities.value = entities.value + [item.entity_id] %}
+          {% endfor %}
+          {{ entities.value }}
+
+    - name: "Bathroom Mold Risk Alert"
+      unique_id: bathroom_mold_risk_alert
+      icon: mdi:mushroom
+      device_class: moisture
+      delay_on: 3600
+      state: >
+        {{ states('sensor.bathroom_mold_risk') | int(-1)
+              > states('input_number.mold_risk_threshold') | int
+            and is_state('input_boolean.climate_alerts', 'on') }}
+
+    - name: "Open Windows Alert"
+      unique_id: open_windows_alert
+      delay_on: 900
+      state: "off"
+    # if cool and outdoor temp < cool temp - 2 and outside humidity < 70
+    # if heat and outdoor temp > heat temp + 2 and outside humidity < 70
+
+    - name: "HVAC Window Door Open Alert"
+      unique_id: hvac_window_door_open_alert
+      device_class: problem
+      delay_on: 900
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ false if entities == none else entities | count > 0 }}
+      attributes:
+        entity_id: >
+          {% if is_state('input_boolean.climate_alerts', 'on')
+                and not is_state('input_select.hvac_mode', 'off') %}
+            {{ expand('group.door_alert_sensors')
+                  | rejectattr('entity_id', 'contains', 'garage')
+                  | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list | sort
+                + expand('group.window_alert_sensors') | selectattr('state', 'eq', 'on')
+                  | map(attribute='entity_id') | list | sort }}
+          {% endif %}
+
+- sensor:
+    # req for hvac runtime history stats
+    - name: "Thermostat HVAC State"
+      unique_id: thermostat_hvac_state
+      state: "{{ state_attr('climate.thermostat', 'hvac_action') }}"
+
+    - name: "Thermostat Target Temperature"
+      unique_id: thermostat_target_temperature
+      icon: mdi:hvac
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: >
+        {% set hvac = states('climate.thermostat') %}
+        {% set temp = state_attr('climate.thermostat', 'temperature') %}
+        {% set high = state_attr('climate.thermostat', 'target_temp_high') %}
+        {% set low = state_attr('climate.thermostat', 'target_temp_low') %}
+        {% set outdoor = states('sensor.outdoor_temperature') %}
+        {% if hvac in ['heat', 'cool'] %}{{ temp | int if is_number(temp) else none }}
+        {% elif hvac == 'heat_cool' %}
+          {% if is_number(high)and is_number(low) and is_number(outdoor) %}
+            {% if outdoor | int > high %} {{ high | int }}
+            {% else %} {{ low | int }}
+            {% endif %}
+          {% else %} {{ low }} {# defaults to heat target if no outdoor temp #}
+          {% endif %}
+        {% else %} {{ none }}
+        {% endif %}
+      availability: "{{ has_value('climate.thermostat') }}"
+
+    - name: "Indoor Temperature"
+      unique_id: indoor_temperature
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: >
+        {% if is_number(states('sensor.thermostat_temperature')) %}
+          {% set def = states('sensor.thermostat_temperature') | int %}
+        {% elif is_number(states('sensor.living_room_temperature')) %}
+          {% set def = states('sensor.living_room_temperature') | int %}
+        {% elif is_number(states('sensor.bedroom_temperature')) %}
+          {% set def = states('sensor.bedroom_temperature') | int %}
+        {% endif %}
+        {{ average([states('sensor.thermostat_temperature') | int('unknown'),
+            states('sensor.living_room_temperature') | int('unknown'),
+            states('sensor.bedroom_temperature') | int('unknown')], def) | round(1) }}
+      availability: >
+        {{ is_number(states('sensor.thermostat_temperature'))
+            or is_number(states('sensor.living_room_temperature'))
+            or is_number(states('sensor.bedroom_temperature')) }}
+
+    - name: "Indoor Temperature Differential"
+      unique_id: indoor_temperature_differential
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: >
+        {% set indoor = states('sensor.indoor_temperature') | float %}
+        {% set outdoor = states('sensor.outdoor_temperature') | float %}
+        {{ (indoor - outdoor) | round(1) | abs }}
+      availability: >
+        {{ is_number(states('sensor.indoor_temperature'))
+            and is_number(states('sensor.outdoor_temperature')) }}
+
+    - name: "Indoor Humidity"
+      unique_id: indoor_humidity
+      device_class: humidity
+      state_class: measurement
+      unit_of_measurement: "%"
+      state: >
+        {% if is_number(states('sensor.thermostat_humidity')) %}
+          {% set def = states('sensor.thermostat_humidity') | int %}
+        {% elif is_number(states('sensor.living_room_humidity')) %}
+          {% set def = states('sensor.living_room_humidity') | int %}
+        {% elif is_number(states('sensor.bedroom_humidity')) %}
+          {% set def = states('sensor.bedroom_humidity') | int %}
+        {% endif %}
+        {{ average([states('sensor.thermostat_humidity') | int('unknown'),
+            states('sensor.living_room_humidity') | int('unknown'),
+            states('sensor.bedroom_humidity') | int('unknown')], def) | int }}
+      availability: >
+        {{ is_number(states('sensor.thermostat_humidity'))
+            or is_number(states('sensor.living_room_humidity'))
+            or is_number(states('sensor.bedroom_humidity')) }}
+
+    - name: "Indoor Humidity Differential"
+      unique_id: indoor_humidity_differential
+      device_class: humidity
+      state_class: measurement
+      unit_of_measurement: "%"
+      state: >
+        {% set indoor = states('sensor.indoor_humidity') | float %}
+        {% set outdoor = states('sensor.outdoor_humidity') | float %}
+        {{ (indoor - outdoor) | round(1) | abs }}
+      availability: >
+        {{ is_number(states('sensor.indoor_humidity'))
+            and is_number(states('sensor.outdoor_humidity')) }}
+
+    - name: "HVAC Boost"
+      unique_id: hvac_boost #TODO use temp differential
+      icon: "{{ iif(states(this.entity_id) | int(-1) > -1, 'mdi:thermometer-plus', 'mdi:thermometer-minus') }}"
+      state_class: measurement
+      unit_of_measurement: "°C"
+      state: >
+        {% if is_state('input_boolean.hvac_boost', 'on') %}
+          {% set temp = states('sensor.outdoor_temperature') | int %}
+          {% set humidity = states('sensor.outdoor_humidity') | int %}
+          {% set hvac_mode = states('climate.thermostat') %}
+          {% set cool = true if hvac_mode == 'cool' or (hvac_mode == 'heat_cool'
+              and temp >= state_attr('climate.thermostat', 'target_temp_high') | int) else false %}
+          {% if not cool and is_state('binary_sensor.waketime_active', 'on') and temp < 5 %} {{ iif(temp < -5, 2, 1) }}
+          {% elif is_state('binary_sensor.outdoor_low_temperature_alert', 'on') %} {{ iif(humidity > 80, 2, 1) }}
+          {% elif is_state('binary_sensor.outdoor_high_temperature_alert', 'on') %} {{ iif(humidity > 80,-1, 0) }}
+          {% elif humidity > 80 %}{{ iif(cool,-1, 1) }}
+          {% else %} 0
+          {% endif %}
+        {% else %} 0
+        {% endif %}
+      availability: >
+        {{ is_number(states('sensor.outdoor_temperature'))
+            and is_number(states('sensor.outdoor_humidity'))
+            and has_value('climate.thermostat') }}

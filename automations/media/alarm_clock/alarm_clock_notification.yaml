@@ -1,0 +1,92 @@
+###############################################################################
+## Alarm Clock - Notification
+###############################################################################
+- id: alarm_clock_notification
+  alias: "[Alarm Clock] Notification"
+  description: "Notifications for active alarm clock."
+  mode: restart
+  variables:
+    person: jason
+  trigger:
+    - platform: state
+      entity_id:
+        - binary_sensor.alarm_clock
+        - switch.alarm_clock_snooze
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      for: 5 # allow switch to turn back off if conditions fail
+
+    - platform: state
+      entity_id:
+        - switch.alarm_clock_snooze
+        - binary_sensor.alarm_clock
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: event
+      id: dismiss
+      event_type: mobile_app_notification_action
+      event_data:
+        action: dismiss_alarm_clock
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_clock_test_play
+      state: "off"
+
+    - condition: template
+      alias: "Person is valid"
+      value_template: "{{ person in ['jason'] }}"
+  action:
+    - if:
+        - condition: state
+          entity_id: binary_sensor.alarm_clock
+          state: "on"
+
+        - condition: template
+          value_template: "{{ trigger.id != 'dismiss' }}"
+      then:
+        - if: # don't send notification if snoozed
+            - condition: state
+              entity_id: switch.alarm_clock_snooze
+              state: "on"
+          then:
+            - service: script.alarm_clock_notification
+              data:
+                type: snooze
+                person: "{{ person }}"
+          else:
+            - repeat:
+                sequence:
+                  - if: # don't send notification if snoozed
+                      - condition: state
+                        entity_id: switch.alarm_clock_snooze
+                        state: "off"
+                    then:
+                      # when snooze turned off this might fire one more time
+                      - delay: 5 # delay and check alarm state again
+
+                      - condition: state
+                        entity_id: binary_sensor.alarm_clock
+                        state: "on"
+
+                      - service: script.alarm_clock_notification
+                        data:
+                          type: alarm
+                          person: "{{ person }}"
+
+                  - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
+                    timeout: 120 # send a notification every 2 minutes
+                until:
+                  - condition: state
+                    entity_id: binary_sensor.alarm_clock
+                    state: "off"
+      else:
+        - service: "notify.{{ person }}"
+          data:
+            message: clear_notification
+            data:
+              tag: alarm_clock

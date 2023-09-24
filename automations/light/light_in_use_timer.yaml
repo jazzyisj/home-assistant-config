@@ -1,0 +1,122 @@
+###############################################################################
+## Light - In Use Timer
+###############################################################################
+- id: light_in_use_timer
+  alias: "[Light] In Use Timer"
+  description: "Turn in use timer on/off when device state changes."
+  mode: parallel
+  max: 50
+  variables:
+    timer: >
+      {% from 'light.jinja' import light_timer %}
+      {{ light_timer(trigger.entity_id) }}
+  trigger:
+    - platform: state
+      id: timed
+      entity_id:
+        - light.bathroom_vanity_light_rgb
+        - light.bathroom_shower_light
+        - light.side_entrance_light
+      to:
+        - "on"
+        - "off"
+
+    - platform: state
+      id: normal
+      entity_id:
+        - light.back_house_potlights
+        - light.back_yard_tree_lights
+        - light.bedroom_fan_light
+        - light.bedroom_potlights
+        - light.dining_room_light_rgb
+        - light.dining_room_potlights
+        - light.front_house_potlights
+        - light.front_porch_light
+        - light.hallway_potlights
+        - light.kitchen_sink_light
+        - light.kitchen_potlights
+        - light.living_room_cove_light
+        - light.living_room_fan_light
+        - light.living_room_potlights
+        - light.master_bedroom_light
+        - light.office_fan_light
+        - light.office_potlights
+        - light.outside_garage_lights
+      to: #ISSUE can't trigger by brightness attribute because of adaptive lighting
+        - "on"
+        - "off"
+  condition: "{{ has_value(timer) }}"
+  action:
+    - if: "{{ is_state(trigger.entity_id, 'on') }}"
+      then:
+        - if: >
+            {{ trigger.id == 'timed' or (trigger.id == 'normal'
+                and now() - trigger.to_state.last_changed > timedelta(seconds=30)) }}
+          then:
+            - service: timer.start
+              target:
+                entity_id: "{{ timer }}"
+      else:
+        - service: timer.cancel
+          target:
+            entity_id: "{{ timer }}"
+
+###############################################################################
+## Light - In Use Timer Finished
+###############################################################################
+- id: light_in_use_timer_finished
+  alias: "[Light] In Use Timer Finished"
+  description: "Turn off light manual mode when light in use timer expires."
+  mode: parallel
+  max: 50
+  variables:
+    light: >
+      {% set light = 'light.' ~ trigger.entity_id.split('.')[1] %}
+      {% if is_state_attr(light, 'rgb_light', 'control') %}
+        {% set light = light ~ '_rgb' %}
+      {% endif %}
+      {{ light }}
+    switch: >
+      {{ (expand(integration_entities('adaptive_lighting'))
+          | selectattr('domain', 'eq', 'switch')
+          | selectattr('entity_id', 'contains', 'adaptive_lighting')
+          | selectattr('attributes.configuration', 'defined')
+          | selectattr('attributes.configuration.lights', 'defined')
+          | selectattr('attributes.configuration.lights', 'contains',
+              trigger.entity_id.split('.')[1])
+          | map(attribute='entity_id') | list)[0] | default(none) }}
+  trigger:
+    - platform: state
+      entity_id:
+        - timer.bathroom_vanity_light
+        - timer.bathroom_shower_light
+        - timer.side_entrance_light
+        - timer.back_house_potlights
+        - timer.back_yard_tree_lights
+        - timer.bedroom_fan_light
+        - timer.bedroom_potlights
+        - timer.dining_room_light
+        - timer.dining_room_potlights
+        - timer.front_house_potlights
+        - timer.front_porch_light
+        - timer.hallway_potlights
+        - timer.kitchen_sink_light
+        - timer.kitchen_potlights
+        - timer.living_room_cove_light
+        - timer.living_room_fan_light
+        - timer.living_room_potlights
+        - timer.master_bedroom_light
+        - timer.office_fan_light
+        - timer.office_potlights
+        - timer.outside_garage_lights
+      to: idle
+      from: active
+      for: 2 # allow light to turn off, avoid turning up before off
+  action:
+    - if: "{{ switch != none and is_state(switch, 'on') }}"
+      then:
+        - service: adaptive_lighting.set_manual_control
+          data:
+            entity_id: "{{ switch }}"
+            lights: "{{ light }}"
+            manual_control: false

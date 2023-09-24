@@ -1,0 +1,62 @@
+###############################################################################
+## Reset Jammed Locks
+###############################################################################
+reset_jammed_locks:
+  alias: "Reset Jammed Locks"
+  description: "Reset jammed entry locks."
+  icon: mdi:lock
+  variables:
+    buttons: >
+      {{ states.binary_sensor | selectattr('entity_id', 'contains', '_door_lock_lock_jammed')
+            | selectattr('state', 'eq', 'on')
+            | map(attribute='object_id') | map('regex_replace', find='(.*)_door_lock_lock_jammed',
+              replace='button.\\1_door_lock_idle_access_control_lock_state', ignorecase=False) | list }}
+    locks: >
+      {{ expand(buttons) | map(attribute='object_id')
+          | map('regex_replace', find='(.*)_door_lock_idle_access_control_lock_state',
+              replace='lock.\\1_door_lock', ignorecase=False) | list }}
+  sequence:
+    - if: "{{ locks == none or locks | count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: error
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+          error: true
+
+    - service: lock.lock
+      data:
+        entity_id: "{{ locks }}"
+
+    - delay: 5 # allow locks to unlock
+
+    # toggle lock to reset state from unknown
+    - service: lock.unlock
+      data:
+        entity_id: "{{ locks }}"
+
+    - delay: 5 # allow locks to unlock
+
+    - service: lock.lock
+      data:
+        entity_id: "{{ locks }}"
+
+    - wait_template: "{{ expand(locks) | selectattr('state', 'eq', 'unlocked') | list | count == 0 }}"
+      timeout: 60
+
+    - if: "{{ wait.completed }}"
+      then:
+        - service: button.press
+          target:
+            entity_id: "{{ buttons }}"
+      else:
+        - service: script.tts_play
+          data:
+            message: |
+              {%- from 'format.jinja' import clist_locks -%}
+              {%- set plural = 's have' if locks | count > 1 else ' has' -%}
+              The {{ clist_locks(locks) }} door lock jam{{ plural }} not been cleared!
+            alert: true

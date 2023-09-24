@@ -1,0 +1,176 @@
+###############################################################################
+## Turn Light On
+###############################################################################
+turn_light_on:
+  alias: "Turn Light On"
+  description: "Turn light on."
+  icon: mdi:lightbulb
+  mode: parallel
+  fields:
+    lights:
+      description: "List of light entity ids"
+      example: "['light.dining_room_light_rgb', 'light.dining_room_potlights']"
+    activate_timer:
+      description: "Activate light in use timer"
+      example: "true"
+    bypass_timer:
+      description: "Bypass light in use timer / manual mode"
+      example: "false"
+    override:
+      description: "Override scene/manual mode."
+      example: "false"
+    reset:
+      description: "Reset manual mode."
+      example: "false"
+    profile:
+      description: "Light profile"
+      example: "default"
+    brightness:
+      description: "Light brightness"
+      example: "180"
+    rgb_color:
+      description: "RGB color"
+      example: "[255, 180, 107]"
+    transition:
+      description: "Transition time"
+      example: "5"
+  variables:
+    entities: >
+      {% from 'light.jinja' import light_list %}
+      {{ light_list(lights) }}
+    override: "{{ override | default(false) }}"
+    reset: "{{ reset | default(false) }}"
+  sequence:
+    - if: "{{ entities == none or entities | count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: info
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+
+    - service: automation.turn_off
+      target:
+        entity_id: automation.light_in_use_timer
+
+    - repeat:
+        for_each: "{{ entities }}"
+        sequence:
+          - variables:
+              timer: >
+                {% from 'light.jinja' import light_timer %}
+                {{ light_timer(repeat.item) }}
+              switch: >
+                {% from 'light.jinja' import adaptive_switch %}
+                {{ adaptive_switch(repeat.item) }}
+              manual: >
+                {% from 'light.jinja' import manual_mode %}
+                {{ manual_mode(repeat.item, switch) }}
+
+          - if: "{{ brightness is defined or profile is defined or rgb_color is defined }}"
+            then:
+              - if: "{{ switch != none and is_state(switch, 'on') }}"
+                then:
+                  - service: adaptive_lighting.set_manual_control
+                    data:
+                      entity_id: "{{ switch }}"
+                      lights: "{{ repeat.item }}"
+                      manual_control: true
+                    continue_on_error: true
+
+              - service: light.turn_on
+                target:
+                  entity_id: "{{ repeat.item }}"
+                data: >-
+                  {%- set data_dict = namespace(value='') %}
+                  {%- set options = ['brightness', 'transition', 'profile'] %}
+                  {%- set values = [brightness | default(none), transition | default(none), profile | default(none)] %}
+                  {%- for item in options %}
+                    {%- if values[loop.index0] != none %}
+                      {%- set data_dict.value = data_dict.value
+                          ~ '"' ~ item ~ '":"'
+                          ~ values[loop.index0] ~ '", ' %}
+                    {%- endif %}
+                  {%- endfor -%}
+                  {{- '{' ~ data_dict.value[:-1] -}}
+                  {%- if rgb_color is defined -%}
+                    {{- iif(data_dict.value != '', ', ', '') -}}
+                    "rgb_color":{{ rgb_color -}}
+                  {%- endif -%}
+                  {{ '}' }}
+                continue_on_error: true
+            else:
+              - condition: template
+                alias: "Timer bypassed or no timer, or timer is idle and not manual mode"
+                value_template: >
+                  {{ override or (bypass_timer | default(false) or timer == none)
+                      or (not manual and is_state(timer, 'idle')) }}
+
+              - condition: template
+                alias: "Light not in active scene"
+                value_template: >
+                  {{ override or repeat.item not in state_attr('binary_sensor.scene_active', 'entity_id')
+                      if is_state('binary_sensor.scene_active', 'on') else true }}
+
+              - if: "{{ switch != none and is_state(switch, 'on') }}"
+                then:
+                  - if: "{{ override }}"
+                    then:
+                      - service: adaptive_lighting.set_manual_control
+                        data:
+                          entity_id: "{{ switch }}"
+                          lights: "{{ repeat.item }}"
+                          manual_control: true
+                        continue_on_error: true
+
+                  - service: adaptive_lighting.apply
+                    data:
+                      entity_id: "{{ switch }}"
+                      lights: "{{ repeat.item }}"
+                      transition: "{{ transition | default(0) }}"
+                      adapt_brightness: "{{ is_state(repeat.item, 'off') or override }}"
+                      adapt_color: "{{ is_state(repeat.item, 'off') or override }}"
+                      prefer_rgb_color: true
+                      turn_on_lights: "{{ is_state(repeat.item, 'off') or override }}"
+                    continue_on_error: true
+                else:
+                  - service: light.turn_on
+                    target:
+                      entity_id: "{{ repeat.item }}"
+                    data:
+                      profile: "{{ iif(is_state('input_select.occupancy_mode', 'Night'), 'default_dim', 'default') }}"
+                      transition: "{{ transition | default(0) }}"
+                    continue_on_error: true
+
+          # only run on last iteration or timer will prevent remaining bulbs turning on (groups)
+          # activate_timer: true only used on single lights / light groups
+          - if: "{{ repeat.last and timer != none and (activate_timer | default(false)) }}"
+            then:
+              - service: timer.start
+                target:
+                  entity_id: "{{ timer }}"
+                continue_on_error: true
+
+          - if: "{{ reset and switch != none }}"
+            then:
+              - service: adaptive_lighting.set_manual_control
+                data:
+                  entity_id: "{{ switch }}"
+                  lights: "{{ repeat.item }}"
+                  manual_control: false
+                continue_on_error: true
+
+    - if: "{{ is_state('script.turn_light_off', 'off') }}"
+      then:
+        - wait_template: >
+            {{ expand(entities) | selectattr('state', 'eq', 'off') | list | count == 0
+                and state_attr(this.entity_id, 'current') | int == 1 }}
+          timeout: 15
+
+        - if: "{{ is_state('script.turn_light_off', 'off') }}"
+          then:
+            - service: automation.turn_on
+              target:
+                entity_id: automation.light_in_use_timer

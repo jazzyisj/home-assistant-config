@@ -1,0 +1,113 @@
+###############################################################################
+## TTS - Finished
+###############################################################################
+- id: tts_finished
+  alias: "[TTS] Finished"
+  description: "Reset tts queue."
+  max_exceeded: silent
+  variables:
+    tts_players: "{{ states('input_text.tts_active_players').split(', ') | list }}"
+  trigger:
+    - platform: state
+      entity_id: script.tts_play
+      to: "off"
+      from: "on"
+      for: 2 # let any queued tts message play
+
+    - platform: state
+      entity_id: input_boolean.tts
+      to: "on"
+      for:
+        minutes: 2
+  action:
+    # only turn off if tts not muted, no resume
+    - if:
+        - condition: state
+          entity_id: input_boolean.tts_muted
+          state: "off"
+      then:
+        - service: script.media_player_set_volumes
+          data: #MASS restore snapshot does not restore volume>????
+            source: tts_off
+          continue_on_error: true
+
+        - service: script.turn_media_player_off # turn off prevent play wrong player
+          data:
+            entity_id: "{{ tts_players }}"
+            reset_volume: false
+          continue_on_error: true
+
+    # reset tts booleans
+    - service: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.tts
+          - input_boolean.tts_muted
+
+###############################################################################
+## TTS - Override Off
+###############################################################################
+- id: tts_override_off
+  alias: "[TTS] Override Off"
+  description: "Reset manual tts settings."
+  trigger:
+    - platform: state
+      entity_id: input_boolean.tts_override
+      to: "off"
+  action:
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.tts_service_manual
+      data:
+        option: None Selected
+
+    - service: select.select_option
+      target:
+        entity_id: select.tts_media_player_manual
+      data:
+        option: None Selected
+
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.tts_volume_manual
+      data:
+        value: 0
+
+###############################################################################
+## TTS - Resume MASS Queues
+###############################################################################
+- id: tts_resume_mass_queues
+  alias: "[TTS] Resume MASS Queues"
+  description: "Resume mass play queue."
+  variables:
+    mass_players: "{{ states('input_text.tts_restore_mass').split(', ') | list }}"
+    tts_players: "{{ states('input_text.tts_active_players').split(', ') | list }}"
+  trigger:
+    - platform: state
+      entity_id: input_boolean.tts
+      to: "off"
+  condition: "{{ is_state('input_boolean.resume_mass', 'on') }}"
+  action:
+    #ISSUE resume on wrong queue (tts group if mass was single) even when queue cleared
+    # players must be turned off to prevent it
+
+    # - repeat:
+    #     for_each: "{{ tts_players }}"
+    #     sequence:
+    #       - service: mass.queue_command #MASS
+    #         data:
+    #           player_id: "{{ tts_players[repeat.index-1] ~ '_2' }}"
+    #           command: clear
+    #         continue_on_error: true
+
+    #       - service: mass.queue_command
+    #         data:
+    #           player_id: "{{ mass_players[repeat.index-1] }}"
+    #           command: snapshot_restore #MASS not working
+    #         continue_on_error: true
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.resume_mass
+
+    - service: script.media_play #TEMP until queue works

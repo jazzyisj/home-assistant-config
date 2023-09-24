@@ -1,0 +1,43 @@
+###############################################################################
+## Pause Media Players
+###############################################################################
+media_players_pause:
+  alias: "Media Players Pause"
+  description: "Pause media players."
+  icon: mdi:play-box-multiple-outline
+  mode: restart
+  fields:
+    entity_id:
+      description: "Media players to pause."
+      example: "media_player.dining_room_hub"
+  variables:
+    media_players: > #BITWISE
+      {% set media_players = expand(entity_id | default(state_attr('group.single_media_players', 'entity_id'))) %}
+      {% set active = namespace(entity_id=[]) %}
+      {% for item in media_players | selectattr('state', 'in', ['playing', 'buffering']) %}
+        {% if item.attributes.supported_features | bitwise_and(1) %}
+          {% set active.entity_id = active.entity_id + [item.entity_id] %}
+        {% endif %}
+      {% endfor %}
+      {{ active.entity_id }}
+  sequence:
+    - if: "{{ media_players == none or media_players | count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: info
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+
+    - condition: template
+      value_template: "{{ media_players | count > 0 }}"
+
+    - service: media_player.media_pause
+      target:
+        entity_id: "{{ media_players }}"
+
+    # wait until all tts tts players are idle state
+    - wait_template: "{{ expand(media_players) | selectattr('state', 'in', ['playing', 'buffering']) | list | count == 0 }}"
+      timeout: 10

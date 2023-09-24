@@ -1,0 +1,76 @@
+###############################################################################
+## Alarm Clock Notification
+###############################################################################
+alarm_clock_notification:
+  alias: "Alarm Clock Notification"
+  description: "Send alarm clock notification."
+  fields:
+    type:
+      description: "Notification type (alarm or snooze)."
+    person:
+      description: "Person to notify."
+  variables:
+    play_delay: "{{ states('input_number.alarm_clock_play_delay') | int }}"
+    snooze_min: "{{ states('input_number.alarm_clock_snooze_time') | int }}"
+    alarm_time: >
+      {% if type == 'snooze' %}
+        {{ (now() + timedelta(minutes=snooze_min)) }}
+      {% else %}
+        {% set atime = states.binary_sensor.alarm_clock.last_changed.replace(second=0, microsecond=0) %}
+        {% if atime == now().replace(second=0, microsecond=0) %}
+          {{ atime + timedelta(seconds=play_delay) }}
+        {% else %}
+          {{ now() }}
+        {% endif %}
+      {% endif %}
+  sequence:
+    - service: "notify.{{ person }}"
+      data:
+        title: "{{ 'Wake Up Alarm!' if type == 'alarm' else 'Alarm Snoozed!' }}"
+        message: |
+          {%- set alarm_time = alarm_time | as_datetime %}
+          {%- if type == 'snooze' %}
+          Snooze Time: {{ snooze_min }} minutes.
+          Next Alarm: {{ alarm_time.strftime('%-I:%M %p') }}.
+          {%- else %}
+          Wake up! It's {{ now().strftime('%-I:%M %p') }}!
+            {%- if now() <= alarm_time %}
+          The alarm will play at {{ alarm_time.strftime('%-I:%M %p') }}.
+            {%- endif %}
+          {%- endif -%}
+        data:
+          tag: alarm_clock
+          group: General
+          channel: General
+          importance: max
+          ttl: 0
+          priority: high
+          visibility: public
+          persistent: true
+          sticky: true
+          chronometer: true # time to alarm play, then how long since alarm or snooze time remaining
+          when: >
+            {% if type == 'snooze' %}
+              {{ (now().timestamp() + (snooze_min * 60)) | int }}
+            {% else %}
+              {% set alarm_time = alarm_time | as_datetime %}
+              {% if now() < alarm_time %}
+                {{ (now().timestamp() + play_delay) | int }}
+              {% else %}
+                {{ alarm_time.timestamp() | int }}
+              {% endif %}
+            {% endif %}
+          notification_icon: "{{ states.binary_sensor.alarm_clock.attributes.icon }}"
+          icon_url: !secret ALARM_CLOCK_ICON
+          ledColor: !secret NOTIFY_COLOR
+          color: !secret NOTIFY_COLOR
+          vibrationPattern: !secret GENERAL_VIBRATION
+          actions: >
+            {% if type == 'snooze' %}
+              [{'title':'Alarm Off', 'action':'turn_off_alarm_clock'},
+                {'title':'Dismiss', 'action':'dismiss_alarm_clock'}]
+            {% else %}
+              [{'title':'Snooze', 'action':'snooze_alarm_clock'},
+                {'title':'Alarm Off', 'action':'turn_off_alarm_clock'},
+                {'title':'Dismiss', 'action':'dismiss_alarm_clock'}]
+            {% endif %}

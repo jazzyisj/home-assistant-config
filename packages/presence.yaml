@@ -1,0 +1,197 @@
+###############################################################################
+## Package - Presence
+###############################################################################
+homeassistant:
+  customize:
+    alert.presence_override_jason:
+      icon: mdi:account-star
+      category: presence
+    alert.occupancy_mode:
+      icon: mdi:home-alert
+      category: presence
+
+    binary_sensor.jason_home:
+      icon: mdi:home-account
+      device_class: occupancy
+
+    camera.jason_location:
+      control: hidden
+
+    zone.home:
+      radius: 50
+
+proximity:
+  jphone_home:
+    zone: home
+    devices: person.jason
+    tolerance: 100 # meters
+    unit_of_measurement: km
+
+input_boolean:
+  guest_home:
+    name: "Guest Home"
+    icon: mdi:account-supervisor
+
+  home_override_jason:
+    name: "Jason Home Override"
+    icon: mdi:account-lock
+    initial: false
+
+  jason_almost_home:
+    name: "Jason Almost Home"
+    icon: mdi:account-supervisor-circle
+    initial: false
+
+  jason_home:
+    name: "Jason Home"
+    icon: mdi:account
+
+  occupancy_announcements:
+    name: "Occupancy Announcements"
+    icon: mdi:account-voice
+
+  calendar_notifications_jason:
+    name: "Jason Calendar Notifications"
+    icon: mdi:calendar
+
+  occupancy_notifications:
+    name: "Occupancy Notifications"
+    icon: mdi:account-multiple
+
+  occupancy_override:
+    name: "Occupancy Override"
+    initial: false
+
+  presence_alerts:
+    name: "Presence Alerts"
+    icon: mdi:alert
+
+  vacation_mode:
+    name: "Vacation Mode"
+    icon: mdi:beach
+
+input_select:
+  last_person_to_arrive:
+    name: "Last Person To Arrive"
+    icon: mdi:account-arrow-left
+    options: &person_options
+      - Jason
+      - Guest
+      - none
+
+  last_person_to_leave:
+    name: "Last Person To Leave"
+    icon: mdi:account-arrow-right
+    options: *person_options
+
+  occupancy_mode:
+    name: "Occupancy Mode"
+    icon: mdi:home-account
+    options:
+      - Home
+      - Night
+      - Away
+      - Guest
+      - Vacation
+
+sensor:
+  - platform: history_stats
+    name: "Jason Home Week"
+    entity_id: binary_sensor.jason_home
+    state: "on"
+    type: time
+    end: "{{ now().replace(hour=0).replace(minute=0).replace(second=0) }}"
+    duration:
+      days: 7
+
+  - platform: history_stats
+    name: "Someone Home Week"
+    entity_id: binary_sensor.someone_home
+    state: "on"
+    type: time
+    end: "{{ now().replace(hour=0).replace(minute=0).replace(second=0) }}"
+    duration:
+      days: 7
+
+alert:
+  occupancy_mode:
+    name: "Occupancy Mode"
+    title: "Occupancy Mode"
+    message: |
+      {%- set occ_mode = states('input_select.occupancy_mode') %}
+      {%- set someone_home = is_state('binary_sensor.someone_home', 'on') %}
+      {%- set master_alarm = states('alarm_control_panel.master') %}
+      {%- if (someone_home and master_alarm == 'Armed Away' ) or (not someone_home and master_alarm in ['Disarmed', 'Armed Home']) %}
+      {{ 'Someone' if someone_home  else  'Nobody' }} is home but the house alarm is {{ states('sensor.master_alarm_status') }}.
+      {%- elif (occ_mode != 'Night' and master_alarm == 'Armed Night') %}
+      The house is in {{ occ_mode }} mode but the alarm is {{ states('sensor.master_alarm_status') }}.
+      {%- elif (someone_home and occ_mode in ['Away', 'Vacation']) or (not someone_home and occ_mode in ['Home', 'Guest', 'Night']) %}
+      {{ 'Someone' if someone_home else 'Nobody' }} is home but the house is in {{ occ_mode }} mode.
+      {%- endif %}
+      Did you forget to
+      {{- ' disarm ' if master_alarm in ['Armed Night', 'Armed Away'] or someone_home else ' arm ' -}} the alarm,
+      {{- ' or has your phone not connected to the network' if not someone_home }}?
+    done_message: clear_notification
+    entity_id: binary_sensor.occupancy_mode_alert
+    state: "on"
+    repeat: 30
+    can_acknowledge: true
+    skip_first: false
+    notifiers: jason
+    data:
+      tag: occupancy_mode
+      group: General
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      visibility: private
+      notification_icon: mdi:home-alert
+      icon_url: !secret HOME_ALERT_ICON
+      ledColor: !secret WARNING_COLOR
+      color: !secret WARNING_COLOR
+      vibrationPattern: !secret ALERT_VIBRATION
+      clickAction: /ui-mobile/presence
+      actions:
+        - title: "Home"
+          action: set_home_mode
+
+        - title: "Away"
+          action: set_away_mode
+
+        - title: "Alarm"
+          action: URI
+          uri: !secret ALARM_URI
+
+  presence_override_jason:
+    name: "Jason Presence Override "
+    title: "Jason: Presence Override"
+    message: |
+      {% set time = as_local(states.input_boolean.home_override_jason.last_changed).strftime('%-I:%M %p') %}
+      Jason's presence override was turned on at {{ time }}.
+    done_message: clear_notification
+    entity_id: binary_sensor.presence_override_jason_alert
+    state: "on"
+    repeat: 60
+    notifiers: jason
+    data:
+      tag: presence_override
+      group: General
+      channel: Alert
+      importance: max
+      ttl: 0
+      priority: high
+      persistant: true
+      visibility: private
+      notification_icon: mdi:account-alert
+      icon_url: !secret HOME_ALERT_ICON
+      ledColor: !secret WARNING_COLOR
+      color: !secret WARNING_COLOR
+      vibrationPattern: !secret ALERT_VIBRATION
+      clickAction: /ui-mobile/presence
+      actions:
+        - title: "Pause"
+          action: pause_alert_presence_override_jason
+
+        - title: "Override Off"
+          action: turn_off_presence_override_jason

@@ -1,0 +1,231 @@
+###############################################################################
+## Package - Charlie Mealtime Reminder
+###############################################################################
+input_boolean:
+  charlie_mealtime_enabled:
+    name: "Charlie Mealtime Enabled"
+  charlie_mealtime_active:
+    name: "Charlie Mealtime Active"
+
+input_number:
+  charlie_mealtime_notification_interval:
+    name: "Charlie Mealtime Notification Interval"
+    icon: mdi:calendar-range
+    unit_of_measurement: minutes
+    mode: slider
+    min: 5
+    max: 60
+    step: 5
+
+input_datetime:
+  charlie_mealtime_days_1:
+    name: "Charlie Mealtime Days 1"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_days_2:
+    name: "Charlie Mealtime Days 2"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_afternoons_1:
+    name: "Charlie Mealtime Afternoons 1"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_afternoons_2:
+    name: "Charlie Mealtime Afternoons 2"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_weekends_1:
+    name: "Charlie Mealtime Weekends 1"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_weekends_2:
+    name: "Charlie Mealtime Weekends 2"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+template:
+  - button:
+      - name: "Charlie Mealtime Done"
+        unique_id: charlie_mealtime_done
+        icon: mdi:dog
+        press:
+          - condition: state
+            entity_id: binary_sensor.charlie_mealtime_reminder
+            state: "on"
+
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.charlie_mealtime_active
+
+          - service: browser_mod.notification
+            data:
+              message: "Charlie Mealtime reminder has been turned off."
+              duration: 30000
+
+          - service: notify.jason
+            data:
+              message: clear_notification
+              data:
+                tag: charlie_mealtime_reminder
+
+  - binary_sensor:
+      - name: "Charlie Mealtime Reminder"
+        unique_id: charlie_mealtime_reminder
+        icon: mdi:dog
+        picture: >
+          {{ iif(is_state(this.entity_id, 'on'),
+            '/local/images/entity_icons/charlie_mealtime.png',
+            '/local/images/entity_icons/charlie_mealtime_off.png') }}
+        state: >
+          {{ is_state('input_boolean.charlie_mealtime_enabled', 'on')
+                and is_state('input_boolean.charlie_mealtime_active', 'on') }}
+
+automation:
+  ###############################################################################
+  ## Reminders - Turn On Charlie Mealtime
+  ###############################################################################
+  - id: reminders_turn_on_charlie_mealtime
+    alias: "[Reminders] Turn On Charlie Mealtime"
+    description: "Turn on reminder active boolean."
+    trigger:
+      - platform: template
+        value_template: >
+          {% set time = states('sensor.time') %}
+          {% set shift = states('sensor.time_trigger_shift') %}
+          {% if is_state('input_boolean.charlie_mealtime_enabled', 'on') %}
+            {{ (shift == 'days' and time == states('input_datetime.charlie_mealtime_days_1')[0:5])
+                or (shift == 'days' and time == states('input_datetime.charlie_mealtime_days_2')[0:5])
+                or (shift == 'afts' and time == states('input_datetime.charlie_mealtime_afternoons_1')[0:5])
+                or (shift == 'afts' and time == states('input_datetime.charlie_mealtime_afternoons_2')[0:5])
+                or (shift == 'wknd' and time == states('input_datetime.charlie_mealtime_weekends_1')[0:5])
+                or (shift == 'wknd' and time == states('input_datetime.charlie_mealtime_weekends_2')[0:5]) }}
+          {% endif %}
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.charlie_mealtime_active
+
+  ###############################################################################
+  ## Reminders - Charlie Mealtime Done
+  ###############################################################################
+  - id: reminders_charlie_mealtime_done
+    alias: "[Reminders] Charlie Mealtime Done"
+    description: "Reset Charlie Mealtime."
+    max_exceeded: silent
+    trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: charlie_mealtime_done
+    condition:
+      - condition: state
+        entity_id: binary_sensor.charlie_mealtime_reminder
+        state: "on"
+    action:
+      - service: button.press
+        target:
+          entity_id: button.charlie_mealtime_done
+
+  ###############################################################################
+  ## Reminders - Reset Charlie Mealtime Active
+  ###############################################################################
+  - id: reminders_reset_charlie_mealtime_active
+    alias: "[Reminders] Reset Charlie Mealtime Active"
+    description: "Reset Charlie Mealtime Active boolean."
+    trigger:
+      - platform: state
+        entity_id: input_boolean.charlie_mealtime_enabled
+        to: "off"
+
+      - platform: state
+        entity_id: input_boolean.charlie_mealtime_active
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.charlie_mealtime_enabled
+        state: "off"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.charlie_mealtime_active
+
+  ###############################################################################
+  ## Reminders - Charlie Mealtime Notification
+  ###############################################################################
+  - id: reminders_charlie_mealtime_notification
+    alias: "[Reminders] Charlie Mealtime Notification"
+    description: "Send notification until reminder is off."
+    trigger:
+      - platform: homeassistant
+        event: start
+
+      - platform: state
+        entity_id: binary_sensor.charlie_mealtime_reminder
+        to: "on"
+        not_from:
+          - unknown
+          - unavailable
+    condition:
+      - condition: state
+        entity_id: binary_sensor.charlie_mealtime_reminder
+        state: "on"
+    action:
+      - repeat:
+          sequence:
+            - service: notify.jason
+              data:
+                message: "Time to feed Charlie!"
+                data:
+                  tag: charlie_mealtime_reminder
+                  group: Reminder
+                  channel: General
+                  importance: max
+                  ttl: 0
+                  priority: high
+                  visibility: public
+                  persistent: true
+                  notification_icon: mdi:dog
+                  icon_url: !secret CHARLIE_ICON
+                  ledColor: !secret HASS_COLOR
+                  color: !secret HASS_COLOR
+                  vibrationPattern: !secret GENERAL_VIBRATION
+                  actions:
+                    - title: "Done"
+                      action: charlie_mealtime_done
+
+            # wait to see if turned off before tts
+            - wait_template: "{{ is_state('binary_sensor.charlie_mealtime_reminder', 'off') }}"
+              timeout:
+                minutes: 2
+
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.charlie_mealtime_reminder
+                  state: "on"
+              then:
+                - service: script.turn_on
+                  continue_on_error: true
+                  target:
+                    entity_id: script.tts_play
+                  data:
+                    variables:
+                      message: |
+                        Hey Charlie!
+                        Charlie! Pay attention!
+                        Are you a hungry doggie?
+                        It's time to get your food!
+                      quiet_play: true
+
+            - wait_template: "{{ is_state('binary_sensor.charlie_mealtime_reminder', 'off') }}"
+              timeout:
+                minutes: "{{ states('input_number.charlie_mealtime_notification_interval') | int }}"
+          until:
+            - condition: state
+              entity_id: binary_sensor.charlie_mealtime_reminder
+              state: "off"

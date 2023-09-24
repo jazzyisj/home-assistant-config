@@ -1,0 +1,87 @@
+###############################################################################
+## Presence - Arrive Home Lighting
+###############################################################################
+- id: presence_arrive_home_lighting
+  alias: "[Presence] Arrive Home Lighting"
+  description: "Turn on arrive home lighting."
+  mode: parallel
+  variables:
+    first_home: "{{ state_attr('binary_sensor.someone_home', 'home') | count == 1 }}"
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.jason_home
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      entity_id: input_boolean.guest_home
+      to: "on"
+  condition:
+    - condition: state
+      entity_id:
+        - binary_sensor.daytime_illuminance_lights
+        - binary_sensor.nighttime_illuminance_lights
+      match: any
+      state: "on"
+  action:
+    - service: script.turn_light_on
+      data:
+        lights: light.side_entrance_light
+        activate_timer: true # force timer to restart
+        bypass_timer: true
+        override: true
+      continue_on_error: true
+
+    # not restoring if nobody else was home or night mode (lights were off)
+    - if: "{{ not first_home }}"
+      then:
+        - service: scene.create
+          data:
+            scene_id: arrive_home_lights_restore # no side entrance, timer turns it off
+            snapshot_entities: &lights
+              - light.kitchen_potlights
+              - light.dining_room_potlights
+              - light.hallway_potlights
+
+    - service: timer.start
+      target:
+        entity_id: timer.arrive_home_lights
+
+    - service: script.light_scene_on
+      data:
+        scene: arrive_home
+      continue_on_error: true
+
+    - if: "{{ not first_home }}"
+      then:
+        # if someone else arrives timer restarts to keep lights on longer
+        - alias: "Wait for arrive home timer to finish"
+          wait_for_trigger:
+            - platform: state
+              entity_id: timer.arrive_home_lights
+              to: idle
+
+        # everyone left again or night mode - arrive lights turned off by away/night mode
+        - if:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              match: any
+              state:
+                - Home
+                - Guest
+          then:
+            - service: script.light_scene_on
+              data:
+                scene: arrive_home_lights_restore
+      else:
+        # turn lights off unless dark out
+        - if:
+            - condition: state
+              entity_id: binary_sensor.nighttime_illuminance_lights
+              state: "off"
+          then:
+            - service: script.turn_light_off
+              data:
+                lights: *lights

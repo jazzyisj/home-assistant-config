@@ -1,0 +1,141 @@
+###############################################################################
+## Presence - Turn Guest Home On
+###############################################################################
+- id: presence_turn_guest_home_on
+  alias: "[Presence] Turn Guest Home On"
+  description: "Turn guest home boolean on."
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+      to: #LOCK_USER
+        - UnLocked (Guest)
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to: Guest
+  condition:
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: "{{ iif(trigger.id == 'occupancy', is_state('input_boolean.occupancy_override', 'off'), true) }}"
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.guest_home
+
+###############################################################################
+## Presence - Turn Guest Home Off
+###############################################################################
+- id: presence_turn_guest_home_off
+  alias: "[Presence] Turn Guest Home Off"
+  description: "Turn guest home boolean off, clear notification."
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+      to: #LOCK_USER
+        - Locked (Guest)
+      not_from:
+        - unknown
+        - unavailable
+      for: 60
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Away
+        - Vacation
+
+    - platform: state
+      entity_id: input_boolean.guest_home
+      to: "off"
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: guest_off
+  condition:
+    - condition: state
+      entity_id: input_boolean.guest_home
+      state: "on"
+
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: "{{ iif(trigger.id == 'occupancy', is_state('input_boolean.occupancy_override', 'off'), true) }}"
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.guest_home
+
+    - service: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: guest_alert
+
+###############################################################################
+## Presence - Guest Home Alert
+###############################################################################
+- id: presence_guest_home_alert
+  alias: "[Presence] Guest Home Alert"
+  description: "Sent notification if guest home when owners leave."
+  mode: restart
+  max: 5
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.jason_home
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+  condition:
+    - condition: state
+      entity_id: binary_sensor.owner_home
+      state: "off"
+
+    - condition: state
+      entity_id: input_boolean.guest_home
+      state: "on"
+  action:
+    - service: notify.jason
+      data:
+        title: "Guest Home"
+        message: |
+          Mode: {{ states('input_select.occupancy_mode') }}
+          Alarm: {{ states('sensor.master_alarm_status') }}
+        data:
+          tag: guest_alert
+          group: General
+          channel: General
+          importance: max
+          ttl: 0
+          priority: high
+          visibility: public
+          notification_icon: "{{ states.input_boolean.guest_home.attributes.icon }}"
+          icon_url: !secret GUEST_ICON
+          ledColor: !secret NOTIFY_COLOR
+          color: !secret NOTIFY_COLOR
+          vibrationPattern: !secret GENERAL_VIBRATION
+          clickAction: /lovelace/presence
+          actions:
+            - title: "Home"
+              action: set_home_mode
+
+            - title: "Away"
+              action: set_away_mode
+
+            - title: "Alarm"
+              action: URI
+              uri: !secret ALARM_URI

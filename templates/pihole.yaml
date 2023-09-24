@@ -1,0 +1,76 @@
+###############################################################################
+## Templates - PiHole
+###############################################################################
+- button:
+    - name: "PiHole Update"
+      unique_id: pihole_update
+      icon: mdi:pi-hole
+      press:
+        - service: shell_command.update_pihole #NEXT doesn't work
+
+        - service: browser_mod.notification
+          data:
+            message: "Updating PiHole."
+            duration: 30000
+
+    - name: "PiHole Reboot"
+      unique_id: pihole_reboot
+      icon: mdi:pi-hole
+      press:
+        - service: shell_command.reboot_pihole #NEXT doesn't work
+
+        - service: browser_mod.notification
+          data:
+            message: "Rebooting PiHole."
+            duration: 30000
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: sensor.time
+  binary_sensor:
+    - name: "PiHole Connected"
+      unique_id: pihole_connected
+      icon: mdi:pi-hole
+      device_class: connectivity
+      state: "{{ integration_entities('pi_hole') | select('has_value') | list | count > 0 }}"
+
+- binary_sensor:
+    - name: "PiHole Connected Alert"
+      unique_id: pihole_connected_alert
+      icon: mdi:pi-hole
+      device_class: problem
+      delay_on: 300
+      state: >
+        {{ (is_state('binary_sensor.pihole_connected', 'off')
+            or is_state('device_tracker.pi_hole', 'away'))
+            and is_state('input_boolean.network_alerts', 'on') }}
+
+    - name: "PiHole Disabled Alert"
+      unique_id: pihole_disabled_alert
+      icon: mdi:pi-hole
+      device_class: running
+      delay_on: 3600
+      state: >
+        {{ is_state('sensor.pi_hole_status', 'Disabled')
+          and is_state('input_boolean.network_alerts', 'on') }}
+
+- sensor:
+    # https://github.com/ironsheep/RPi-Reporter-MQTT2HA-Daemon
+    #WARNING (MainThread) [homeassistant.components.sensor] Sensor sensor.rpi_memory_use_percent has device class None, state class None and unit % thus indicating it has a numeric value; however, it has the non-numeric value:  (<class 'str'>); Please update your configuration if your entity is manually configured, otherwise create a bug report at https://github.com/home-assistant/core/issues?q=is%3Aopen+is%3Aissue+label%3A%22integration%3A+template%22
+    - name: "RPi Memory Use Percent"
+      unique_id: rpi_memory_use_percent
+      icon: mdi:memory
+      unit_of_measurement: "%"
+      state: >
+        {% if state_attr('sensor.rpi_monitor_raspberrypi', 'memory') != none %}
+          {% set total = state_attr('sensor.rpi_monitor_raspberrypi', 'memory')['size_mb'] | float(-1) %}
+          {% set free = state_attr('sensor.rpi_monitor_raspberrypi', 'memory')['free_mb'] | float(-1) %}
+          {{ ((total - free) / total * 100) | int(-1) }}
+        {% else %} - 1
+        {% endif %}
+      availability: "{{ state_attr('sensor.rpi_monitor_raspberrypi', 'memory') != none }}"

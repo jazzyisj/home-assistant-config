@@ -1,0 +1,100 @@
+###############################################################################
+## Templates - Sprinkler
+###############################################################################
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: state
+      entity_id: sensor.time
+  binary_sensor:
+    - name: "Hydrawise Connected"
+      unique_id: hydrawise_connected
+      icon: mdi:sprinkler-variant
+      device_class: connectivity
+      state: "{{ integration_entities('hydrawise') | select('has_value') | list | count > 0 }}"
+
+- binary_sensor:
+    - name: "Hydrawise Connected Alert"
+      unique_id: hydrawise_connected_alert
+      icon: mdi:sprinkler-variant
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.hydrawise_connected', 'off')
+            and is_state('input_boolean.sprinkler_alerts', 'on') }}
+
+    - name: "Sprinkler Active"
+      unique_id: sprinkler_active
+      icon: mdi:sprinkler-variant
+      device_class: running
+      state: "{{ states('sensor.current_watering_zone') != 'not_watering' }}"
+      availability: "{{ is_state('binary_sensor.hydrawise_connected', 'on') }}"
+
+- sensor:
+    # only one enity in group can ever be on at once
+    - name: "Current Watering Zone"
+      unique_id: current_watering_zone
+      icon: mdi:sprinkler-variant
+      state: >
+        {% set sensor = expand('group.sprinkler_current_cycle')
+            | selectattr('state', 'eq', 'on') | map(attribute='attributes.zone_name') | join('') %}
+        {{ sensor if sensor | count > 0 else 'not_watering' }}
+      attributes:
+        start_time: >
+          {% set sensor = expand('group.sprinkler_current_cycle')
+              | selectattr('state', 'eq', 'on') | map(attribute='last_changed') | join('') %}
+          {{ sensor if sensor | count > 0 }}
+        minutes_left: >
+          {% set sensor = expand('group.sprinkler_current_cycle')
+              | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | join('')%}
+          {{ states('sensor.' ~ sensor[14:-9] ~ '_watering_time') if sensor | count > 0 }}
+      availability: "{{ is_state('binary_sensor.hydrawise_connected', 'on') }}"
+
+    # reject current watering zone to get next zone
+    - name: "Next Watering Zone"
+      unique_id: next_watering_zone
+      icon: mdi:sprinkler-variant
+      state: >
+        {% set sensors = expand('group.sprinkler_next_cycle') %}
+        {% if sensors | count > 0 %}
+            {% set zone_on = state_attr(expand('group.sprinkler_current_cycle')
+                | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | join(''), 'identifier') %}
+            {% if zone_on not in ['', none] %}
+              {% set next_time = sensors | rejectattr('attributes.identifier', 'eq', zone_on) | map(attribute='state') | list %}
+              {% if next_time != none and next_time != '' and next_time != [] and next_time | count > 0 %}
+                {% set next_time = next_time | min | as_datetime %}
+                {% if next_time - now() < timedelta(days=365) %}
+                  {% set next_zone = namespace(name='') %}
+                  {% for item in sensors %}
+                    {% if item.state == next_time.isoformat() %}
+                        {% set next_zone.name = item.attributes.zone_name %}
+                        {% break %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ next_zone.name }}
+                {% else %} suspended
+                {% endif %}
+              {% else %} none
+              {% endif %}
+            {% else %} none
+            {% endif %}
+        {% endif %}
+      attributes:
+        start_time: >
+          {% set sensors = expand('group.sprinkler_next_cycle') | default([]) %}
+          {% if sensors | count > 0 %}
+              {% set zone_on = state_attr(expand('group.sprinkler_current_cycle')
+                  | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | join(''), 'identifier') %}
+              {% if zone_on not in ['', none] %}
+                {% set next_time = (sensors | rejectattr('attributes.identifier', 'eq', zone_on) | map(attribute='state') | list) | default(none) %}
+                {% if next_time != none and next_time != '' and next_time != [] and next_time | count > 0 %}
+                  {% set next_time = next_time | min | as_datetime %}
+                  {{ iif(next_time - now() < timedelta(days=365), next_time | as_timestamp | timestamp_custom('%a %b %-d,%Y %-H:%M %p', true, none), '') }}
+                {% endif %}
+              {% endif %}
+          {% endif %}
+      availability: "{{ is_state('binary_sensor.hydrawise_connected', 'on') }}"

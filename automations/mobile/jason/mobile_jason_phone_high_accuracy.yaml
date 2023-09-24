@@ -1,0 +1,194 @@
+###############################################################################
+## Mobile - Jason Phone High Accuracy On
+###############################################################################
+- id: mobile_jason_phone_high_accuracy_on
+  alias: "[Mobile] Jason Phone High Accuracy On"
+  description: "Turn on mobile high accuracy location mode."
+  max_exceeded: silent
+  trigger:
+    # keep switch in sync with sensor
+    - platform: state
+      entity_id: binary_sensor.jphone_high_accuracy_mode
+      to: "on"
+
+    # leaving somewhere
+    - platform: state
+      entity_id: person.jason
+      to: not_home
+
+    # arriving home
+    - platform: state
+      entity_id: input_boolean.jason_almost_home
+      to: "on"
+
+    # arriving from out of town
+    - platform: numeric_state
+      entity_id: proximity.jphone_home
+      below: 20
+
+    # commute times, almost home
+    - platform: state
+      id: commute
+      entity_id:
+        - binary_sensor.work_commute_active
+        - binary_sensor.home_commute_active
+        - input_boolean.jason_almost_home
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      id: activity
+      entity_id: sensor.jphone_detected_activity
+      to: in_vehicle
+
+    - platform: state
+      entity_id:
+        - device_tracker.jason_phone_wifi #ISSUE takes 3 min to disconnect
+        - device_tracker.jason_phone_router_wifi
+      to: not_home
+      for: 60 # prevent triggers on momentary disconnections
+
+    # faster wifi home/away update
+    - platform: state
+      entity_id: binary_sensor.jason_phone_wifi_connected
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+      for: 60 # prevent triggers on momentary disconnections
+  condition:
+    - condition: state
+      entity_id: switch.jason_phone_high_accuracy
+      state: "off"
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id in ['commute', 'activity', 'jeep'],
+            states('proximity.jphone_home') | int(0) <= 10, true) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.entity_id == 'binary_sensor.work_commute_active',
+            not is_state('person.jason', 'Work'), true) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.entity_id in ['binary_sensor.home_commute_active', 'input_boolean.jason_almost_home'],
+            not is_state('person.jason', 'home'), true) }}
+  action:
+    - service: switch.turn_on
+      target:
+        entity_id: switch.jason_phone_high_accuracy
+
+###############################################################################
+## Mobile - Jason Phone High Accuracy Off
+###############################################################################
+- id: mobile_jason_phone_high_accuracy_off
+  alias: "[Mobile] Jason Phone High Accuracy Off"
+  description: "Turn off mobile high accuracy location mode."
+  max_exceeded: silent
+  trigger:
+    # safeguard, turn off after an hour
+    - platform: state
+      entity_id: switch.jason_phone_high_accuracy
+      to: "on"
+      for:
+        minutes: 60
+
+    # keep switch in sync with sensor
+    - platform: state
+      entity_id: binary_sensor.jphone_high_accuracy_mode
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_jason_phone_high_accuracy
+
+    # turn off when we've arrived somwhere (another zone)
+    - platform: state
+      entity_id: person.jason
+      from: not_home
+      for: 60
+      not_to:
+        - near_home
+        - almost_home
+
+    - platform: numeric_state
+      entity_id: proximity.jphone_home
+      above: 20
+
+    - platform: state
+      id: commute
+      entity_id:
+        - binary_sensor.work_commute_active
+        - binary_sensor.home_commute_active
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    # sensor is often unknown
+    - platform: state
+      id: activity
+      entity_id: sensor.jphone_detected_activity
+      to:
+        - still
+        - unknown
+        - unavailable
+      for:
+        minutes: 5
+
+    # wifi disconnect for faster home/away update
+    # use mobile wifi - not cycling, faster
+    - platform: state
+      id: tracker
+      entity_id: binary_sensor.jason_phone_wifi_connected
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+
+    # bt/wifi disconnect for faster home/away update
+    - platform: state
+      id: tracker
+      entity_id:
+        - device_tracker.jason_phone_wifi
+        - device_tracker.jason_phone_router_wifi
+      from: not_home
+      for: 60
+  condition:
+    - condition: state
+      entity_id: switch.jason_phone_high_accuracy
+      state: "on"
+
+    # shorter time delta than turn_on to ensure always triggered after turn_on if requried
+    - condition: template
+      value_template: >
+        {{ true if this.attributes.last_triggered == none
+          else now() - this.attributes.last_triggered > timedelta(seconds=30) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id == 'activity',
+          is_state('binary_sensor.work_commute_active', 'off')
+          and is_state('binary_sensor.home_commute_active', 'off'), true) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.entity_id == 'binary_sensor.home_commute_active',
+            is_state('person.jason', 'home'), true) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.entity_id == 'binary_sensor.work_commute_active',
+            is_state('person.jason', 'work'), true) }}
+  action:
+    - service: switch.turn_off
+      target:
+        entity_id: switch.jason_phone_high_accuracy

@@ -1,0 +1,56 @@
+###############################################################################
+## Reset Keypad Disabled Locks
+###############################################################################
+reset_keypad_disabled_locks:
+  alias: "Reset Keypad Disabled Locks"
+  description: "Reset keypad disabled alert entry locks."
+  icon: mdi:lock
+  variables:
+    buttons: >
+      {{ states.binary_sensor | selectattr('entity_id', 'contains', '_door_lock_keypad_temporary_disabled')
+            | selectattr('state', 'eq', 'on')
+            | map(attribute='object_id') | map('regex_replace', find='(.*)_door_lock_keypad_temporary_disabled',
+              replace='button.\\1_door_lock_idle_access_control_keypad_state', ignorecase=False) | list }}
+    locks: >
+      {{ expand(buttons) | map(attribute='object_id')
+          | map('regex_replace', find='(.*)_door_lock_idle_access_control_keypad_state',
+              replace='lock.\\1_door_lock', ignorecase=False) | list }}
+  sequence:
+    - if: "{{ locks == none or locks | count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: error
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+          error: true
+
+    # toggle lock to reset state from unknown
+    - service: lock.unlock
+      data:
+        entity_id: "{{ locks }}"
+
+    - delay: 5 # allow locks to unlock
+
+    - service: lock.lock
+      data:
+        entity_id: "{{ locks }}"
+
+    - wait_template: "{{ expand(locks) | selectattr('state', 'eq', 'locked') | list | count == locks | count }}"
+      timeout: 60
+
+    - if: "{{ wait.completed }}"
+      then:
+        - service: button.press
+          target:
+            entity_id: "{{ buttons }}"
+      else:
+        - service: script.tts_play
+          data:
+            message: |
+              {%- from 'format.jinja' import clist_locks -%}
+              {%- set plural = 's have' if locks | count > 1 else ' has' -%}
+              The {{ clist_locks(locks) }} door lock keyboard disabled{{ plural }} not been cleared!
+            alert: true

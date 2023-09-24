@@ -1,0 +1,44 @@
+###############################################################################
+## Lock - Status Update
+## #ISSUE https://github.com/jazzyisj/home-assistant-config/issues/36
+## https://github.com/home-assistant/core/issues/79097
+###############################################################################
+- id: lock_status_update
+  alias: "[Lock] Status Update"
+  description: "Update lock status."
+  mode: parallel
+  variables:
+    node_id: "{{ trigger.event.data['node_id'] | int(-1) }}"
+    entity_id: >
+      {{ states.lock | selectattr('attributes.node_id', 'eq', node_id)
+          | map(attribute='entity_id') | join('') }}
+    userID: >
+      {% if trigger.event.data.parameters is defined %}
+        {% if trigger.event.data.parameters['userId'] is defined %}
+          {{ trigger.event.data.parameters['userId'] | int(-1) }}
+        {% endif %}
+      {% endif %}
+    user: > #LOCK_USER
+      {% set users = ['Hassio', 'Jason'] %}
+      {{ 'Keypad' if userID | int(-1) < 1 or userID | int > 2 else users[userID | int -1] }}
+    event_label: "{{ trigger.event.data['event_label'] }}"
+  trigger:
+    - platform: event
+      event_type: zwave_js_notification
+  condition:
+    - "{{ event_label.endswith('lock operation') and node_id > 0 }}"
+    - "{{ entity_id != '' }}"
+  action:
+    - service: input_text.set_value
+      target:
+        entity_id: "input_text.{{ entity_id.split('.')[1] }}_status"
+      data:
+        value: >
+          {% if event_label == 'Manual unlock operation' %} Unlocked (Manual)
+          {% elif event_label == 'Manual lock operation' %} Locked (Manual)
+          {% elif event_label == 'RF unlock operation' %} Unlocked (Hassio)
+          {% elif event_label == 'RF lock operation' %} Locked (Hassio)
+          {% elif event_label == 'Keypad unlock operation' %} Unlocked ({{ user }})
+          {% elif event_label == 'Keypad lock operation' %} Locked ({{ user }})
+          {% else %} {{ none }}
+          {% endif %}

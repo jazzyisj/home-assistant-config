@@ -1,0 +1,167 @@
+###############################################################################
+## Alarm - Disarm Alarm
+###############################################################################
+- id: alarm_disarm_alarm
+  alias: "[Alarm] Disarm Alarm"
+  description: "Disarm house alarm."
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.danger_alarm
+      to: "off"
+      from: "on"
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disarm_master_alarm
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_enabled
+      state: "on"
+
+    - not:
+        - condition: state
+          entity_id: alarm_control_panel.master
+          state: disarmed
+  action:
+    - service: script.disarm_alarm
+
+###############################################################################
+# Alarm - Disarm Arrive Home
+###############################################################################
+- id: alarm_disarm_arrive_home
+  alias: "[Alarm] Disarm Arrive Home"
+  description: "Disarm alarm when arriving home."
+  mode: queued
+  variables:
+    person: >
+      {% from 'value.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+  trigger:
+    - platform: state
+      id: lock
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+      to:
+        - Unlocked (Jason)
+        - Unlocked (Keypad)
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disarm_alarm_jason
+
+    - platform: event
+      id: doorbell
+      event_type: mobile_app_notification_action
+      event_data:
+        action: doorbell_unlock_door
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arriving_home_jason
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: open_garage_jason
+  condition:
+    - condition: state
+      entity_id: input_boolean.alarm_enabled
+      state: "on"
+
+    - "{{ person != '' }}"
+  action:
+    - if:
+        - condition: template
+          alias: "An alarm zone is not disarmed"
+          value_template: >
+            {{ not is_state('alarm_control_panel.house', 'disarmed')
+                or not is_state('alarm_control_panel.garage', 'disarmed') }}
+      then:
+        - if:
+            - condition: trigger
+              alias: "Alarm was disarmed with a lock keypad"
+              id: lock
+          then:
+            - service: script.disarm_alarm
+              data:
+                person: "{{ person }}"
+          else:
+            - choose:
+                - conditions: "{{ person == 'jason' }}"
+                  sequence:
+                    - wait_template: > # mobile action, make sure home
+                        {{ is_state('binary_sensor.jason_home', 'on')
+                            or is_state('input_boolean.jason_almost_home', 'on')
+                            or is_state('alarm_control_panel.master', 'disarmed') }}
+                      timeout:
+                        minutes: 5
+              default:
+                - wait_template: "{{ is_state('alarm_control_panel.master', 'disarmed') }}"
+                  timeout:
+                    minutes: 5
+
+            - if: "{{ wait.completed }}"
+              then:
+                - if:
+                    - not:
+                        - condition: state
+                          entity_id: alarm_control_panel.master
+                          state: disarmed
+                  then:
+                    - service: script.disarm_alarm
+                      data:
+                        person: "{{ person }}"
+              else:
+                - service: browser_mod.notification
+                  data:
+                    duration: 30000
+                    message: "{{ person | title }} attempted to disarm the alarm."
+
+                - service: notify.jason
+                  data:
+                    message: |
+                      {{- person | title }} attempted to disarm the alarm at {{ states('sensor.time') }}.
+                      {% if person != 'hassio' -%}
+                      {{ person | title }} was
+                      {{- iif(is_state('binary_sensor.' ~ person ~ '_home', 'on'),
+                          ' home', iif(is_state('input_boolean.' ~ person ~ '_almost_home', 'on'),
+                            ' almost home', ' not home')) }}.
+                      {% endif -%}
+                    data:
+                      group: Alarm
+                      channel: Alert
+                      importance: max
+                      ttl: 0
+                      priority: high
+                      visibility: private
+                      timeout: 3600
+                      notification_icon: mdi:shield-alert
+                      icon_url: !secret ALERT_ICON
+                      ledColor: !secret WARNING_COLOR
+                      color: !secret WARNING_COLOR
+                      vibrationPattern: !secret ALERT_VIBRATION
+                      clickAction: /ui-mobile/alarm
+                      actions:
+                        - title: "Alarm"
+                          action: URI
+                          uri: !secret ALARM_URI
+
+                        - title: "Cameras"
+                          action: URI
+                          uri: !secret LOREX_URI
+      else:
+        - if: "{{ person != 'hassio' }}"
+          then:
+            - service: "notify.{{ person }}"
+              data:
+                message: clear_notification
+                data:
+                  tag: "{{ person }}_arriving_home"

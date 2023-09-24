@@ -1,0 +1,113 @@
+###############################################################################
+## Set Thermostat
+###############################################################################
+set_thermostat:
+  alias: "Set Thermostat"
+  description: "Set thermostat to preset mode/temperatures."
+  icon: mdi:thermostat
+  variables:
+    boost_temp: "{{ states('sensor.hvac_boost') | int(0) }}"
+    occupancy_mode: "{{ states('input_select.occupancy_mode') }}"
+    hvac_mode: "{{ states('input_select.hvac_mode') }}" # stored hvac mode
+    pmode: >
+      {{ 'eco' if occupancy_mode in ['Away', 'Vacation']
+          and is_state('input_boolean.hvac_presence_override', 'off') else 'none' }}
+    heat_temp: >
+      {% if occupancy_mode == 'Home' or is_state('input_boolean.hvac_presence_override', 'on') %}
+        {% set temp = states('input_number.home_heat_temperature') | int %}
+      {% elif occupancy_mode == 'Night' %}
+        {% set temp = states('input_number.night_heat_temperature') | int %}
+      {% elif occupancy_mode == 'Guest' %}
+        {% set temp = states('input_number.guest_heat_temperature') | int %}
+      {% else %}
+        {% set temp = states('input_number.home_heat_temperature') | int %}
+      {% endif %}
+      {{ temp + boost_temp }}
+    cool_temp: >
+      {% if occupancy_mode == 'Home' or is_state('input_boolean.hvac_presence_override', 'on') %}
+      {% set temp = states('input_number.home_cool_temperature') | int %}
+      {% elif occupancy_mode == 'Night' %}
+        {% set temp = states('input_number.night_cool_temperature') | int %}
+      {% elif occupancy_mode == 'Guest' %}
+        {% set temp = states('input_number.guest_cool_temperature') | int %}
+      {% else %}
+        {% set temp = states('input_number.home_cool_temperature') | int %}
+      {% endif %}
+      {{ temp + boost_temp }}
+  sequence:
+    - if: "{{ states('climate.thermostat') != hvac_mode }}"
+      then:
+        - service: climate.set_hvac_mode
+          target:
+            entity_id: climate.thermostat
+          data:
+            hvac_mode: "{{ hvac_mode }}"
+
+        # wait for hvac mode to change (Nest slow), prevent automation.climate_mode_changed trigger
+        - wait_template: "{{ states('climate.thermostat') == hvac_mode }}"
+          timeout: 10
+
+    - alias: "HVAC mode is not off"
+      not:
+        - condition: state
+          entity_id: input_select.hvac_mode
+          state: "off"
+
+    - if: "{{ not is_state_attr('climate.thermostat', 'preset_mode', pmode) }}"
+      then:
+        # if override on, cancel eco to preheat/cool house
+        - service: climate.set_preset_mode
+          target:
+            entity_id: climate.thermostat
+          data:
+            preset_mode: >
+              {{ 'eco' if occupancy_mode in ['Away', 'Vacation']
+                  and is_state('input_boolean.hvac_presence_override', 'off') else 'none' }}
+
+        # wait for eco mode to register (Nest slow), prevent temp set in eco
+        - wait_template: "{{ is_state_attr('climate.thermostat', 'preset_mode', pmode) }}"
+          timeout: 10
+
+    # error if temp is set in off/eco mode
+    - alias: "Valid HVAC and preset mode"
+      and:
+        - condition: state
+          entity_id: climate.thermostat
+          state:
+            - heat
+            - cool
+            - heat_cool
+
+        - not:
+            - condition: state
+              entity_id: climate.thermostat
+              attribute: preset_mode
+              state: eco
+
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: climate.thermostat
+              state:
+                - heat
+                - cool
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.thermostat
+              data:
+                hvac_mode: "{{ states('climate.thermostat') }}"
+                temperature: "{{ cool_temp if hvac_mode == 'cool' else heat_temp }}"
+
+        - conditions:
+            - condition: state
+              entity_id: climate.thermostat
+              state: heat_cool
+          sequence:
+            - service: climate.set_temperature
+              target:
+                entity_id: climate.thermostat
+              data:
+                hvac_mode: heat_cool
+                target_temp_low: "{{ heat_temp }}"
+                target_temp_high: "{{ cool_temp }}"

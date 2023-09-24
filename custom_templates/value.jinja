@@ -1,31 +1,61 @@
 {% macro occupancy_mode() %}
-{% set house = today_at(states('input_datetime.house_waketime')) %}
-{% set waketime = states('sensor.next_waketime')|as_datetime
+{%- set house = today_at(states('input_datetime.house_waketime')) %}
+{%- set waketime = states('sensor.next_waketime') | as_datetime
   if has_value('sensor.waketime_today') else house %}
-{% set bedtime = states('sensor.bedtime_today')|as_datetime
+{%- set bedtime = states('sensor.bedtime_today') | as_datetime
   if has_value('sensor.bedtime_today') else today_at(states('input_datetime.days_bedtime')) %}
-{% if is_state('binary_sensor.someone_home','off') %}
-  {% set mode = 'Vacation' if is_state('input_select.occupancy_mode','Vacation') else 'Away' %}
-{% elif bedtime < now() < waketime %}
-  {% set mode = 'Night' if is_state('input_boolean.bedtime_delayed','off')
-    else ('Home' if is_state('binary_sensor.owner_home','on') else 'Guest') %}
-{% else %}
-  {% set mode = 'Home' if is_state('binary_sensor.owner_home','on') else 'Guest' %}
-{% endif %}
-{{ mode }}
+{%- if is_state('binary_sensor.someone_home', 'off') %}
+  {% set mode = 'Vacation' if is_state('input_select.occupancy_mode', 'Vacation') else 'Away' %}
+{%- elif bedtime < now() < waketime %}
+  {%- set mode = 'Night' if is_state('input_boolean.bedtime_delayed', 'off')
+    else ('Home' if is_state('binary_sensor.owner_home', 'on') else 'Guest') %}
+{%- else %}
+  {%- set mode = 'Home' if is_state('binary_sensor.owner_home', 'on') else 'Guest' %}
+{%- endif %}
+{{- mode -}}
 {% endmacro %}
 
 {% macro rain_text() %}
 {%- set cond = states('sensor.current_condition') -%}
-{%- set dist = states('sensor.nearest_storm_distance')|int(-1) -%}
-{%- set dir = state_attr('sensor.nearest_storm_bearing','cardinal') %}
+{%- set dist = states('sensor.nearest_storm_distance') | int(-1) -%}
+{%- set dir = state_attr('sensor.nearest_storm_bearing', 'cardinal') %}
+{%- set rain_time = state_attr('sensor.rain_start', '12_hour') %}
 {%- if dist > -1 -%}
-  There is a {{ states('sensor.precipitation_type')|replace('none','') }}storm
-  {{- iif(dist >= 1,dist|int ~ iif(dist|int == 1,' kilometer',' kilometers') ~ ' away',' in the immediate vicinity') }}
-  {{- iif(dir != none,' approaching from the ' ~ dir,'') }}.
-{%- endif %}
-{% if states('sensor.precipitation_type') == 'rain' %} It is raining now.
-{%- else %} Rain is expected around {{ state_attr('sensor.rain_start','12_hour') }}.
+There is a {{ states('sensor.precipitation_type') | replace('none', '') }}storm
+{{- iif(dist >= 1, dist | int ~ iif(dist | int == 1, ' kilometer', ' kilometers') ~ ' away', ' in the immediate vicinity') }}
+{{- iif(dir != none, ' approaching from the ' ~ dir, '') }}.
+{%- endif -%}
+{%- if states('sensor.precipitation_type') == 'rain' %}
+It is raining now.
+{%- elif rain_time != none %}
+Rain is expected around {{ rain_time }}.
 {%- endif -%}
 {% endmacro %}
 
+{% macro trigger_person(trigger) %}
+{%- if trigger.id == 'lock' %}
+  {%- set person = trigger.to_state.state %}
+{%- elif trigger.id in ['doorbell', 'danger'] %}
+  {%- set person = 'hassio' %}
+{%- elif trigger.event is defined %}
+  {%- set person = trigger.event.data['action'] %}
+{%- else %}
+  {%- set person = trigger.entity_id %}
+{%- endif %}
+{%- if person | lower | contains('hassio')
+    or person | lower | contains('keypad') %} hassio
+{%- elif person | lower | contains('guest') %} guest
+{%- elif person | lower | contains('jason') %} jason
+{%- endif -%}
+{% endmacro %}
+
+{% macro list_events(agenda) %}
+{%- for event in agenda.events %}
+{%- if (event.start | as_datetime).day == now().day %}
+{{ event.start | as_timestamp | timestamp_custom('Today at %-I:%M %p') }}: {{ event.summary }}
+{%- else %}
+{{ event.start | as_timestamp | timestamp_custom('%A at %-I:%M %p') }}: {{ event.summary }}
+{%- endif %}
+{% if event.description is defined %}, {{ event.description }}{% endif %}
+{%- endfor %}.
+{% endmacro %}

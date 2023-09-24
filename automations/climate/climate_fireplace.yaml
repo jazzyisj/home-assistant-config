@@ -1,0 +1,109 @@
+###############################################################################
+## Climate - Turn On Fireplace
+###############################################################################
+- id: climate_turn_on_fireplace
+  alias: "[Climate] Turn On Fireplace"
+  description: "Turn the fireplace on."
+  initial_state: true # safety
+  trigger:
+    - platform: template
+      value_template: >
+        {% if is_number(states('sensor.indoor_temperature'))
+            and is_number(states('sensor.living_room_temperature')) %}
+          {{ states('sensor.indoor_temperature') | float
+              - states('sensor.living_room_temperature') | float > 5 }}
+        {% endif %}
+
+    - platform: state
+      id: alert
+      entity_id: alert.indoor_low_temperature
+      to: "on"
+  action:
+    - service: switch.turn_on
+      data:
+        entity_id: switch.fireplace
+
+    - if:
+        - condition: trigger
+          id: alert
+      then:
+        - service: notify.jason
+          data:
+            title: "Fireplace Alert"
+            message: |
+              The fireplace has been turned on because the indoor low temperture alert is on.
+              HVAC Mode: {{ states('climate.thermostat') }}
+              HVAC State: {{ state_attr('climate.thermostat', 'hvac_action') }}
+              Temperature: {{ states('sensor.indoor_temperature', with_unit=true) }}
+              Target: {{ states('sensor.thermostat_target_temperature', with_unit=true) }}
+            data:
+              tag: fireplace_emergency_on
+              group: General
+              channel: Alert
+              importance: max
+              ttl: 0
+              priority: high
+              visibility: public
+              notification_icon: mdi:fireplace
+              icon_url: !secret FIREPLACE_ICON
+              ledColor: !secret WARNING_COLOR
+              color: !secret WARNING_COLOR
+              vibrationPattern: !secret ALERT_VIBRATION
+              clickAction: /ui-mobile/climate
+              actions:
+                - title: "Fireplace Off"
+                  action: fireplace_off
+
+###############################################################################
+## Climate - Turn Off Fireplace
+###############################################################################
+- id: climate_turn_off_fireplace
+  alias: "[Climate] Turn Off Fireplace"
+  description: "Turn the fireplace off."
+  initial_state: true # safety
+  trigger:
+    - platform: state
+      entity_id: switch.fireplace
+      to: "on"
+      for:
+        minutes: 60
+
+    - platform: numeric_state
+      entity_id: sensor.living_room_temperature
+      above: 22
+
+    - platform: state
+      id: alert
+      entity_id: alert.indoor_low_temperature
+      to: idle
+
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+  condition:
+    - condition: state
+      entity_id: switch.fireplace
+      state: "on"
+
+    - or:
+        - condition: numeric_state
+          entity_id: sensor.living_room_temperature
+          above: 22
+
+        - condition: state
+          entity_id: alert.indoor_low_temperature
+          state: "idle"
+
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: >
+        {{ is_state('input_boolean.occupancy_override', 'off')
+            if trigger.id == 'occupancy' else true }}
+  action:
+    - service: switch.turn_off
+      data:
+        entity_id: switch.fireplace

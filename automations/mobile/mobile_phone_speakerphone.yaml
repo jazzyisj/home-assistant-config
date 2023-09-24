@@ -1,0 +1,58 @@
+###############################################################################
+## Mobile - Phone Speakerphone
+###############################################################################
+- id: mobile_phone_speakerphone
+  alias: "[Mobile] Phone Speakerphone"
+  description: "Mute media players when a speakerphone is turned on."
+  mode: restart
+  variables:
+    mute_players: >
+      {% set inactive_players = expand('group.single_media_players')
+          | selectattr('attributes.device_class', 'defined')
+          | selectattr('attributes.device_class', 'eq', 'tv')
+          | selectattr('state', 'in', ['off', 'idle', 'standby'])
+          | map(attribute='entity_id') | list %}
+      {{ expand('group.single_media_players')
+          | rejectattr('entity_id', 'in', inactive_players)
+          | map(attribute='entity_id') | list }}
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.mobile_phone_in_use
+      attribute: speaker_on
+      to:
+        - true
+        - false
+      from:
+        - true
+        - false
+  condition: "{{ mute_players | count > 0 }}"
+  action:
+    - if:
+        - condition: state
+          entity_id: input_boolean.tts
+          state: "on"
+      then:
+        - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+
+    - if:
+        - condition: state
+          entity_id: binary_sensor.mobile_phone_in_use
+          attribute: speaker_on
+          state: true
+      then:
+        - service: media_player.volume_mute
+          target:
+            entity_id: "{{ mute_players }}"
+          data:
+            is_volume_muted: true
+      else:
+        - alias: "System mute is on"
+          condition: state
+          entity_id: switch.system_mute
+          state: "off"
+
+        - service: media_player.volume_mute
+          target:
+            entity_id: "{{ mute_players }}"
+          data:
+            is_volume_muted: false

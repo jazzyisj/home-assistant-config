@@ -1,0 +1,67 @@
+###############################################################################
+## HASS LED
+###############################################################################
+hass_led:
+  alias: "HASS LED"
+  description: "Set led notification."
+  mode: queued
+  fields:
+    reset:
+      description: "Reset LED"
+      example: "true"
+    startup:
+      description: "Startup LED"
+      example: "true"
+  variables:
+    reset: "{{ reset | default(false) }}"
+    startup: "{{ startup | default(false) }}"
+    entities: >
+      {{ expand('group.notify_led') | selectattr('attributes.hass_led', 'defined')
+          | selectattr('attributes.hass_led', 'eq', true) | map(attribute='entity_id') | list }}
+    alert_state: >
+      {% set status = states('sensor.hass_status') %}
+      {% if is_state('binary_sensor.wan', 'off') %} wan_down
+      {% elif status in ['severe', 'extreme'] %} {{ status }}
+      {% elif startup %} startup
+      {% else %} off
+      {% endif %}
+    duration: "{{ iif(startup, 70, 255) }}"
+    color: >
+      {% if alert_state == 'wan_down' %} 240
+      {% elif alert_state == 'startup' %} 90
+      {% elif alert_state == 'extreme' %} 5
+      {% elif alert_state == 'severe' %} 25
+      {% else %} 170
+      {% endif %}
+    brightness: "{{ iif(is_state('binary_sensor.quiet_time', 'on'), 5, 10) }}"
+    effect: "{{ iif(alert_state == 'off', 'off', 'pulse') }}"
+  sequence:
+    - if: "{{ entities == none or entities | count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: warning
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+
+    - if: "{{ alert_state == 'off' and not reset }}"
+      then:
+        - service: script.turn_on
+          target:
+            entity_id: script.led_reset
+          data:
+            variables:
+              entities: "{{ entities }}"
+      else:
+        - service: script.turn_on
+          target:
+            entity_id: script.inovelli_led_control
+          data:
+            variables:
+              entities: "{{ entities }}"
+              duration: "{{ duration }}"
+              color: "{{ color }}"
+              brightness: "{{ brightness }}"
+              effect: "{{ effect }}"

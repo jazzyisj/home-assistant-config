@@ -1,0 +1,71 @@
+###############################################################################
+## Scene LED
+###############################################################################
+scene_led:
+  alias: "Scene LED"
+  description: "Set led notification."
+  mode: queued
+  fields:
+    reset:
+      description: "Reset LED"
+      example: "true"
+  variables:
+    reset: "{{ reset | default(false) }}"
+    entities: "{{ state_attr('group.scene_led', 'entity_id') }}"
+    quiet: "{{ is_state('binary_sensor.quiet_time', 'on') }}"
+    alert_state: >
+      {% if is_state('switch.company_scene', 'on') %} company
+      {% elif is_state('switch.movie_scene', 'on') %} movie
+      {% elif is_state('switch.chill_scene', 'on') %} chill
+      {% elif is_state('binary_sensor.waketime_active', 'on') %} waketime
+      {% elif is_state('input_boolean.bedtime_delayed', 'on') %} delayed
+      {% elif is_state('binary_sensor.bedtime_active', 'on') %} bedtime
+      {% else %} off
+      {% endif %}
+    duration: 255
+    color: >
+      {% if alert_state == 'company' %} 125
+      {% elif alert_state == 'movie' %} 145
+      {% elif alert_state == 'chill' %} 165
+      {% elif alert_state == 'waketime' %} 35
+      {% elif alert_state == 'delayed' %} 180
+      {% elif alert_state == 'bedtime' %} 180
+      {% else %} 170
+      {% endif %}
+    brightness: "{{ iif(alert_state == 'off', 3, 5) }}"
+    effect: >
+      {% if alert_state in ['movie', 'company', 'chill'] %} pulse
+      {% elif alert_state == 'delayed' %} slow blink
+      {% elif alert_state in ['waketime', 'bedtime'] %} chase
+      {% else %} off
+      {% endif %}
+  sequence:
+    - if: "{{ entities == none or entities | count == 0 }}"
+      then:
+        - service: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: warning
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+
+    - if: "{{ alert_state == 'off' and not reset }}"
+      then:
+        - service: script.turn_on
+          target:
+            entity_id: script.led_reset
+          data:
+            variables:
+              entities: "{{ entities }}"
+      else:
+        - service: script.turn_on
+          target:
+            entity_id: script.inovelli_led_control
+          data:
+            variables:
+              entities: "{{ entities }}"
+              duration: "{{ duration }}"
+              color: "{{ color }}"
+              brightness: "{{ brightness }}"
+              effect: "{{ effect }}"
