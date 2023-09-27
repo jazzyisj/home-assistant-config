@@ -49,7 +49,7 @@
 - Watchman
 - Weatherflow
 
-## UI Plugins (41)
+## UI Plugins (40)
 
 - Apex Charts
 - Auto Entities
@@ -77,7 +77,6 @@
 - Numberbox Card
 - Pirate Weather
 - Plotly Graph Card
-- Rain Gauge Card
 - Roku Card
 - Slider Entity Row
 - Smart ThinQ Sensors
