@@ -78,61 +78,72 @@
       delay_on: 300
       delay_off: >
         {% set update = true if now() - states('sensor.uptime') | as_datetime < timedelta(minutes=5)
-            or now() - states.input_number.wind_alert_threshold.last_changed < timedelta(seconds=60) else false %}
+            or now() - states.input_number.wind_alert_threshold.last_changed
+              < timedelta(seconds=60) else false %}
         {{ iif(update, 0, 3600) }}
       state: >
         {% set thresh = states('input_number.wind_alert_threshold') | int %}
-        {{ (states('sensor.wind_speed') | int(-1) >= thresh or states('sensor.wind_gust') | int(-1) >= thresh)
+        {{ (states('sensor.wind_speed') | int(-1) >= thresh
+              or states('sensor.wind_gust') | int(-1) >= thresh)
             and is_state('input_boolean.weather_alerts', 'on') }}
-      availability: "{{ is_number(states('sensor.wind_speed')) or is_number(states('sensor.wind_gust')) }}"
+      availability: >
+        {{ is_number(states('sensor.wind_speed'))
+            or is_number(states('sensor.wind_gust')) }}
 
     - name: "Rain"
       unique_id: rain
       icon: mdi:weather-pouring
       state: >
         {{ is_state('sensor.precipitation_type', 'rain')
-            or states('sensor.precipitation_rate') | int(0) > 0 }}
+            or states('sensor.precipitation_intensity')
+              not in ['No Precipitation', 'unknown', 'unavailable']
+            or states('sensor.precipitation_rate') | int(-1) > 0 }}
 
-    - name: "Rain Today"
-      unique_id: rain_today # next 12 hours
+    - name: "Rain Today" # raining or next 12 hours
+      unique_id: rain_today
       icon: mdi:weather-pouring
       state: >
-        {% set time = states('sensor.rain_start') if has_value('sensor.rain_start') else none %}
-        {{ time != none and now() - time < timedelta(hours=12)
+        {% set time = states('sensor.rain_start')
+            if has_value('sensor.rain_start') else none %}
+        {{ time != none and now() - time|as_datetime < timedelta(hours=12)
             or states('sensor.precipitation_probability_today') | int(0) > 70
             or is_state('binary_sensor.rain', 'on') }}
 
-    - name: "Rain Alert"
+    - name: "Rain Alert" # raining or next 4 hours
       unique_id: rain_alert
       icon: mdi:weather-pouring
+      delay_off: # prevent multiple triggers scattered showers
+        minutes: 60
       state: >
-        {% set time = states('sensor.rain_start') | as_datetime if has_value('sensor.rain_start') else none %}
+        {% set time = states('sensor.rain_start') | as_datetime
+            if has_value('sensor.rain_start') else none %}
         {{ (is_state('binary_sensor.rain', 'on')
-            or states('sensor.precipitation_probability') | int(0) >= 80
-            or true if time != none and now() - time < timedelta(hours=4) else false)
+            or states('sensor.precipitation_probability') | int(0) >= 70
+            or true if time != none and time - now() < timedelta(hours=4) else false)
             and is_state('input_boolean.weather_alerts', 'on') }}
 
 - sensor:
-    - name: "Rain Start"
+    - name: "Rain Start" # next 12 hours
       unique_id: rain_start
       icon: mdi:weather-pouring
       device_class: timestamp
       state: >
         {% set time = namespace(value=none) %}
-        {% set threshold = 40 %}
         {% set forecast = state_attr('weather.home_hourly', 'forecast') %}
-        {% if forecast != none %}
+        {% if is_state('binary_sensor.rain','off') and forecast != none %}
           {% for item in forecast %}
-            {% if loop.index0 < 12 and item.precipitation_probability | int(-1) >= threshold %}
+            {% if loop.index0 < 12
+                and item.precipitation_probability | int(-1) >= 40
+                and item.condition |contains('rain') %}
               {% set time.value = item.datetime %}
-              {% break %}
+            {% break %}
             {% endif %}
           {% endfor %}
         {% endif %}
         {{ time.value }}
       attributes:
         12hour: >
-          {% from 'format.jinja' import twelve_hour %}
+          {% from 'value.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
 
     - name: "Weatherflow High Temperature" #TEMP while testing
@@ -870,7 +881,9 @@
       state_class: measurement
       unit_of_measurement: "°"
       attributes:
-        cardinal: "{% from 'format.jinja' import cardinal_direction %}{{ cardinal_direction(states(this.entity_id)) }}"
+        full_cardinal: >
+          {% from 'value.jinja' import full_cardinal_direction %}
+          {{ full_cardinal_direction(states(this.entity_id)) }}
         provider: Pirate Weather
       availability: >
         {{ is_state('binary_sensor.pirateweather_connected', 'on')
@@ -1010,7 +1023,7 @@
             or (is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_wind_speed_0d'))) }}
 
-    # envcan priority - more accurate
+    # pirate, envcan priority - more accurate
     # if envcan gust n/a use envcan speed - gust never < speed
     - name: "Wind Gust"
       unique_id: wind_gust
@@ -1019,7 +1032,10 @@
       state_class: measurement
       unit_of_measurement: km/h # weatherflow local from m/s to km/h
       state: >
-        {% if is_state('binary_sensor.envcan_connected', 'on')
+        {% if is_state('binary_sensor.pirateweather_connected', 'on')
+            and is_number(states('sensor.pirateweather_wind_gust')) %}
+          {{ states('sensor.pirateweather_wind_gust') | int }}
+        {% elif is_state('binary_sensor.envcan_connected', 'on')
             and is_number(states('sensor.windsor_wind_gust')) %}
           {{ states('sensor.windsor_wind_gust') | int }}
         {% elif is_state('binary_sensor.envcan_connected', 'on')
@@ -1031,13 +1047,13 @@
         {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.weatherflow_wind_gust_km_h')) %}
           {{ states('sensor.weatherflow_wind_gust_km_h') | int }}
-        {% elif is_state('binary_sensor.pirateweather_connected', 'on')
-            and is_number(states('sensor.pirateweather_wind_gust')) %}
-          {{ states('sensor.pirateweather_wind_gust') | int }}
         {% endif %}
       attributes:
         provider: >
-          {% if is_state('binary_sensor.envcan_connected', 'on')
+          {% if is_state('binary_sensor.pirateweather_connected', 'on')
+              and is_number(states('sensor.pirateweather_wind_gust')) %}
+            Pirate Weather
+          {% elif is_state('binary_sensor.envcan_connected', 'on')
               and (is_number(states('sensor.windsor_wind_gust'))
                 or is_number(states('sensor.windsor_wind_speed'))) %}
             Environment Canada
@@ -1047,20 +1063,17 @@
           {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
               and is_number(states('sensor.weatherflow_wind_gust_km_h')) %}
             WeatherFlow Cloud
-          {% elif is_state('binary_sensor.pirateweather_connected', 'on')
-              and is_number(states('sensor.pirateweather_wind_gust')) %}
-            Pirate Weather
           {% endif %}
       availability: >
-        {{ (is_state('binary_sensor.envcan_connected', 'on')
+        {{ (is_state('binary_sensor.pirateweather_connected', 'on')
+              and is_number(states('sensor.pirateweather_wind_gust')))
+            or (is_state('binary_sensor.envcan_connected', 'on')
               and (is_number(states('sensor.windsor_wind_gust'))
                 or is_number(states('sensor.windsor_wind_speed'))))
             or (is_state('binary_sensor.weatherflow_local_connected', 'on')
               and is_number(states('sensor.tempest_st_00057689_wind_gust')))
             or (is_state('binary_sensor.weatherflow_cloud_connected', 'on')
-              and is_number(states('sensor.weatherflow_wind_gust_km_h')))
-            or (is_state('binary_sensor.pirateweather_connected', 'on')
-              and is_number(states('sensor.pirateweather_wind_gust'))) }}
+              and is_number(states('sensor.weatherflow_wind_gust_km_h'))) }}
 
     - name: "Wind Gust Today"
       unique_id: wind_gust_today
@@ -1113,44 +1126,49 @@
       state_class: measurement
       unit_of_measurement: °
       state: >
-        {% if is_state('binary_sensor.weatherflow_local_connected', 'on')
+        {% if is_state('binary_sensor.pirateweather_connected', 'on')
+            and is_number(states('sensor.pirateweather_wind_bearing')) %}
+          {{ states('sensor.pirateweather_wind_bearing') | int }}
+        {% elif is_state('binary_sensor.envcan_connected', 'on')
+            and is_number(states('sensor.windsor_wind_bearing')) %}
+          {{ states('sensor.windsor_wind_bearing') | int }}
+        {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
             and is_number(states('sensor.tempest_st_00057689_wind_bearing')) %}
           {{ states('sensor.tempest_st_00057689_wind_bearing') | int }}
         {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.weatherflow_wind_direction')) %}
           {{ states('sensor.weatherflow_wind_direction') | int }}
-        {% elif is_state('binary_sensor.envcan_connected', 'on')
-            and is_number(states('sensor.windsor_wind_bearing')) %}
-          {{ states('sensor.windsor_wind_bearing') | int }}
-        {% elif is_state('binary_sensor.pirateweather_connected', 'on')
-            and is_number(states('sensor.pirateweather_wind_bearing')) %}
-          {{ states('sensor.pirateweather_wind_bearing') | int }}
         {% endif %}
       attributes:
-        cardinal: "{% from 'format.jinja' import cardinal_direction %}{{ cardinal_direction(states(this.entity_id)) }}"
+        cardinal: >
+          {%- from 'value.jinja' import cardinal_direction %}
+          {{- cardinal_direction(states(this.entity_id)) -}}
+        full_cardinal: >
+          {%- from 'value.jinja' import full_cardinal_direction %}
+          {{- full_cardinal_direction(states(this.entity_id)) -}}
         provider: >
-          {% if is_state('binary_sensor.weatherflow_local_connected', 'on')
+          {% if is_state('binary_sensor.pirateweather_connected', 'on')
+              and is_number(states('sensor.pirateweather_wind_bearing')) %}
+            Pirate Weather
+          {% elif is_state('binary_sensor.envcan_connected', 'on')
+              and is_number(states('sensor.windsor_wind_bearing')) %}
+            Environment Canada
+          {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
               and is_number(states('sensor.tempest_st_00057689_wind_bearing')) %}
             WeatherFlow Local
           {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
               and is_number(states('sensor.weatherflow_wind_direction')) %}
             WeatherFlow Cloud
-          {% elif is_state('binary_sensor.envcan_connected', 'on')
-              and is_number(states('sensor.windsor_wind_bearing')) %}
-            Environment Canada
-          {% elif is_state('binary_sensor.pirateweather_connected', 'on')
-              and is_number(states('sensor.pirateweather_wind_bearing')) %}
-            Pirate Weather
           {% endif %}
       availability: >
-        {{ (is_state('binary_sensor.weatherflow_local_connected', 'on')
-              and is_number(states('sensor.tempest_st_00057689_wind_bearing')))
-            or (is_state('binary_sensor.weatherflow_cloud_connected', 'on')
-              and is_number(states('sensor.weatherflow_wind_direction')))
+        {{ (is_state('binary_sensor.pirateweather_connected', 'on')
+              and is_number(states('sensor.pirateweather_wind_bearing')))
             or (is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_wind_bearing')))
-            or (is_state('binary_sensor.pirateweather_connected', 'on')
-              and is_number(states('sensor.pirateweather_wind_bearing'))) }}
+            or (is_state('binary_sensor.weatherflow_local_connected', 'on')
+              and is_number(states('sensor.tempest_st_00057689_wind_bearing')))
+            or (is_state('binary_sensor.weatherflow_cloud_connected', 'on')
+              and is_number(states('sensor.weatherflow_wind_direction'))) }}
 
     - name: "Wind Beaufort Display"
       unique_id: wind_beaufort_display

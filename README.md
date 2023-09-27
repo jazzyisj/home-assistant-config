@@ -1,9 +1,10 @@
 # Home Assistant Configuration
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_dark.png)
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home_2023_7_light.png)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png)
 
-##### <font color='cyan'>Updated 23-09-19</font>
+[More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
+
+##### <font color='cyan'>Updated 23-09-26</font>
 
 ## INSTALLED ADDONS (20)
 
@@ -48,13 +49,12 @@
 - Watchman
 - Weatherflow
 
-## UI Plugins (42)
+## UI Plugins (41)
 
 - Apex Charts
 - Auto Entities
 - Bar Card
 - Battery State Card
-- Big Slider Card
 - Button Card
 - Browser Mod
 - Card Mod
@@ -97,11 +97,11 @@
 
 - alarm_control_panel - 3
 - alert - 106
-- automation - 314
-- binary_sensor - 475
-- button - 100
+- automation - 315
+- binary_sensor - 469
+- button - 99
 - calendar - 15
-- camera - 41
+- camera - 40
 - climate - 5
 - counter - 1
 - cover - 1
@@ -111,26 +111,26 @@
 - input_boolean - 199
 - input_button - 2
 - input_datetime - 41
-- input_number - 195
+- input_number - 190
 - input_select - 18
 - input_text - 45
 - light - 48
 - lock - 4
-- media_player - 44
-- number - 77
+- media_player - 43
+- number - 75
 - person - 1
 - proximity - 1
 - remote - 1
-- scene - 8
-- script - 81
+- scene - 9
+- script - 78
 - select - 120
-- sensor - 963
+- sensor - 974
 - siren - 2
 - sun - 1
-- switch - 175
+- switch - 169
 - timer - 54
 - tts - 1
-- update - 128
+- update - 129
 - weather - 9
 - zone - 10
 
