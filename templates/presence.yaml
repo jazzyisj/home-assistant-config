@@ -1,77 +1,71 @@
 ###############################################################################
 ## Templates - Presence
 ###############################################################################
-- button:
-    - name: "Arriving Home Jason"
-      unique_id: arriving_home_jason
-      icon: mdi:home-account
-      press:
-        - condition: state
-          entity_id:
-            - binary_sensor.jason_home
-            - input_boolean.jason_almost_home
-          match: any
-          state: "on"
-
-        - event: mobile_app_notification_action
-          event_data:
-            action: arriving_home_jason
-
 - binary_sensor:
     - name: "Someone Home"
       unique_id: someone_home
-      icon: mdi:account-supervisor-circle
-      device_class: presence
+      device_class: occupancy
       state: >
         {% set home = state_attr(this.entity_id, 'home') %}
         {{ home | count > 0 if home != none else false }}
       attributes:
         home: >
-          {% set home = namespace(people=[]) %}
-          {% if is_state('binary_sensor.jason_home', 'on') %} {% set home.people = home.people + ['jason'] %} {% endif %}
-          {% if is_state('input_boolean.guest_home', 'on') %} {% set home.people = home.people + ['guest'] %} {% endif %}
-          {{ home.people }}
+          {{ states.person
+              | selectattr('state','eq','home')
+              | map(attribute='object_id') | list }}
 
     - name: "Owner Home"
       unique_id: owner_home
-      icon: mdi:account-supervisor-circle
-      device_class: presence
+      device_class: occupancy
       state: "{{ is_state('binary_sensor.jason_home', 'on') }}"
 
     # if override on use boolean value, else phone is connected use person location, else use boolean value
     - name: "Jason Home"
       unique_id: jason_home
-      icon: "{{ iif(is_state('binary_sensor.jason_home', 'on'), 'mdi:account-circle', 'mdi:account-circle-outline')}}"
       device_class: presence
-      delay_off: 2 # delay to prevent home/away trigger when override boolean not on (switches back)
-      delay_on: 2
+      delay_off: 1 # allow reset when override boolean not on
+      delay_on: 1 # allow reset when override boolean not on
       state: >
         {{ is_state('input_boolean.jason_home', 'on')
             if is_state('input_boolean.home_override_jason', 'on')
               else is_state('person.jason', 'home') }}
       attributes:
-        just_arrived:
-          > #ISSUE will always be true after a restart/template reload - last_changed is restart time
-          {{ is_state('binary_sensor.jason_home', 'on')
+        #ISSUE will always be true after a restart/template reload - last_changed is restart time
+        just_arrived: >
+          {{ is_state(this.entity_id, 'on')
               and now() - states.binary_sensor.jason_home.last_changed < timedelta(minutes=15) }}
+
+    # used for composite device tracker -> person.guest
+    - name: "Guest Home"
+      unique_id: guest_home
+      device_class: presence
+      state: "{{ is_state('input_boolean.guest_home', 'on') }}"
+      attributes:
+        just_arrived: >
+          {{ is_state(this.entity_id, 'on')
+              and now() - states.binary_sensor.guest_home.last_changed < timedelta(minutes=15) }}
 
     - name: "Occupancy Mode Alert"
       unique_id: occupancy_mode_alert
       device_class: problem
-      delay_on: 900
+      delay_on: 900 # let person set alarm/mode before alerting
       state: >
-        {{ ((is_state('input_select.occupancy_mode', ['Away', 'Vacation']) and is_state('binary_sensor.someone_home', 'on'))
-            or ((is_state('input_select.occupancy_mode', ['Home', 'Guest', 'Night']) and is_state('binary_sensor.someone_home', 'off'))
-            or (is_state('input_select.occupancy_mode', 'Guest') and is_state('binary_sensor.owner_home', 'on'))
-            or (is_state('alarm_control_panel.master', 'armed_away') and states('input_select.occupancy_mode') not in ['Away', 'Vacation'])
-            or (is_state('alarm_control_panel.master', 'armed_night') and not is_state('input_select.occupancy_mode', 'Night'))
-            or (is_state('alarm_control_panel.master', ['armed_home', 'disarmed']) and states('input_select.occupancy_mode') not in ['Home', 'Guest']))
+        {% set someone_home = is_state('binary_sensor.someone_home', 'on') %}
+        {% set owner_home = is_state('binary_sensor.owner_home', 'on') %}
+        {% set alarm = states('input_select.occupancy_mode') %}
+        {% set mode = states('alarm_control_panel.master') %}
+        {{ ((mode in ['Away', 'Vacation'] and someone_home)
+            or (mode in ['Home', 'Guest', 'Night'] and not someone_home)
+            or (mode == 'Guest' and owner_home)
+            or (alarm == 'armed_away' and mode not in ['Away', 'Vacation'])
+            or (alarm == 'armed_night' and not mode == 'Night')
+            or (alarm in ['armed_home', 'disarmed'] and mode not in ['Home', 'Guest'])
             and is_state('input_boolean.alarm_enabled', 'on'))
           and is_state('input_boolean.presence_alerts', 'on') }}
 
     - name: "Presence Override Jason Alert"
       unique_id: presence_override_jason_alert
-      delay_on: 900 # allow override to turn back off before alert
+      delay_on: 900 # allow override to turn back off before alerting
       state: >
         {{ is_state('input_boolean.home_override_jason', 'on')
             and is_state('input_boolean.presence_alerts', 'on') }}
@@ -80,10 +74,10 @@
       unique_id: presence_led_alert
       state: >
         {{ is_state('input_boolean.jason_almost_home', 'on')
-          or (is_state('binary_sensor.jason_home', 'on')
-            and (now() - states.binary_sensor.jason_home.last_changed < timedelta(minutes=10)))
-          or (is_state('input_boolean.guest_home', 'on')
-            and (now() - states.input_boolean.guest_home.last_changed < timedelta(minutes=10)))
-          or (states('proximity.jphone_home') | int(0) < 4
-            and state_attr('proximity.jphone_home', 'dir_of_travel') == 'towards')
-          or is_state('alert.jason_phone_offline', 'on') }}
+            or (states.binary_sensor
+                  | selectattr('attributes.just_arrived','defined')
+                  | selectattr('attributes.just_arrived','eq', true)
+                  | map(attribute='entity_id') | list | count > 0)
+            or (states('proximity.jphone_home') | int(0) < 4
+              and state_attr('proximity.jphone_home', 'dir_of_travel') == 'towards')
+            or is_state('alert.jason_phone_offline', 'on') }}

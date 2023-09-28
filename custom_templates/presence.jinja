@@ -1,0 +1,88 @@
+{% macro occupancy_mode() %}
+{%- set day_reset = today_at(states('input_datetime.day_reset')) %}
+{%- set bedtime = states('sensor.bedtime_today') | as_datetime
+  if has_value('sensor.bedtime_today') else today_at(states('input_datetime.weekend_bedtime')) %}
+{%- set waketime = states('sensor.waketime_today') | as_datetime
+  if has_value('sensor.waketime_today') else today_at(states('input_datetime.house_waketime')) %}
+{%- set waketime = waketime + timedelta(days=1) if waketime < now() < day_reset else waketime %}
+{%- set bedtime = bedtime + timedelta(days=1) if bedtime < waketime < now()
+      else bedtime - timedelta(days=1) if now() < waketime < bedtime else bedtime %}
+{%- if is_state('binary_sensor.someone_home', 'off') %}
+  {% set mode = 'Vacation' if is_state('input_select.occupancy_mode', 'Vacation') else 'Away' %}
+{%- elif bedtime < waketime %}
+  {%- set mode = 'Night' if is_state('input_boolean.bedtime_delayed', 'off')
+    else ('Home' if is_state('binary_sensor.owner_home', 'on') else 'Guest') %}
+{%- else %}
+  {%- set mode = 'Home' if is_state('binary_sensor.owner_home', 'on') else 'Guest' %}
+{%- endif %}
+{{- mode -}}
+{% endmacro %}
+
+{% macro trigger_person(trigger) %}
+{%- if trigger.id == 'lock' %}
+  {%- set person = trigger.to_state.state %}
+{%- elif trigger.id in ['doorbell', 'danger'] %}
+  {%- set person = 'hassio' %}
+{%- elif trigger.id == 'zone' %}
+  {%- set person = trigger.entity_id %}
+{%- elif trigger.event is defined %}
+  {%- set person = trigger.event.data['action'] %}
+{%- else %}
+  {%- set person = trigger.entity_id %}
+{%- endif %}
+{%- if person | lower | contains('hassio')
+    or person | lower | contains('keypad') %} hassio
+{%- elif person | lower | contains('guest') %} guest
+{%- elif person | lower | contains('jason') %} jason
+{%- endif -%}
+{% endmacro %}
+
+{% macro list_people(people) %}
+{%- set people = people|default(['nobody']) %}
+{%- set msg = namespace(value='') %}
+{%- set qty = namespace(value=0) %}
+{%- for item in people %}
+{%- set qty.value = qty.value | int(0) + 1 %}
+{%- if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
+{%- set msg.value = msg.value ~ item | title %}
+{%- endfor %}
+{%- set clist = ', and ' if msg.value.split(', ') | count > 2 else ' and ' %}
+{%- set plural = ' are' if qty.value | int(0) > 1 else ' is' %}
+{{- clist.join(msg.value.rsplit(', ', 1)) -}} {{ plural -}}
+{% endmacro %}
+
+{% macro occupancy_alert() %}
+{%- set someone_home = is_state('binary_sensor.someone_home','on') %}
+{%- set owner_home = state_attr('binary_sensor.owner_home','on') %}
+{%- set people = state_attr('binary_sensor.someone_home','home') %}
+{%- set alarm = states('alarm_control_panel.master') %}
+{%- set mode = states('input_select.occupancy_mode') %}
+{%- set status = states('sensor.master_alarm_status') %}
+{%- from 'presence.jinja' import list_people %}
+{%- if (someone_home and alarm in ['armed_away', 'armed_vacation'])
+  or (not someone_home and alarm in ['disarmed', 'armed_home']) %}
+{{ list_people(people) }} home but the house alarm is {{ status }}.
+{%- elif (alarm == 'armed_night' and mode != 'Night')
+  or (alarm in ['armed_home', 'disarmed'] and mode not in ['Home', 'Guest']) %}
+The house is in {{ mode }} mode but the alarm is {{ status }}.
+{%- elif mode == 'Guest' and owner_home %}
+The house is in guest mode, but {{ list_people(people|replace('guest','')) }} home.
+{%- elif (someone_home and mode in ['Away', 'Vacation'])
+  or (not someone_home and mode in ['Home', 'Guest', 'Night']) %}
+{{ list_people(people) }} home but house is in {{ mode }} mode.
+{%- endif %}
+{%- if someone_home %}
+  {%- if mode == ['Away', 'Vacation'] %}
+Have you forgotten to activate home mode?
+  {%- elif alarm in ['armed_away', 'armed_vacation'] %}
+Have you forgotten to disarm the alarm?
+  {%- endif %}
+{%- else %}
+Has your phone not connected to the network
+  {%- if mode == ['Home', 'Night', 'Guest'] %}
+, or have you just forgotten to activate away mode
+  {%- elif alarm in ['disarmed', 'armed_home', 'armed_night', 'armed_vacation'] %}
+, have you just forgotten to arm the alarm again
+  {%- endif %} ?
+{%- endif -%}
+{% endmacro %}
