@@ -47,126 +47,124 @@ waketime:
               target:
                 entity_id: switch.alarm_clock_nap
 
-    - if:
-        - condition: state
-          entity_id:
-            - binary_sensor.daytime_illuminance_lights
-            - binary_sensor.nighttime_illuminance_lights
-          match: any
-          state: "on"
-      then:
-        - service: script.turn_on # don't hold up script
-          target:
-            entity_id: script.waketime_lights
-          continue_on_error: true
+    - parallel:
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id:
+                    - binary_sensor.daytime_illuminance_lights
+                    - binary_sensor.nighttime_illuminance_lights
+                  match: any
+                  state: "on"
+              then:
+                - service: script.waketime_lights
 
-    - service: script.arm_alarm
-      data:
-        mode: home
-        override: true
-
-    - if:
-        - condition: state
-          entity_id: input_boolean.alarm_auto_arming
-          state: "off"
-      then:
-        - service: input_select.select_option
-          target:
-            entity_id: input_select.occupancy_mode
-          data:
-            option: >
-              {% if is_state('binary_sensor.owner_home', 'on') %} Home
-              {% elif is_state('binary_sensor.guest_home', 'on') %} Guest
-              {% else %} Away
-              {% endif %}
-
-    - if:
-        - condition: state
-          entity_id:
-            - input_boolean.occupancy_announcements
-            - input_boolean.alarm_announcements
-          match: any
-          state: "on"
-      then:
-        - wait_for_trigger:
-            - platform: event
-              event_type: occupancy_notification
-          timeout: 60
-
-    - if:
-        - condition: state
-          entity_id: input_boolean.media_preset_enabled_wake
-          state: "on"
-      then:
-        - service: script.media_play
-          data:
-            preset: wake
-          continue_on_error: true #ISSUE #MASS script does not continue if mass fails
-
-        - wait_template: "{{ is_state('timer.media_preset_wake', 'idle') }}"
-
-        - variables:
-            stop_player: >
-              {{ expand(state_attr('group.media_players', 'entity_id'))
-                  |selectattr('name', 'eq', states('select.media_preset_speaker_wake'))
-                  |map(attribute='entity_id')|join('') }}
-
-        - if: "{{ stop_player != '' }}"
-          then:
-            - service: script.turn_media_player_off
+        - sequence:
+            - service: input_select.select_option
+              target:
+                entity_id: input_select.occupancy_mode
               data:
-                entity_id: "{{ stop_player }}"
+                option: >
+                  {% if is_state('binary_sensor.owner_home', 'on') %} Home
+                  {% elif is_state('binary_sensor.guest_home', 'on') %} Guest
+                  {% else %} Away
+                  {% endif %}
               continue_on_error: true
-      else:
-        - delay: # wake time duration
-            minutes: "{{ states('input_number.media_preset_wake_time')|int }}"
 
-    - if:
-        - condition: state
-          entity_id: input_boolean.calendar_notifications_jason
-          state: "on"
-      then:
-        - service: button.press
-          target:
-            entity_id: button.announce_calendar_events_jason
+            - service: script.arm_alarm
+              data:
+                mode: home
+                override: true
+              continue_on_error: true
 
-    - variables:
-        battery: "{{ states('sensor.jphone_battery_level')|int(-1) }}"
+            - if:
+                - condition: state
+                  entity_id:
+                    - input_boolean.occupancy_announcements
+                    - input_boolean.alarm_announcements
+                  match: any
+                  state: "on"
+              then:
+                - wait_for_trigger:
+                    - platform: event
+                      event_type: occupancy_notification
+                  timeout: 60
 
-    - if: "{{ 0 > battery < 50 }}"
-      then:
-        - service: script.tts_play
-          data:
-            message: "Just a heads up, your mobile phone battery level is only {{ battery }} percent."
-            quiet_play: true
+            - if:
+                - condition: state
+                  entity_id: input_boolean.media_preset_enabled_wake
+                  state: "on"
+              then:
+                - service: script.media_play
+                  data:
+                    preset: wake
+                  continue_on_error: true #ISSUE #MASS script does not continue if mass fails
 
-    - if:
-        - condition: numeric_state
-          entity_id: sensor.tts_saved_messages
-          above: 0
-      then:
-        - service: script.tts_play_saved_messages
-          continue_on_error: true
+                - wait_template: "{{ is_state('timer.media_preset_wake', 'idle') }}"
 
-    - if:
-        - condition: state
-          entity_id: input_boolean.morning_weather_enabled
-          state: "on"
-      then:
-        - service: script.weather_report
-          continue_on_error: true
+                - variables:
+                    stop_player: >
+                      {{ expand(state_attr('group.media_players', 'entity_id'))
+                          |selectattr('name', 'eq', states('select.media_preset_speaker_wake'))
+                          |map(attribute='entity_id')|join('') }}
 
-    - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+                - if: "{{ stop_player != '' }}"
+                  then:
+                    - service: script.turn_media_player_off
+                      data:
+                        entity_id: "{{ stop_player }}"
+                      continue_on_error: true
+              else:
+                - delay: # wake time duration
+                    minutes: "{{ states('input_number.media_preset_wake_time')|int }}"
 
-    - if:
-        - condition: state
-          entity_id: input_boolean.media_preset_enabled_morning
-          state: "on"
-      then:
-        - service: script.media_play
-          data:
-            preset: morning
-          continue_on_error: true
+            - if:
+                - condition: state
+                  entity_id: input_boolean.calendar_notifications_jason
+                  state: "on"
+              then:
+                - service: button.press
+                  target:
+                    entity_id: button.announce_calendar_events_jason
+                  continue_on_error: true
+
+            - variables:
+                battery: "{{ states('sensor.jphone_battery_level')|int(-1) }}"
+
+            - if: "{{ 0 > battery < 50 }}"
+              then:
+                - service: script.tts_play
+                  data:
+                    message: "Just a heads up, your mobile phone battery level is only {{ battery }} percent."
+                    quiet_play: true
+                  continue_on_error: true
+
+            - if:
+                - condition: numeric_state
+                  entity_id: sensor.tts_saved_messages
+                  above: 0
+              then:
+                - service: script.tts_play_saved_messages
+                  continue_on_error: true
+
+            - if:
+                - condition: state
+                  entity_id: input_boolean.morning_weather_enabled
+                  state: "on"
+              then:
+                - service: script.weather_report
+                  continue_on_error: true
+
+            - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+
+            - if:
+                - condition: state
+                  entity_id: input_boolean.media_preset_enabled_morning
+                  state: "on"
+              then:
+                - service: script.media_play
+                  data:
+                    preset: morning
 
 ###############################################################################
 ## Wake Up Switch - waketime button / zwave scenes
