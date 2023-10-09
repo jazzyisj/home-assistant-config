@@ -153,75 +153,47 @@
       device_class: timestamp
       icon: mdi:weather-sunset-up
       state: >
-        {% set waketime = none %}
+        {% set wake_tomorrow = none %}
         {% set use_alarms = false %}
+        {% set reset = today_at(states('input_datetime.day_reset')) %}
+        {% set house = today_at(states('input_datetime.house_waketime')) %}
         {% set guest = today_at(states('input_datetime.guest_waketime')) %}
-        {% if is_state('input_select.occupancy_mode', 'Guest') %}
-          {% if is_state('input_boolean.guest_morning', 'on') %}
-            {% set waketime = guest + timedelta(days=1) if now() > guest else guest %}
-          {% endif %}
+        {% set wake_today = states('sensor.waketime_today')|as_datetime
+          if has_value('sensor.waketime_today') else house %}
+        {% set days = today_at(states('input_datetime.days_waketime')) %}
+        {% set afts = today_at(states('input_datetime.afternoons_waketime')) %}
+        {% set wknd = today_at(states('input_datetime.weekend_waketime')) %}
+        {% set work_tomorrow = is_state('binary_sensor.work_tomorrow', 'on') %}
+        {% set set_alarms = state_attr('sensor.alarm_clock_next_alarm', 'set_alarms') %}
+        {% if is_state('input_select.occupancy_mode', 'Guest') and is_state('input_boolean.guest_morning', 'on') %}
+          {% set wake_tomorrow = guest %}
+        {% elif work_tomorrow and is_state('input_boolean.workday_morning', 'on') %}
+          {% set wake_tomorrow = afts if is_state('sensor.work_shift_tomorrow', 'Afternoons') else days %}
+          {% set use_alarms = true %}
+        {% elif not work_tomorrow and is_state('input_boolean.weekend_morning', 'on') %}
+          {% set wake_tomorrow = wknd %}
+          {% set use_alarms = true %}
         {% else %}
-          {% set days = today_at(states('input_datetime.days_waketime')) %}
-          {% set afts = today_at(states('input_datetime.afternoons_waketime')) %}
-          {% set wknd = today_at(states('input_datetime.weekend_waketime')) %}
-          {% set house = today_at(states('input_datetime.house_waketime')) %}
-          {% set set_alarms = state_attr('sensor.alarm_clock_next_alarm', 'set_alarms') %}
-          {% set wake_today = states('sensor.waketime_today')|as_datetime
-              if has_value('sensor.waketime_today') else none %}
-          {# set wake time today to alarm if alarm set #}
-          {% if use_alarms and set_alarms != none and wake_today != none %}
-            {% if set_alarms | count > 0 %}
-              {% set today_alarms = namespace(value=[]) %}
-              {% for item in set_alarms %}
-                {# select set alarms within 6 hours of today wake time #}
-                {% if ((wake_today | as_timestamp - item) | abs <= 21600) %}
-                  {% set today_alarms.value = today_alarms.value + [item] %}
-                {% endif %}
-              {% endfor %}
-              {# set next wake_today to wake alarm - wake_alarms(min) #}
-              {% if use_alarms and today_alarms.value | count > 0 %}
-                {% set wake_today = today_alarms.value | min | as_datetime %}
-              {% endif %}
-            {% endif %}
-          {% endif %}
-          {# set wake time tomorrow #}
-          {% if is_state('binary_sensor.work_tomorrow', 'on') and is_state('input_boolean.workday_morning', 'on') %}
-            {% set wake_tomorrow = afts + timedelta(days=1) if is_state('sensor.work_shift_tomorrow', 'Afternoons') else days + timedelta(days=1) %}
-            {% set use_alarms = true %}
-          {% elif is_state('binary_sensor.work_tomorrow', 'off') and is_state('input_boolean.weekend_morning', 'on') %}
-            {% set wake_tomorrow = wknd + timedelta(days=1) %}
-            {% set use_alarms = true %}
-          {% else %}
-            {% set wake_tomorrow = none if is_state('input_boolean.house_wakeup', 'off')
-                else house + timedelta(days=1) if now() > house else house %}
-          {% endif %}
+          {% set wake_tomorrow = house if is_state('input_boolean.house_wakeup', 'on') else none %}
+        {% endif %}
+        {% if wake_tomorrow != none %}
+          {% set wake_tomorrow = wake_tomorrow + timedelta(days=1)
+              if wake_tomorrow < now() or wake_tomorrow < reset else wake_tomorrow %}
           {% if use_alarms and set_alarms != none %}
-            {# resset wake time tomorrow if alarm set #}
-            {% if set_alarms | count > 0 %}
-              {% set tomorrow_alarms = namespace(value=[]) %}
-              {% for item in set_alarms %}
-                {# select set alarms within 6 hours of tomorrow wake time #}
-                {% if ((wake_tomorrow | as_timestamp - item) | abs <= 21600) %}
-                  {% set tomorrow_alarms.value = tomorrow_alarms.value + [item] %}
-                {% endif %}
-              {% endfor %}
-              {# set next wake_tomorrow to next wake alarm - wake_alarms(min) #}
-              {% if use_alarms and tomorrow_alarms.value | count > 0 %}
-                {% set wake_tomorrow = tomorrow_alarms.value | min | as_datetime %}
+            {% set tomorrow_alarms = namespace(value=[]) %}
+            {% for item in set_alarms %}
+              {# select set alarms within 6 hours of tomorrow wake time #}
+              {% if ((wake_tomorrow | as_timestamp - item) | abs <= 21600) %}
+                {% set tomorrow_alarms.value = tomorrow_alarms.value + [item] %}
               {% endif %}
+            {% endfor %}
+            {# set next wake_tomorrow to next alarm - wake_alarms(min) #}
+            {% if tomorrow_alarms.value | count > 0 %}
+              {% set wake_tomorrow = tomorrow_alarms.value | min | as_datetime %}
             {% endif %}
-          {% endif %}
-          {% if wake_today == none %}
-            {# use house time if wake_today is off #}
-            {% set waketime = wake_tomorrow if now() > house else wake_today %}
-          {% else %}
-            {# if now is after wake_today or house already awake next wake is tomorrow #}
-            {% set waketime = wake_tomorrow if now() > wake_today
-                  or is_state('input_select.occupancy_mode', ['Home', 'Guest'])
-                else wake_today %}
           {% endif %}
         {% endif %}
-        {{ waketime }}
+        {{- wake_tomorrow if now() > wake_today else wake_today -}}
       attributes:
         12hour: >
           {% from 'value.jinja' import twelve_hour %}
