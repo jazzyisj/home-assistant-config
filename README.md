@@ -36,6 +36,8 @@
 - Asus Router
 - Balboa
 - Browser Mod
+- Composite Device Tracker
+- Fontawesome
 - Frigate
 - Google Home
 - HACS
@@ -44,7 +46,7 @@
 - Ontario Energy Board
 - Pirate Weather
 - Smart ThinQ Sensors
-- Variable
+- Variables+History
 - Virtual
 - Watchman
 - Weatherflow
