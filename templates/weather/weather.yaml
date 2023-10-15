@@ -10,9 +10,6 @@
 
     - platform: time_pattern
       hours: /1
-
-    - platform: state
-      entity_id: sensor.time
   action:
     - service: weather.get_forecast
       data:
@@ -24,8 +21,8 @@
     - name: Weather Hourly Forecast
       unique_id: weather_hourly_forecast
       state: "{{ now().isoformat() }}"
-      attributes: #TEMP "{{ hourly.forecast }}"
-        forecast: "{{ state_attr('weather.weatherflow_hourly_based_forecast', 'forecast') }}"
+      attributes:
+        forecast: "{{ hourly.forecast }}"
 
 - trigger:
     - platform: homeassistant
@@ -219,12 +216,10 @@
       unique_id: current_condition
       icon: mdi:weather-partly-snowy-rainy
       state: >
-        {% if has_value('weather.weatherflow_local_daily') %}
-          {% set condition = states('weather.weatherflow_local_daily') %}
+        {% if has_value('weather.windsor') %}
+          {% set condition = states('weather.windsor') %}
         {% elif has_value('weather.weatherflow_day_based_forecast') %}
           {% set condition = states('weather.weatherflow_day_based_forecast') %}
-        {% elif has_value('weather.windsor') %}
-          {% set condition = states('weather.windsor') %}
         {% elif has_value('weather.pirateweather') %}
           {% set condition = states('weather.pirateweather') %}
         {% endif %}
@@ -244,19 +239,16 @@
         {% endif %}
       attributes:
         provider: >
-          {% if has_value('weather.weatherflow_local_daily') %}
-            WeatherFlow Local
+          {% if has_value('weather.windsor') %}
+            Environment Canada
           {% elif has_value('weather.weatherflow_day_based_forecast') %}
             WeatherFlow Cloud
-          {% elif has_value('weather.windsor') %}
-            Environment Canada
           {% elif has_value('weather.pirateweather') %}
             Pirate Weather
           {% endif %}
       availability: >
-        {{ has_value('weather.weatherflow_local_daily')
+        {{ has_value('weather.windsor')
             or has_value('weather.weatherflow_day_based_forecast')
-            or has_value('weather.windsor')
             or has_value('weather.pirateweather') }}
 
     - name: "Outdoor Temperature"
@@ -560,9 +552,6 @@
         {% if is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.weatherflow_precipitation_probability')) %}
           {{ states('sensor.weatherflow_precipitation_probability') | int }}
-        {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
-            and is_number(states('sensor.weatherflow_local_precipitation_probability')) %}
-          {{ states('sensor.weatherflow_local_precipitation_probability') | int }}
         {% elif is_state('binary_sensor.envcan_connected', 'on')
             and is_number(states('sensor.windsor_chance_of_precip')) %}
           {{ states('sensor.windsor_chance_of_precip') | int }}
@@ -575,9 +564,6 @@
           {% if is_state('binary_sensor.weatherflow_cloud_connected', 'on')
               and is_number(states('sensor.weatherflow_precipitation_probability')) %}
             WeatherFlow Cloud
-          {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
-              and is_number(states('sensor.weatherflow_local_precipitation_probability')) %}
-            WeatherFlow Local
           {% elif is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_chance_of_precip')) %}
             Environment Canada
@@ -588,8 +574,6 @@
       availability: >
         {{ (is_state('binary_sensor.weatherflow_cloud_connected', 'on')
               and is_number(states('sensor.weatherflow_precipitation_probability')))
-            or (is_state('binary_sensor.weatherflow_local_connected', 'on')
-              and is_number(states('sensor.weatherflow_local_precipitation_probability')))
             or (is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_chance_of_precip')))
             or (is_state('binary_sensor.pirateweather_connected', 'on')
@@ -974,7 +958,7 @@
 
     # pirate, envcan priority - more accurate
     - name: "Wind Speed"
-      unique_id: wind_speed
+      unique_id: wind_speed #TEST avg local
       icon: mdi:weather-windy
       device_class: wind_speed
       state_class: measurement
@@ -987,8 +971,8 @@
             and is_number(states('sensor.windsor_wind_speed')) %}
           {{ states('sensor.windsor_wind_speed') | int }}
         {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
-            and is_number(states('sensor.tempest_st_00057689_wind_speed')) %}
-          {{ (states('sensor.tempest_st_00057689_wind_speed') | int*3.6) | int }}
+            and is_number(states('sensor.tempest_st_00057689_wind_speed_avg')) %}
+          {{ (states('sensor.tempest_st_00057689_wind_speed_avg') | int*3.6) | int }}
         {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.weatherflow_wind_speed_km_h')) %}
           {{ states('sensor.weatherflow_wind_speed_km_h') | int }}
@@ -1002,7 +986,7 @@
               and is_number(states('sensor.windsor_wind_speed')) %}
             Environment Canada
           {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
-              and is_number(states('sensor.tempest_st_00057689_wind_speed')) %}
+              and is_number(states('sensor.tempest_st_00057689_wind_speed_avg')) %}
             WeatherFlow Local
           {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
               and is_number(states('sensor.weatherflow_wind_speed_km_h')) %}
@@ -1200,12 +1184,23 @@
     - name: "Wind Beaufort Display"
       unique_id: wind_beaufort_display
       icon: mdi:windsock
-      state: "{{ states('sensor.weatherflow_beaufort_description') | replace('_', ' ') | title }}"
-      attributes:
-        provider: WeatherFlow Cloud
-      availability: >
-        {{ is_state('binary_sensor.weatherflow_cloud_connected', 'on')
-            and has_value('sensor.weatherflow_beaufort_description') }}
+      state: >
+        {% set speed = states('sensor.wind_speed')|int(-1) %}
+        {% if speed == -1 %} Unknown
+        {% elif speed < 1 %} Calm
+        {% elif speed < 6 %} Light Air
+        {% elif speed < 12 %} Light Breeze
+        {% elif speed < 20 %} Gentle Breeze
+        {% elif speed < 29 %} Moderate Breeze
+        {% elif speed < 38 %} Fresh Breeze
+        {% elif speed < 50 %} Strong Breeze
+        {% elif speed < 62 %} Near Gale
+        {% elif speed < 75 %} Gale
+        {% elif speed < 89 %} Strong Gale
+        {% elif speed < 103 %} Storm
+        {% elif speed < 118 %} Violent Storm
+        {% else %} Hurricane
+        {% endif %}
 
     - name: "Cloud Cover"
       unique_id: cloud_cover
