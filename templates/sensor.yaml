@@ -29,33 +29,36 @@
 
     - platform: state
       entity_id: switch.outdoor_sump
+      to:
+        - "on"
+        - "off"
 
     - platform: numeric_state
       entity_id: sensor.outdoor_temperature
       below: 0
       for:
-        hours: 12
+        hours: 12 # match sump off automation
         minutes: 5 # allow pump to turn off
 
     - platform: numeric_state
       entity_id: sensor.outdoor_temperature
       above: 0
       for:
-        hours: 12
+        days: 1 # match sump on automation
         minutes: 5 # allow pump to turn on
   binary_sensor:
-    - name: "Outdoor Sump Power Off Alert"
-      unique_id: outdoor_sump_power_off_alert #VERIFY
+    - name: "Outdoor Sump Power Alert"
+      unique_id: outdoor_sump_power_alert
       icon: mdi:pump-off
       device_class: problem
       state: >
-        {{ (is_state('switch.outdoor_sump', 'off')
-              and states('sensor.outdoor_temperature') | int(-1) >= 0)
-            or (is_state('switch.outdoor_sump', 'on')
-              and states('sensor.outdoor_temperature') | int(-1) < 0) }}
-      availability: >
-        {{ has_value('switch.outdoor_sump')
-            and is_number(states('sensor.outdoor_temperature')) }}
+        {% if has_value('sensor.outdoor_temperature')
+              and has_value('switch.outdoor_sump') %}
+          {{ iif(states('sensor.outdoor_temperature') | int >= 0,
+              is_state('switch.outdoor_sump', 'off'),
+                is_state('switch.outdoor_sump', 'on')) }}
+        {% else %} {{ true }}
+        {% endif %}
 
 - trigger:
     - platform: homeassistant
@@ -298,11 +301,13 @@
       icon: mdi:flash-alert
       device_class: problem
       state: >
-        {{ is_state('switch.indoor_sump', 'off')
+        {{ not has_value('switch.indoor_sump')
+            or is_state('switch.indoor_sump', 'off')
             or states('sensor.indoor_sump_power') | float(-1) > 600
             or is_state('binary_sensor.indoor_sump_overpowering', 'on')
             or states('sensor.indoor_sump_device_temperature') | float(-1) > 55
-            or is_state('binary_sensor.indoor_sump_overheating', 'on') }}
+            or is_state('binary_sensor.indoor_sump_overheating', 'on')
+            and is_state('input_boolean.startup_pending', 'off') }}
 
     - name: "Outdoor Sump"
       unique_id: outdoor_sump
@@ -316,11 +321,13 @@
       icon: mdi:flash-alert
       device_class: problem
       state: >
-        {{ states('sensor.outdoor_sump_power') | float(-1) > 600
+        {{ not has_value('switch.outdoor_sump')
+            or states('sensor.outdoor_sump_power') | float(-1) > 600
             or is_state('binary_sensor.outdoor_sump_overpowering', 'on')
             or states('sensor.outdoor_sump_device_temperature') | float(-1) > 55
             or is_state('binary_sensor.outdoor_sump_overheating', 'on')
-            or is_state('binary_sensor.outdoor_sump_power_off_alert','on') }}
+            or is_state('binary_sensor.outdoor_sump_power_alert','on')
+            and is_state('input_boolean.startup_pending', 'off') }}
 
 - sensor:
     - name: "Current Power Use [W]"
