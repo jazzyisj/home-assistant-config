@@ -12,7 +12,7 @@ tts_play:
       description: "TTS Message to play."
       example: "This is a test message."
     alert:
-      description: Message is an alert. (overrides tts, media player, and volume)
+      description: "Message is an alert. (overrides tts, media player, and volume)"
       example: "false"
     tts_service:
       description: "Override service to use for TTS."
@@ -27,23 +27,23 @@ tts_play:
       description: "Percent - override volume level"
       example: "50"
     quiet_play:
-      description: Play announcement during quiet time.
+      description: "Play announcement during quiet time."
       example: "true"
-    night_play:
-      description: Play announcement during night mode.
+    always_play:
+      description: "Always play announcement."
       example: "true"
     ignore_away:
-      description: Play announcement when nobody home.
+      description: "Play announcement when nobody home."
       example: "true"
     save_message:
-      description: Save message to play when home or after alarm.
+      description: "Save message to play when home or after alarm."
       example: "true"
   variables:
     min_volume: "{{ min_volume | default(-1) | float }}"
     quiet_play: "{{ quiet_play | default(false) }}"
-    night_play: "{{ night_play | default(false) }}"
+    always_play: "{{ always_play | default(false) }}"
     ignore_away: "{{ ignore_away | default(false) }}"
-    save_msg: "{{ save_message | default(false) }}"
+    save_message: "{{ save_message | default(is_state('binary_sensor.mobile_phone_in_use', 'on')) }}"
     alert: "{{ alert | default(false) }}"
   sequence:
     - service: notify.tts_message_history
@@ -123,15 +123,19 @@ tts_play:
           {% endif %}
           {{ min_volume/100 if min_volume > -1 and (min_volume > volume) else volume/100 }}
         mute_tts: >
-          {{ false if alert
-              else is_state('switch.system_mute', 'on')
-              or is_state('input_boolean.alarm_triggered', 'on')
-              or (is_state('binary_sensor.quiet_time', 'on') and not quiet_play and not night_play)
-              or (is_state('binary_sensor.scene_active', 'on') and not night_play)
-              or (is_state('input_select.occupancy_mode', 'Night') and not night_play)
-              or (is_state('binary_sensor.someone_home', 'off') and not ignore_away)
-              or media_players | count == 0
-              or volume == 0 }}
+          {% if is_state('switch.system_mute', 'on') %}
+            {{ false if alert else true }}
+          {% else %}
+            {{ false if (alert or always_play)
+                else is_state('binary_sensor.mobile_phone_in_use', 'on')
+                or is_state('input_boolean.alarm_triggered', 'on')
+                or (is_state('binary_sensor.scene_active', 'on'))
+                or (is_state('input_select.occupancy_mode', 'Night'))
+                or (is_state('binary_sensor.quiet_time', 'on') and not quiet_play)
+                or (is_state('binary_sensor.someone_home', 'off') and not ignore_away)
+                or media_players | count == 0
+                or volume == 0 }}
+          {% endif %}
 
     - choose:
         - conditions: "{{ mute_tts }}"
@@ -144,7 +148,7 @@ tts_play:
             - if: >
                 {{ is_state('input_boolean.jason_phone_tts_enabled', 'on')
                     and is_state('binary_sensor.jason_home', 'on')
-                    and (quiet_play or night_play) }}
+                    and (quiet_play or always_play) }}
               then:
                 - service: notify.jason
                   data:
@@ -155,7 +159,7 @@ tts_play:
 
             # save message if message is flagged for save
             - if:
-                - "{{ save_msg }}"
+                - "{{ save_message }}"
               then:
                 - service: script.turn_on
                   target:
@@ -190,10 +194,12 @@ tts_play:
           target:
             entity_id: input_boolean.tts_muted
 
-        # turn boolean on to start announcement queue
-        - service: input_boolean.turn_on
+        # store tts player for tts sensor
+        - service: input_text.set_value
           target:
-            entity_id: input_boolean.tts
+            entity_id: input_text.tts_active_media_player
+          data:
+            value: "{{ media_player }}"
 
         # store tts players for tts queue finished
         - service: input_text.set_value
@@ -260,6 +266,11 @@ tts_play:
         #         data:
         #           player_id: "{{ mass_queues[repeat.index-1] }}"
         #           command: snapshot_create
+
+        # turn boolean on to start announcement queue
+        - service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.tts
 
         - service: script.media_player_set_volumes
           data:
