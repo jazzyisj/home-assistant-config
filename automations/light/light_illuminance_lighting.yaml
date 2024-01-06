@@ -6,6 +6,8 @@
   description: "Turn lights on based on outdoor illuminance."
   mode: restart
   max_exceeded: silent
+  trace: #TEST
+    stored_traces: 20
   trigger:
     - platform: homeassistant
       id: startup
@@ -44,8 +46,8 @@
         - Vacation
       for: 5 # allow waketime_active / scene_active to turn on
 
-    - platform: zone #VERIFY
-      id: home
+    - platform: zone
+      id: arrive
       entity_id: person.jason
       zone: zone.almost_home
       event: enter
@@ -152,16 +154,26 @@
           then:
             - choose:
                 - conditions:
-                    - condition: state
-                      entity_id: input_select.occupancy_mode
-                      match: any
-                      state:
-                        - Home
-                        - Guest
+                    - or:
+                        - condition: state
+                          entity_id: input_select.occupancy_mode
+                          match: any
+                          state:
+                            - Home
+                            - Guest
+
+                        - and:
+                            - condition: template
+                              alias: "Jason almost home"
+                              value_template: "{{ trigger.id == 'arrive' }}"
+
+                            - condition: state
+                              entity_id: binary_sensor.someone_home
+                              state: "off"
                   sequence:
                     - if: # no outside lights in morning
                         - condition: state
-                          entity_id: binary_sensor.morning_hours
+                          entity_id: binary_sensor.waketime_active
                           state: "on"
                       then:
                         - service: script.light_scene_on
@@ -185,22 +197,18 @@
                     # turn on away lights
                     - service: script.turn_light_on
                       data:
-                        lights: >
-                          {% set bedtime = states('sensor.bedtime_today') %}
-                          {% set night =  now() > bedtime | as_datetime if bedtime != none else false %}
-                          {{ iif(night,night_away_lights , away_lights) }}
+                        lights: "{{ iif(is_state('binary_sensor.night_time','on'), night_away_lights, away_lights) }}"
                         activate_timer: false
                         bypass_timer: true
                         reset: true
 
-                    # turn off all lights except away lights #VERIFY
+                    # turn off all lights except away lights
                     - service: script.turn_light_off
                       data:
                         lights: >
-                          {% set bedtime = states('sensor.bedtime_today') %}
-                          {% set night =  now() > bedtime | as_datetime if bedtime != none else false %}
                           {{ expand('group.lights')
-                              | rejectattr('entity_id', 'in', iif(night,night_away_lights , away_lights))
+                              | rejectattr('entity_id', 'in',
+                                  iif(is_state('binary_sensor.night_time','on'), night_away_lights, away_lights))
                               | selectattr('state', 'eq', 'on')
                               | map(attribute='entity_id') | list }}
                         activate_timer: false

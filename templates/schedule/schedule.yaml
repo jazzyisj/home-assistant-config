@@ -27,9 +27,54 @@
           {%- endfor %}
 
 - binary_sensor:
+    - name: "Waketime Active"
+      unique_id: waketime_active
+      icon: mdi:weather-sunset-up
+      state: >
+        {% if is_state('binary_sensor.someone_home', 'on') %}
+          {% set waketime = states('sensor.waketime_today') | as_datetime
+              if has_value('sensor.waketime_today') else none %}
+          {% if is_state('script.waketime', 'on') %} true
+          {% elif waketime != none %}
+            {{ now() > waketime - timedelta(minutes=30)
+                and now() < waketime + timedelta(minutes=states('input_number.media_preset_wake_time') | int) }}
+          {% endif %}
+        {% endif %}
+
+    # bedtime script or delay timer on, or after bedtime but not night mode
+    # waketime takes precedence
+    - name: "Bedtime Active"
+      unique_id: bedtime_active
+      icon: "{{ 'mdi:chevron-up-circle' if is_state('input_boolean.bedtime_delayed', 'on') else 'mdi:bed-clock' }}"
+      state: >
+        {% if is_state('binary_sensor.someone_home', 'on')
+            and not is_state('script.waketime', 'on') %}
+          {% set bedtime = states('sensor.bedtime_today') | as_datetime
+              if has_value('sensor.bedtime_today') else none %}
+          {% if is_state('script.bedtime', 'on')
+              or not is_state('timer.bedtime_delay', 'idle') %} true
+          {% elif bedtime != none %}
+              {{ now() >= bedtime - timedelta(minutes=states('input_number.bedtime_warning_time') | int)
+                  and now() <= bedtime + timedelta(hours=2) }}
+          {% endif %}
+        {% endif %}
+
+    - name: "Night Time"
+      unique_id: night_time
+      icon: mdi:weather-night
+      delay_off: 5 # prevent on/off toggle on date changes
+      state: >
+        {% set bedtime = states('sensor.bedtime_today') | as_datetime
+            if has_value('sensor.bedtime_today') else today_at(states('input_datetime.weekend_bedtime')) %}
+        {% set waketime = states('sensor.waketime_today') | as_datetime
+            if has_value('sensor.waketime_today') else today_at(states('input_datetime.house_waketime')) %}
+        {{ now() < waketime
+            if now() > today_at(states('input_datetime.day_reset'))
+              else bedtime < now()  }}
+
     - name: "Quiet Time"
       unique_id: quiet_time
-      icon: "{{ iif(is_state('binary_sensor.quiet_time', 'on'), 'mdi:volume-low', 'mdi:volume-high') }}"
+      icon: "{{ iif(is_state(this.entity_id, 'on'), 'mdi:volume-low', 'mdi:volume-high') }}"
       delay_off: 5 # prevent on/off toggle on date changes
       state: >
         {% if is_state('input_boolean.quiet_time_override', 'on') %} true
@@ -40,54 +85,6 @@
               {{ states('sensor.quiet_time_start') | as_datetime
                   <= now() < states('sensor.quiet_time_end') | as_datetime }}
             {% endif %}
-          {% endif %}
-        {% endif %}
-
-    - name: "Morning Hours"
-      unique_id: morning_hours
-      icon: mdi:sun-clock-outline
-      state: "{{ today_at('12:00') > now () > today_at(states('input_datetime.day_reset')) }}"
-
-    - name: "Waketime Active"
-      unique_id: waketime_active
-      icon: mdi:weather-sunset-up
-      state: >
-        {% if is_state('binary_sensor.someone_home', 'on')
-            and is_state('input_select.occupancy_mode', 'Night') %}
-          {% set waketime = states('sensor.waketime_today') | as_datetime
-              if has_value('sensor.waketime_today') else none %}
-          {% set day_reset = today_at(states('input_datetime.day_reset')) %}
-          {% if is_state('script.waketime', 'on') %} true
-          {% elif is_state('input_select.occupancy_mode', ['Home', 'Guest'])
-              and now() - states.input_select.occupancy_mode.last_changed
-                > timedelta(minutes=states('input_number.media_preset_wake_time') | int) %} false
-          {% elif waketime != none %}
-            {% set waketime = waketime + timedelta(days=1) if waketime < day_reset else waketime %}
-            {% if is_state('input_select.occupancy_mode', 'Night') %}
-              {{ now() >= waketime - timedelta(minutes=30)
-                  and now() <= waketime + timedelta(hours=2) }}
-            {% else %}
-              {{ day_reset < now() > waketime - timedelta(minutes=30)
-                  and now() < waketime + timedelta(minutes=states('input_number.media_preset_wake_time') | int) }}
-            {% endif %}
-          {% endif %}
-        {% endif %}
-
-    # bedtime script/delay timer on or after bedtime but not night mode, and more than 2 hours before waketime
-    - name: "Bedtime Active"
-      unique_id: bedtime_active
-      icon: "{{ 'mdi:chevron-up-circle' if is_state('input_boolean.bedtime_delayed', 'on') else 'mdi:bed-clock' }}"
-      state: >
-        {% if is_state('script.bedtime', 'on') or not is_state('timer.bedtime_delay', 'idle') %} true
-        {% elif is_state('input_select.occupancy_mode', ['Home', 'Guest']) %}
-          {% set day_reset = today_at(states('input_datetime.day_reset')) %}
-          {% set waketime = states('sensor.waketime_today') | as_datetime
-              if has_value('sensor.waketime_today') else none %}
-          {% set bedtime = states('sensor.bedtime_today') | as_datetime
-              if has_value('sensor.bedtime_today') else none %}
-          {% if waketime != none and bedtime != none %}
-            {% set waketime = waketime + timedelta(days=1) if waketime < bedtime else waketime %}
-            {{ bedtime <= now() <= waketime - timedelta(hours=2) }}
           {% endif %}
         {% endif %}
 
@@ -183,7 +180,7 @@
         {% set reset = today_at(states('input_datetime.day_reset')) %}
         {% set house = today_at(states('input_datetime.house_waketime')) %}
         {% set guest = today_at(states('input_datetime.guest_waketime')) %}
-        {% set wake_today = states('sensor.waketime_today')|as_datetime
+        {% set wake_today = states('sensor.waketime_today') | as_datetime
           if has_value('sensor.waketime_today') else house %}
         {% set days = today_at(states('input_datetime.days_waketime')) %}
         {% set afts = today_at(states('input_datetime.afternoons_waketime')) %}
@@ -325,12 +322,13 @@
       device_class: timestamp
       icon: mdi:bed-clock
       state: >
+        {% set bedtime_warning = none %}
         {% set bedtime = states('sensor.bedtime_today') | as_datetime
             if has_value('sensor.bedtime_today') else none %}
         {% if bedtime != none %}
-          {% set bedtime = bedtime - timedelta(minutes = states('input_number.bedtime_warning_time') | int) %}
+          {% set bedtime_warning = bedtime - timedelta(minutes = states('input_number.bedtime_warning_time') | int) %}
         {% endif %}
-        {{ bedtime }}
+        {{ bedtime_warning }}
       attributes:
         12hour: >
           {% from 'speech.jinja' import twelve_hour %}
