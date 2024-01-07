@@ -4,7 +4,7 @@
 
 [More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-##### <font color='cyan'>Updated 23-09-26</font>
+##### <font color='cyan'>Updated 24-01-07</font>
 
 ## INSTALLED ADDONS (20)
 
@@ -97,42 +97,45 @@
 ## ENTITY COUNTS
 
 - alarm_control_panel - 3
-- alert - 106
-- automation - 315
-- binary_sensor - 469
-- button - 99
-- calendar - 15
+- alert - 103
+- automation - 308
+- binary_sensor - 471
+- button - 100
+- calendar - 16
 - camera - 40
 - climate - 5
 - counter - 1
-- cover - 1
-- device_tracker - 73
+- device_tracker - 69
+- event - 75
 - fan - 10
 - group - 66
-- input_boolean - 199
+- input_boolean - 198
 - input_button - 2
 - input_datetime - 41
 - input_number - 190
 - input_select - 18
-- input_text - 45
-- light - 48
+- input_text - 46
+- light - 55
 - lock - 4
-- media_player - 43
-- number - 75
-- person - 1
+- media_player - 45
+- number - 80
+- person - 2
 - proximity - 1
 - remote - 1
-- scene - 9
-- script - 78
-- select - 120
-- sensor - 974
+- scene - 8
+- script - 72
+- select - 123
+- sensor - 1033
 - siren - 2
+- stt - 1
 - sun - 1
-- switch - 169
+- switch - 160
 - timer - 54
+- todo - 4
 - tts - 1
 - update - 129
-- weather - 9
+- valve - 1
+- weather - 6
 - zone - 10
 
 ## TAGS USED IN CODE
