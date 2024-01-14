@@ -1,0 +1,139 @@
+###############################################################################
+## Package - Charlie Scene
+###############################################################################
+homeassistant:
+  customize:
+    switch.charlie_scene:
+      assumed_state: false
+
+switch:
+  - platform: template
+    switches:
+      charlie_scene:
+        friendly_name: "Charlie Scene"
+        unique_id: charlie_scene
+        icon_template: mdi:dog-side
+        # value_template: "{{ not is_state('timer.charlie_scene', 'idle') }}"
+        turn_on:
+          - if:
+              - condition: state
+                entity_id: input_boolean.media_preset_enabled_charlie
+                state: "on"
+
+              - condition: state
+                entity_id: input_select.occupancy_mode
+                state:
+                  - Home
+                  - Guest
+                  - Away
+            then:
+              - service: media_player.play_media #IDEA add video to presets
+                target:
+                  entity_id: media_player.living_room_chromecast
+                data:
+                  media_content_type: cast
+                  media_content_id: '
+                    {
+                    "app_name": "youtube",
+                    "media_id": "CVdkGFNCXAA"
+                    }'
+                  enqueue: replace
+                  extra:
+                    autoplay: true
+
+              #DISABLED play video instead
+              # - service: script.media_play
+              #   data:
+              #     preset: charlie
+
+          - if:
+              - condition: state
+                entity_id: binary_sensor.nighttime_illuminance_lights
+                state: "on"
+
+              - condition: state
+                entity_id: input_select.occupancy_mode
+                state: Away
+            then:
+              - service: script.turn_light_on
+                data:
+                  lights: light.dining_room_light_rgb
+        turn_off:
+          - if:
+              - condition: template
+                value_template: >
+                  {{ is_state('input_boolean.media_preset_enabled_charlie','on')
+                      and is_state_attr('media_player.living_room_chromecast','media_content_id','CVdkGFNCXAA') }}
+            then:
+              - service: media_player.turn_off
+                target:
+                  entity_id: media_player.living_room_chromecast
+
+# and is_state_attr('media_player.living_room_tv','source','HDMI 2')
+
+# - if:
+#     - condition: state
+#       entity_id: input_boolean.media_preset_enabled_charlie
+#       state: "on"
+#   then:
+#     - service: media_player.turn_off
+#       target: >
+#         {{ expand('group.media_players')
+#             | selectattr('name','eq',states('select.media_preset_speaker_charlie'))
+#             | map(attribute='entity_id') | list }}
+
+automation:
+  ###############################################################################
+  ## Scene Charlie On
+  ###############################################################################
+  - id: scene_charlie_on
+    alias: "[Scene] Charlie On"
+    description: "Turn on Charlie scene."
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_select.occupancy_mode
+        to: Away
+    condition:
+      - condition: state
+        entity_id: switch.charlie_scene
+        state: "on"
+    action:
+      # - service: switch.turn_off #TEST does switch turn on work if already on
+      #   target:
+      #     entity_id: switch.charlie_scene
+
+      - wait_template: "{{ not is_state('input_select.occupancy_mode','Away') }}"
+        timeout: 300 # wait 5 minutes
+
+      - if:
+          - condition: template
+            alias: "Occupancy mode is still Away"
+            value_template: "{{ not wait.complted }}"
+        then:
+          - service: switch.turn_on
+            target:
+              entity_id: switch.charlie_scene
+
+  ###############################################################################
+  ## Scene - Charlie Scene Off
+  ###############################################################################
+  - id: scene_charlie_scene_off
+    alias: "[Scene] Charlie Scene Off"
+    description: "Turn off charlie scene."
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_select.occupancy_mode
+        to:
+          - Home
+          - Guest
+        from: Away
+
+      - platform: state
+        entity_id: input_select.occupancy_mode
+        to: Night
+    action:
+      - service: switch.turn_off
+        target:
+          entity_id: switch.charlie_scene
