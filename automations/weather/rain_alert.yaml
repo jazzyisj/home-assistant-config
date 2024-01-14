@@ -1,45 +1,42 @@
 ###############################################################################
-## Weather - Rain Alert Notification
+## Weather - Precipitation Alert Notification
 ###############################################################################
-- id: weather_rain_alert_notification
-  alias: "[Weather] Rain Alert Notification"
-  description: "Rain alert notification."
+- id: weather_precipitation_alert_notification
+  alias: "[Weather] Precipitation Alert Notification"
+  description: "Precipitation alert notification."
   max_exceeded: silent
   trigger:
     - platform: state
-      entity_id: alert.rain_alert
+      entity_id: alert.precipitation
       to: "on"
 
-    - platform: time
-      at: sensor.rain_start
-
+    # notification after work - windows, walk dog etc.
     - platform: template
       value_template: >
-        {{ is_state('binary_sensor.rain_today', 'on')
+        {{ is_state('binary_sensor.precipitation_today', 'on')
             and is_state('binary_sensor.work_today', 'on')
             and is_state('sensor.work_shift_today', 'Days')
             and states('sensor.time') == '15:50' }}
 
+    # notification before work - windows, walk dog etc.
     - platform: template
       value_template: >
-        {{ is_state('binary_sensor.rain_today', 'on')
+        {{ is_state('binary_sensor.precipitation_today', 'on')
             and ((is_state('binary_sensor.work_today', 'on')
                 and is_state('sensor.work_shift_today', 'Afternoons'))
               or is_state('binary_sensor.work_today', 'off'))
             and states('sensor.time') == '10:45' }}
   condition:
+    - condition: time
+      alias: "Prevent notifications at night"
+      after: "08:00:00"
+      before: "22:00:00"
+
     - condition: template
+      alias: "Only once every 2 hours"
       value_template: >
         {{ true if this.attributes.last_triggered == none
-            else now() - this.attributes.last_triggered > timedelta(hours=1) }}
-
-    - condition: state
-      entity_id: alert.rain_alert
-      state: "on"
-
-    - condition: time
-      after: "10:00:00"
-      before: "22:00:00"
+            else now() - this.attributes.last_triggered > timedelta(hours=2) }}
   action:
     - variables:
         file: >
@@ -56,8 +53,8 @@
     - service: notify.jason
       data:
         message: |
-          {%- from 'speech.jinja' import rain_text -%}
-          {{- rain_text() -}}
+          {%- from 'speech.jinja' import precipitation_text -%}
+          {{- precipitation_text() -}}
         data:
           tag: windsor_radar
           notification_icon: mdi:weather-rainy
@@ -69,58 +66,41 @@
           clickAction: /ui-mobile/storm-radar
           actions:
             - title: "Pause"
-              action: pause_alert_rain_alert
+              action: pause_alert_precipitation_alert
 
 ###############################################################################
-## Weather - Rain Soon Announcement
+## Weather - Rain Announcement
 ###############################################################################
-- id: weather_rain_soon_announcement
-  alias: "[Weather] Rain Soon"
-  description: "Reminder if it's going to rain soon."
-  trigger:
-    - platform: time
-      at: sensor.rain_start
-  condition:
-    - condition: template
-      value_template: >
-        {{ true if this.attributes.last_triggered == none
-            else now() - this.attributes.last_triggered > timedelta(hours=1) }}
-
-    - condition: state
-      entity_id: binary_sensor.jason_home
-      state: "on"
-  action:
-    - service: script.tts_play
-      data:
-        message: |
-          Hey Jay! Just a reminder that it's probably going to rain soon.
-          Have you left the Jeep windows open again you knucklehead?
-        quiet_play: true
-        save_message: "{{ is_state('binary_sensor.mobile_phone_in_use','on') }}"
-
-###############################################################################
-## Weather - Rain Start Announcement
-###############################################################################
-- id: weather_rain_start_announcement
-  alias: "[Weather] Rain Start Announcement"
-  description: "Reminder when it starts raining."
+- id: weather_rain_announcement
+  alias: "[Weather] Rain Announcement"
+  description: "Announcement when it's about to rain or it starts raining."
   trigger:
     - platform: state
-      entity_id: binary_sensor.rain
+      entity_id: alert.precipitation
       to: "on"
-      from: "off"
   condition:
-    - condition: template
-      value_template: >
-        {{ true if this.attributes.last_triggered == none
-            else now() - this.attributes.last_triggered > timedelta(hours=1) }}
+    - condition: state
+      entity_id: binary_sensor.freezing
+      state: "off"
 
     - condition: state
       entity_id: binary_sensor.jason_home
       state: "on"
+
+    - condition: template
+      alias: "Only once every 4 hours"
+      value_template: >
+        {{ true if this.attributes.last_triggered == none
+            else now() - this.attributes.last_triggered > timedelta(hours=4) }}
   action:
     - service: script.tts_play
       data:
-        message: "Jay, it's starting to rain.  Have you checked the goddamn Jeep windows yet?"
+        message: >
+          Hey Knucklehead!
+          {{ iif(is_state('binary_sensor.rain','on'),'It is starting to rain.',
+              'Its probably going to start raining soon.') }}
+          Have you checked the Jeep windows yet?
         quiet_play: true
-        save_message: "{{ is_state('binary_sensor.mobile_phone_in_use','on') }}"
+        save_message: >
+          {{ is_state('binary_sensor.mobile_phone_in_use','on')
+              and is_state('binary_sensor.jason_home','on') }}

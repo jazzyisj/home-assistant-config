@@ -30,6 +30,7 @@
   sensor:
     - name: Weather Forecasts
       unique_id: weather_forecasts
+      device_class: timestamp
       state: "{{ now().isoformat() }}"
       attributes:
         envcan_hourly: "{{ hourly['weather.windsor']['forecast'] }}"
@@ -55,6 +56,51 @@
       device_class: connectivity
       state: "{{ integration_entities('tomorrowio') | select('has_value') | list | count > 0 }}"
 
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: time_pattern
+      minutes: 15
+
+    - platform: state
+      entity_id:
+        - binary_sensor.rain
+        - binary_sensor.snow
+  sensor:
+    # uses envcan forecast, most accurate
+    - name: "Precipitation Start" # next 12 hours
+      unique_id: precipitation_start
+      icon: mdi:weather-pouring
+      device_class: timestamp
+      state: >
+        {% set time = namespace(value=none) %}
+        {% set forecast = state_attr('sensor.weather_forecasts', 'envcan_hourly') %}
+        {% if is_state('binary_sensor.snow', 'on') %}
+          {% set time.value = states.binary_sensor.snow.last_changed %}
+        {% elif is_state('binary_sensor.rain', 'on') %}
+          {% set time.value = states.binary_sensor.snow.last_changed %}
+        {% elif forecast != none %}
+          {% for item in forecast %}
+            {% if loop.index0 < 12
+                and item.precipitation_probability | int(-1) >= 50
+                and (item.condition | contains('rain')
+                  or item.condition | contains('snow')
+                  or item.condition | contains('storm')) %}
+              {% set time.value = item.datetime %}
+            {% break %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {{ time.value }}
+      attributes:
+        12hour: >
+          {% from 'speech.jinja' import twelve_hour %}
+          {{ twelve_hour('sensor.precipitation_start') }}
+
 - binary_sensor:
     - name: "Tomorrow.io Connected Alert"
       unique_id: tomorrow_io_connected_alert
@@ -64,14 +110,6 @@
       state: >
         {{ is_state('binary_sensor.tomorrow_io_connected', 'off')
             and is_state('input_boolean.weather_alerts', 'on') }}
-
-    - name: "Weather LED Active"
-      unique_id: weather_led_alert
-      state: >
-        {{ is_state('binary_sensor.envcan_weather_alert', 'on')
-            or is_state('binary_sensor.outdoor_low_temperature_alert', 'on')
-            or is_state('binary_sensor.outdoor_high_temperature_alert', 'on')
-            or is_state('alert.rain_alert', 'on') }}
 
     - name: "Outdoor High Temperature Alert"
       unique_id: outdoor_high_temperature_alert
@@ -110,8 +148,59 @@
           {% else %} Off
           {% endif %}
 
-    - name: "Strong Wind Alert"
-      unique_id: strong_wind_alert
+    - name: "Freezing"
+      unique_id: freezing
+      device_class: cold
+      state: >
+        {{ is_state('binary_sensor.home_binary_sensors_is_freezing', 'on')
+            or is_state('sensor.tempest_st_00057689_temperature_level', 'freezing')
+            or states('sensor.outdoor_temperature') | int('1') < 0 }}
+
+    - name: "Snow"
+      unique_id: snow
+      icon: mdi:weather-snowy-heavy
+      state: "{{ is_state('sensor.precipitation_type', 'snow') }}"
+
+    - name: "Rain"
+      unique_id: rain
+      icon: mdi:weather-pouring
+      state: "{{ is_state('sensor.precipitation_type', 'rain') }}"
+
+    - name: "Precipitation Soon" # next 2 hours
+      unique_id: precipitation_soon
+      icon: mdi:weather-pouring
+      state: >
+        {% set time = states('sensor.precipitation_start') | as_datetime
+            if has_value('sensor.precipitation_start') else none %}
+        {{ states('sensor.precipitation_type') == 'none'
+            and time != none and now() - time < timedelta(hours=2) }}
+
+    - name: "Precipitation Today" # next 12 hours
+      unique_id: precipitation_today
+      icon: mdi:weather-pouring
+      state: >
+        {% set time = states('sensor.precipitation_start') | as_datetime
+            if has_value('sensor.precipitation_start') else none %}
+        {{ time != none and now() - time < timedelta(hours=12)
+            or states('sensor.precipitation_probability_today') | int(0) > 50 }}
+
+    - name: "Precipitation Alert"
+      unique_id: precipitation_alert
+      icon: >
+        {% if is_state('binary_sensor.snow','on') %} {{ states.binary_sensor.snow.attributes.icon }}
+        {% elif is_state('binary_sensor.rain','on') %} {{ states.binary_sensor.rain.attributes.icon }}
+        {% else %} {{ states.alert.precipitation.attributes.icon }}
+        {% endif %}
+      delay_off: # prevent multiple triggers scattered showers
+        minutes: 60
+      state: >
+        {{ (is_state('binary_sensor.snow', 'on')
+            or is_state('binary_sensor.rain', 'on')
+            or is_state('binary_sensor.precipitation_soon', 'on'))
+            and is_state('input_boolean.weather_alerts','on') }}
+
+    - name: "Wind Alert"
+      unique_id: wind_alert
       icon: mdi:weather-windy
       delay_on: 300
       delay_off: >
@@ -128,70 +217,14 @@
         {{ is_number(states('sensor.wind_speed'))
             or is_number(states('sensor.wind_gust')) }}
 
-    - name: "Rain"
-      unique_id: rain
-      icon: mdi:weather-pouring
+    - name: "Weather LED Active"
+      unique_id: weather_led_alert
       state: >
-        {{ is_state('sensor.precipitation_type', 'rain')
-            or states('sensor.precipitation_intensity')
-              not in ['none', 'unknown', 'unavailable']
-            or states('sensor.precipitation_rate') | int(-1) > 0 }}
-
-    - name: "Rain Soon" # raining or next 4 hours
-      unique_id: rain_soon
-      icon: mdi:weather-pouring
-      state: >
-        {% set time = states('sensor.rain_start') | as_datetime
-            if has_value('sensor.rain_start') else none %}
-        {{ time != none and now() - time < timedelta(hours=4)
-            or states('sensor.precipitation_probability') | int(0) > 50
-            or is_state('binary_sensor.rain', 'on') }}
-
-    - name: "Rain Today" # raining or next 12 hours
-      unique_id: rain_today
-      icon: mdi:weather-pouring
-      state: >
-        {% set time = states('sensor.rain_start') | as_datetime
-            if has_value('sensor.rain_start') else none %}
-        {{ time != none and now() - time < timedelta(hours=12)
-            or states('sensor.precipitation_probability_today') | int(0) > 50
-            or is_state('binary_sensor.rain', 'on') }}
-
-    - name: "Rain Alert"
-      unique_id: rain_alert
-      icon: mdi:weather-pouring
-      delay_off: # prevent multiple triggers scattered showers
-        minutes: 60
-      state: >
-        {{ (is_state('binary_sensor.rain', 'on')
-            or is_state('binary_sensor.rain_soon', 'on'))
-            and is_state('input_boolean.weather_alerts','on') }}
-
+        {{ is_state('binary_sensor.envcan_weather_alert', 'on')
+            or is_state('binary_sensor.outdoor_low_temperature_alert', 'on')
+            or is_state('binary_sensor.outdoor_high_temperature_alert', 'on')
+            or is_state('alert.precipitation', 'on') }}
 - sensor:
-    # uses envcan forecast, more accurate
-    - name: "Rain Start" # next 12 hours
-      unique_id: rain_start #
-      icon: mdi:weather-pouring
-      device_class: timestamp
-      state: >
-        {% set time = namespace(value=none) %}
-        {% set forecast = state_attr('sensor.weather_forecasts', 'envcan_hourly') %}
-        {% if is_state('binary_sensor.rain', 'off') and forecast != none %}
-          {% for item in forecast %}
-            {% if loop.index0 < 12
-                and item.precipitation_probability | int(-1) >= 50
-                and item.condition | contains('rain') %}
-              {% set time.value = item.datetime %}
-            {% break %}
-            {% endif %}
-          {% endfor %}
-        {% endif %}
-        {{ time.value }}
-      attributes:
-        12hour: >
-          {% from 'speech.jinja' import twelve_hour %}
-          {{ twelve_hour(this.entity_id) }}
-
     - name: "Weatherflow High Temperature" #TEMP while testing
       unique_id: weatherflow_high_temperature
       device_class: temperature
@@ -229,7 +262,7 @@
         {% endif %}
       availability: "{{ is_number(states('sensor.outdoor_temperature_change')) }}"
 
-    #IDEA add icons for extra values - req custom weather card
+    #IDEA add icons for envcan extra values - req custom weather card
     - name: "Current Condition"
       unique_id: current_condition
       icon: mdi:weather-partly-snowy-rainy
@@ -892,39 +925,16 @@
               and is_number(states('sensor.windsor_precipitation_yesterday'))) }}
 
     - name: "Precipitation Type"
-      unique_id: precipitation_type
+      unique_id: precipitation_type #TEST current condition
       icon: mdi:weather-rainy
-      state: > # wf cloud priority - wf local false positives
-        {% if is_state('binary_sensor.weatherflow_cloud_connected', 'on')
-            and is_state('binary_sensor.home_binary_sensors_is_raining', 'on') %}
-          {{ iif(is_state('binary_sensor.home_binary_sensors_is_freezing', 'on'), 'snow', 'rain') }}
-        {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
-            and has_value('sensor.tempest_st_00057689_precipitation_type') %}
-          {{ states('sensor.tempest_st_00057689_precipitation_type') | lower }}
-        {% elif is_state('binary_sensor.pirateweather_connected', 'on')
-            and has_value('sensor.pirateweather_precip') %}
-          {{ states('sensor.pirateweather_precip') }}
+      state: >
+        {% set condition = states('sensor.current_condition') %}
+        {% if condition | contains('snow') %} snow
+        {% elif condition | contains('rain')
+            or condition | contains('pouring') %} rain
+        {% else %} none
         {% endif %}
-      attributes:
-        provider: >
-          {% if is_state('binary_sensor.weatherflow_cloud_connected', 'on')
-              and has_value('binary_sensor.home_binary_sensors_is_freezing') %}
-            WeatherFlow Cloud
-          {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
-              and has_value('sensor.tempest_st_00057689_precipitation_type')
-              and is_number(states('sensor.tempest_st_00057689_freezing_level_altitude')) %}
-            WeatherFlow Local
-          {% elif is_state('binary_sensor.pirateweather_connected', 'on')
-              and has_value('sensor.pirateweather_precip') %}
-            Pirate Weather
-          {% endif %}
-      availability: >
-        {{ (is_state('binary_sensor.weatherflow_cloud_connected', 'on')
-              and has_value('binary_sensor.home_binary_sensors_is_freezing'))
-            or (is_state('binary_sensor.weatherflow_local_connected', 'on')
-              and has_value('sensor.tempest_st_00057689_precipitation_type'))
-            or (is_state('binary_sensor.pirateweather_connected', 'on')
-              and has_value('sensor.pirateweather_precip')) }}
+      availability: "{{ has_value('sensor.current_condition') }}"
 
     - name: "Lightning Count"
       unique_id: lightning_count
@@ -979,6 +989,21 @@
       availability: >
         {{ is_state('binary_sensor.pirateweather_connected', 'on')
             and is_number(states('sensor.pirateweather_nearest_storm_distance')) }}
+
+    - name: "Pressure Trend"
+      unique_id: pressure_trend #TEST
+      icon: >
+        {% if is_state(this.entity_id, 'rising') %} mdi:trending-up
+        {% elif is_state(this.entity_id, 'falling') %} mdi:trending-down
+        {% else %} mdi:trending-up
+        {% endif %}
+      state: >
+        {% set change = states('sensor.pressure_change') | float %}
+        {% if change >= 1 %} rising
+        {% elif change < -1 %} falling
+        {% else %} steady
+        {% endif %}
+      availability: "{{ is_number(states('sensor.pressure_change')) }}"
 
     - name: "Barometric Pressure"
       unique_id: barometric_pressure
