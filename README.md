@@ -141,7 +141,7 @@
 ## TAGS USED IN CODE
 
 - #VERIFY - to be verifed
-- #TEST - test value
+- #TEST - test code
 - #TODO - to be completed
 - #NEXT - next feature/fix to complete
 - #IDEA - idea for future option/function

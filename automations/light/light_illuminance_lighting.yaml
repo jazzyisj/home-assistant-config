@@ -6,7 +6,7 @@
   description: "Turn lights on based on outdoor illuminance."
   mode: restart
   max_exceeded: silent
-  trace: #TEST
+  trace: #VERIFY
     stored_traces: 20
   trigger:
     - platform: homeassistant
@@ -22,7 +22,6 @@
       not_from:
         - unknown
         - unavailable
-      for: 5 # allow nighttime to turn on before off trigger
 
     - platform: state
       id: night_lux
@@ -45,12 +44,6 @@
         - Away
         - Vacation
       for: 5 # allow waketime_active / scene_active to turn on
-
-    - platform: zone
-      id: arrive
-      entity_id: person.jason
-      zone: zone.almost_home
-      event: enter
 
     - platform: state
       id: away
@@ -116,37 +109,33 @@
               | selectattr('attributes.timed', 'eq', true)
               | map(attribute='entity_id') | list }}
 
-    - choose:
-        - conditions:
-            - condition: trigger
-              id: day_lux
-          sequence:
+    - if:
+        - condition: trigger
+          id: day_lux
+      then:
+        - condition: state
+          entity_id: binary_sensor.nighttime_illuminance_lights
+          state: "off"
+
+        - if:
             - condition: state
-              entity_id: binary_sensor.nighttime_illuminance_lights
-              state: "off"
+              entity_id: binary_sensor.daytime_illuminance_lights
+              state: "on"
+          then:
+            - condition: state
+              entity_id: binary_sensor.someone_home
+              state: "on"
 
-            - if:
-                - condition: state
-                  entity_id: binary_sensor.daytime_illuminance_lights
-                  state: "on"
-              then:
-                - condition: state
-                  entity_id: input_select.occupancy_mode
-                  match: any
-                  state:
-                    - Home
-                    - Guest
-
-                - service: script.turn_light_on
-                  data:
-                    lights: "{{ day_lux }}"
-                    activate_timer: false
-              else:
-                - service: script.turn_light_off
-                  data:
-                    lights: "{{ day_lux }}"
-                    activate_timer: false
-      default:
+            - service: script.turn_light_on
+              data:
+                lights: "{{ day_lux }}"
+                activate_timer: false
+          else:
+            - service: script.turn_light_off
+              data:
+                lights: "{{ day_lux }}"
+                activate_timer: false
+      else:
         - if:
             - condition: state
               entity_id: binary_sensor.nighttime_illuminance_lights
@@ -154,22 +143,9 @@
           then:
             - choose:
                 - conditions:
-                    - or:
-                        - condition: state
-                          entity_id: input_select.occupancy_mode
-                          match: any
-                          state:
-                            - Home
-                            - Guest
-
-                        - and:
-                            - condition: template
-                              alias: "Jason almost home"
-                              value_template: "{{ trigger.id == 'arrive' }}"
-
-                            - condition: state
-                              entity_id: binary_sensor.someone_home
-                              state: "off"
+                    - condition: state
+                      entity_id: binary_sensor.someone_home
+                      state: "on"
                   sequence:
                     - if: # no outside lights in morning
                         - condition: state
