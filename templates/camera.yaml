@@ -103,51 +103,29 @@
               | selectattr('state', 'eq', 'on')
               | map(attribute='entity_id') | list | sort }}
 
-    - name: "Camera Stream Alert"
-      unique_id: camera_stream_alert
+    - name: "Camera Offline Alert"
+      unique_id: camera_offline_alert
       icon: mdi:cctv-off
       device_class: problem
-      state: >
+      delay_on: 60 # prevent false triggers
+      state: > # allow 5 minutes at startup for cameras to come online
         {% if now() - states('sensor.uptime') | as_datetime > timedelta(minutes=5) %}
           {% set entities = state_attr(this.entity_id, 'entity_id') %}
           {{ entities | count > 0 if entities != none
               and is_state('input_boolean.camera_alerts', 'on') else false }}
         {% endif %}
       attributes:
-        entity_id: >
-          {% set indoor = expand(state_attr('group.indoor_cameras', 'entity_id'))
-              | map(attribute="entity_id") | list if is_state('binary_sensor.someone_home', 'on') else [] %}
-          {% set all = expand(integration_entities('frigate'))
-              | selectattr('domain', 'eq', 'sensor')
-              | selectattr('entity_id', 'contains', '_camera_fps')
-              | selectattr('state', 'eq', '0')
-              | map(attribute="object_id")
-              | map('regex_replace', find='(.*)_camera_fps', replace='camera.\\1') | list %}
-          {{ expand(all) | rejectattr('entity_id', 'in', indoor) | map(attribute="entity_id") | list }}
-
-    - name: "Camera Offline Alert"
-      unique_id: camera_offline_alert
-      icon: mdi:cctv-off
-      device_class: problem
-      state:
-        > # allow 10 minutes at startup for cameras to come online (kiosk mainly)
-        {% if now() - states('sensor.uptime') | as_datetime > timedelta(minutes=10) %}
-          {% set entities = state_attr(this.entity_id, 'entity_id') %}
-          {{ entities | count > 0 if entities != none
-              and is_state('input_boolean.camera_alerts', 'on') else false }}
-        {% endif %}
-      attributes: # wyze/kiosk cams ignored - turned off when somebody home/kisok offline
-        entity_id: >
+        entity_id: > # indoor cams are off when somebody home
           {% set indoor = state_attr('group.indoor_cameras', 'entity_id')
-              if is_state('binary_sensor.someone_home', 'off') else [] %}
+              if is_state('binary_sensor.someone_home', 'on')
+                and state_attr('group.indoor_cameras', 'entity_id') != none else [] %}
           {% set frigate = expand(integration_entities('frigate'))
               | selectattr('domain', 'eq', 'camera')
               | rejectattr('entity_id', 'search', '_person|_dog|_car')
+              | rejectattr('entity_id', 'in', indoor)
               | map(attribute='entity_id') | reject('has_value') | list %}
           {% set ipcams = states.device_tracker | selectattr('name', 'contains', 'IPCAM')
               | selectattr('state', 'ne', 'home') | map(attribute='entity_id') | list %}
-          {% set others = [] %} {# expand(['camera.kiosk'])
-              | map(attribute='entity_id') | reject('has_value') | list % #}
           {{ (frigate + ipcams) | sort }}
 
     - name: "Camera Object Detected"

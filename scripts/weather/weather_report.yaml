@@ -55,7 +55,7 @@ weather_report:
           {%- set precip_start = state_attr('sensor.precipitation_start', '12hour') %}
           {%- set pop = states('sensor.precipitation_probability_today') | int('unknown') %}
           {%- set precip_type = states('sensor.precipitation_type') | lower | replace('none', 'precipitation') | replace('hail', 'rain') %}
-          {%- set precip_today = states('sensor.precipitation_expected_today') | int(-1) %}
+          {%- set expected_precip = states('sensor.precipitation_expected_today') | int(-1) %}
           {%- set wind_max = states('sensor.wind_gust_today') | int('unknown') %}
           {%- set wind_gust = states('sensor.wind_gust') | int('unknown') %}
           {%- set wind_dir = state_attr('sensor.wind_bearing', 'full_cardinal') %}
@@ -65,6 +65,7 @@ weather_report:
           {%- set snow = states('sensor.snow_probability') | int(-1) %}
           {%- set sunset = state_attr('sun.sun', 'next_setting') | as_timestamp | timestamp_custom('%-I:%M %p', true, none) %}
           {%- set sunrise = state_attr('sun.sun', 'next_rising') | as_timestamp | timestamp_custom('%-I:%M %p', true, none) %}
+          {%- set night = state_attr('sun.sun', 'next_rising') | as_timestamp < state_attr('sun.sun', 'next_setting') | as_timestamp %}
           {%- set rand_positive = ['stupendous', 'wonderful', 'peachy', 'great', 'fabulous', 'beautiful'] | random %}
           {%- set tod_greeting = states('sensor.tod_greeting') %}
           {%- set tod_goodbye = states('sensor.tod_goodbye') %}
@@ -74,7 +75,7 @@ weather_report:
           Environment Canada has issued a {{ state_attr('binary_sensor.envcan_weather_alert', 'title') }} for the immediate area
           {{- ' until ' ~ until if until != none -}}.
           {%- endif %}
-          It is currently {{ temp }} degree{{ iif(temp | abs != 1,'s') }} and {{ current }}
+          It is currently {{ temp }} degree{{ iif(temp | abs != 1,'s','') }} and {{ current }}
           {%- if (temp - app_temp ) | abs > 2 %}, but it feels more like {{ app_temp }} {%- endif %}.
           {%- if high_temp > states('input_number.outdoor_high_temperature_threshold') | int %}
           It will be bloody hot
@@ -94,28 +95,26 @@ weather_report:
           {%- if show_normal_low %} low is {{ normal_low_diff | abs }} {{ 'degree' if normal_low_diff | abs == 1 else 'degrees' }} {{ 'lower' if normal_low_diff < 0 else 'higher' }}{% endif %}
           {%- if show_normal_high or show_normal_low %} than normal!{% endif %}
           {%- else %}
-          Today's high temperature will be {% if show_normal_high %}{{ normal_high_diff | abs }} {{ 'degree' if normal_high_diff | abs == 1 else 'degrees' }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal, with a high of {{ 'only ' if normal_high_diff <  0 }}{% endif %}
-          {{- ' ' ~ high_temp }} degree{{ iif(high_temp | abs != 1,'s') }}.  The overnight low temperature will be {{ low_temp }} {{ 'degree' if low_temp in [-1, 1] else 'degrees' }}
+          Today's high temperature will be {% if show_normal_high %}{{ normal_high_diff | abs }} {{ 'degree' if normal_high_diff | abs == 1 else 'degrees' }}
+          {{- ' lower' if normal_high_diff < 0 else ' higher' }} than normal, with a high of {{ 'only ' if normal_high_diff <  0 }}{% endif %}
+          {{- high_temp }} degree{{ iif(high_temp | abs != 1,'s','') }}.  The overnight low temperature will be {{ low_temp }} {{ 'degree' if low_temp in [-1, 1] else 'degrees' }}
           {%- if show_normal_low %}, which is {{ normal_low_diff | abs }} degree{{ iif(normal_low_diff | abs != 1,'s') }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
           {%- endif %}
-          {% if wind_max > 15 -%} It will get {{ 'rather' if wind_max <  25 else 'very' }} windy today, with wind speeds approaching {{ wind_max }} kilometers per hour.{% endif %}
-          The current humidity level is {{ humidity }} percent
-          {%- if rain %}, and it is raining
-          {%- elif precipitation_today %}, and there is a {{ pop }} percent chance of {{ precip_type }}
-            {%- if precip_start != none %} starting around {{ precip_start }}{% endif -%}
-          {%- endif -%}.
-          {%- if precip_today > 0 %}
-          Today's expected precipitation is {{ precip_today }} millimeter{{ iif(precip_today != 1, 's', '') }}
-          {%- else %}
-          There will be no {{ precip_type }} today
+          The current humidity level is {{ humidity }} percent, and there
+          {%- if precipitation_today %} is a {{ pop }} percent chance of {{ precip_type }}
+          {%- if precip_start != none %} starting around {{ precip_start }}{% endif -%}
+          {%- if expected_precip > 0 %}
+          Today's expected precipitation is {{ expected_precip }} millimeter{{ iif(expected_precip != 1, 's', '') }}
           {%- endif -%}
-          {%- if fog > 25 %}{{ iif(precip_today > 0, ', and ', 'but ') }}
-          there is {{ iarticle(fog) }} percent chance of fog
+          {%- else %} is no {{ precip_type }} expected today
           {%- endif -%}.
+          {%- if fog > 25 %} There is {{ iif(precipitation_today, 'also', 'however,') }} {{ iarticle(fog) }} percent chance of fog.
+          {%- endif -%}
           {%- if states('sensor.uv_risk_today') | lower in ['medium', 'medium-high', 'high', 'very high'] -%}
+          {% if wind_max > 15 -%} It will get {{ 'rather' if wind_max <  25 else 'very' }} windy today, with wind speeds approaching {{ wind_max }} kilometers per hour.{% endif %}
           The forecasted UV risk is {{ states('sensor.uv_risk_today') -}}. Do your best to keep all your pastey red-headed step children indoors today.
           {%- endif %}
-          {%- if not states('sensor.aqi_risk_level') | lower in ['good', 'unknown'] %}
+          {%- if not states('sensor.aqi_risk_level') | lower in ['good', 'unknown','unavailable'] %}
           The current air quality index is {{ states('sensor.aqi_risk_level') }}, so be prepared to choke on a little smog out there.
           {%- endif -%}
           {%- if states('sensor.asthma_risk_today') | lower in ['medium-high', 'high'] %}
@@ -127,7 +126,9 @@ weather_report:
           {%- if states('sensor.flu_risk_today') | lower in ['medium', 'medium-high', 'high'] %}
           The current cold and flu risk is {{ states('sensor.flu_risk_today') }}, so I highly suggest you mask up, hide in your basement, and avoid all contact with any other human beings today.
           {%- endif %}
-          The sun will set this evening at {{ sunset -}}
-          , and with any luck will rise tomorrow morning at {{ sunrise }}.
+          The sun
+          {%- if night %} already has set
+          {%- else %} will set this evening at {{ sunset -}}
+          {%- endif %}, and with any luck, it will rise again in the morning at {{ sunrise }}.
           Have a {{ rand_positive }} {{ tod_goodbye }}!
           Cheerio!

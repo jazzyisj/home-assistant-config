@@ -8,17 +8,28 @@
     - platform: event
       event_type: event_template_reloaded
 
+    # allow weather entities to populate
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: "off"
+
     - platform: time_pattern
       minutes: /15
+
+    - platform: state
+      entity_id: &forecasts
+        - weather.windsor
+        - weather.pirateweather
+        - weather.forecast_home
+      from:
+        - unknown
+        - unavailable
   action:
     - service: weather.get_forecasts
       data:
         type: hourly
       target:
-        entity_id: &forecasts
-          - weather.windsor
-          - weather.pirateweather
-          - weather.forecast_home
+        entity_id: *forecasts
       response_variable: hourly
 
     - service: weather.get_forecasts
@@ -33,12 +44,12 @@
       device_class: timestamp
       state: "{{ now().isoformat() }}"
       attributes:
-        envcan_hourly: "{{ hourly['weather.windsor']['forecast'] }}"
-        envcan_daily: "{{ daily['weather.windsor']['forecast'] }}"
-        pirate_hourly: "{{ hourly['weather.pirateweather']['forecast'] }}"
-        pirate_daily: "{{ daily['weather.pirateweather']['forecast'] }}"
-        weatherflow_hourly: "{{ hourly['weather.forecast_home']['forecast'] }}"
-        weatherflow_daily: "{{ daily['weather.forecast_home']['forecast'] }}"
+        envcan_hourly: "{% if hourly['weather.windsor'] is defined %}{{ hourly['weather.windsor']['forecast'] }}{% endif %}"
+        envcan_daily: "{% if daily['weather.windsor'] is defined %}{{ daily['weather.windsor']['forecast'] }}{% endif %}"
+        pirate_hourly: "{% if hourly['weather.pirateweather'] %}{{ hourly['weather.pirateweather']['forecast'] }}{% endif %}"
+        pirate_daily: "{% if daily['weather.pirateweather'] %}{{ daily['weather.pirateweather']['forecast'] }}{% endif %}"
+        weatherflow_hourly: "{% if hourly['weather.forecast_home'] %}{{ hourly['weather.forecast_home']['forecast'] }}{% endif %}"
+        weatherflow_daily: "{% if daily['weather.forecast_home'] %}{{ daily['weather.forecast_home']['forecast'] }}{% endif %}"
 
 - trigger:
     - platform: homeassistant
@@ -57,6 +68,7 @@
       state: "{{ integration_entities('tomorrowio') | select('has_value') | list | count > 0 }}"
 
 #ISSUE #WARNING (MainThread) [homeassistant.components.sensor.helpers] sensor.precipitation_start rendered invalid timestamp: None
+# caused by trigger sensor, no error with normal sensor
 - trigger:
     - platform: homeassistant
       event: start
@@ -78,13 +90,20 @@
       icon: mdi:weather-pouring
       device_class: timestamp
       state: >
+        {% set forecast = none %}
         {% set time = namespace(value=none) %}
-        {% set forecast = state_attr('sensor.weather_forecasts', 'envcan_hourly') %}
+        {% if state_attr('sensor.weather_forecasts', 'envcan_hourly') != none %}
+          {% set forecast = state_attr('sensor.weather_forecasts', 'envcan_hourly') %}
+        {% elif state_attr('sensor.weather_forecasts', 'weatherflow_hourly') != none %}
+          {% set forecast = state_attr('sensor.weather_forecasts', 'weatherflow_hourly') %}
+        {% elif state_attr('sensor.weather_forecasts', 'pirate_hourly') != none %}
+          {% set forecast = state_attr('sensor.weather_forecasts', 'pirate_hourly') %}
+        {% endif %}
         {% if is_state('binary_sensor.snow', 'on') %}
           {% set time.value = states.binary_sensor.snow.last_changed %}
         {% elif is_state('binary_sensor.rain', 'on') %}
           {% set time.value = states.binary_sensor.snow.last_changed %}
-        {% elif forecast != none %}
+        {% elif forecast not in ['', none] %}
           {% for item in forecast %}
             {% if loop.index0 < 12
                 and item.precipitation_probability | int(-1) >= 50
@@ -101,6 +120,18 @@
         12hour: >
           {% from 'speech.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
+        provider: >
+          {% if state_attr('sensor.weather_forecasts', 'envcan_hourly') != none %}
+            Environment Canada
+          {% elif state_attr('sensor.weather_forecasts', 'weatherflow_hourly') != none %}
+            WeatherFlow Cloud
+          {% elif state_attr('sensor.weather_forecasts', 'pirate_hourly') != none %}
+            Pirate Weather
+          {% endif %}
+      availability: >
+        {{ state_attr('sensor.weather_forecasts', 'envcan_hourly') != none
+            or state_attr('sensor.weather_forecasts', 'weatherflow_hourly') != none
+            or state_attr('sensor.weather_forecasts', 'pirate_hourly') != none }}
 
 - binary_sensor:
     - name: "Tomorrow.io Connected Alert"
@@ -1019,7 +1050,7 @@
             and is_number(states('sensor.pirateweather_nearest_storm_distance')) }}
 
     - name: "Pressure Trend"
-      unique_id: pressure_trend #VERIFY
+      unique_id: pressure_trend
       icon: >
         {% if is_state(this.entity_id, 'rising') %} mdi:trending-up
         {% elif is_state(this.entity_id, 'falling') %} mdi:trending-down

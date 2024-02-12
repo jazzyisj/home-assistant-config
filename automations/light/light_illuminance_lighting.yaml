@@ -6,8 +6,6 @@
   description: "Turn lights on based on outdoor illuminance."
   mode: restart
   max_exceeded: silent
-  trace: #VERIFY
-    stored_traces: 20
   trigger:
     - platform: homeassistant
       id: startup
@@ -144,26 +142,6 @@
             - choose:
                 - conditions:
                     - condition: state
-                      entity_id: binary_sensor.someone_home
-                      state: "on"
-                  sequence:
-                    - if: # no outside lights in morning
-                        - condition: state
-                          entity_id: binary_sensor.morning_hours
-                          state: "on"
-                      then:
-                        - service: script.light_scene_on
-                          data:
-                            scene: morning
-                      else:
-                        # turn on night lights
-                        - service: script.turn_light_on
-                          data:
-                            lights: "{{ night_lux }}"
-                            activate_timer: false
-
-                - conditions:
-                    - condition: state
                       entity_id: input_select.occupancy_mode
                       match: any
                       state:
@@ -218,6 +196,21 @@
                               | map(attribute='entity_id') | list }}
                         activate_timer: false
                         bypass_timer: true
+              default:
+                - if: # no outside lights in morning
+                    - condition: state
+                      entity_id: binary_sensor.morning_hours
+                      state: "on"
+                  then:
+                    - service: script.light_scene_on
+                      data:
+                        scene: morning
+                  else:
+                    # turn on night lights
+                    - service: script.turn_light_on
+                      data:
+                        lights: "{{ night_lux }}"
+                        activate_timer: false
           else:
             - if:
                 - condition: state
@@ -237,16 +230,18 @@
                     lights: "{{ day_lux }}"
                     activate_timer: false
 
-                # turn off all lights except day/timed lights
-                - service: script.turn_light_off
-                  data:
-                    lights: >
-                      {{ expand('group.lights')
-                          | rejectattr('entity_id', 'in', day_lux)
-                          | rejectattr('entity_id', 'in', timed_lights)
-                          | selectattr('state', 'eq', 'on')
-                          | map(attribute='entity_id') | list }}
-                    activate_timer: false
+                - if: "{{ trigger.id == 'night_lux' }}"
+                  then:
+                    # turn off all lights except day/timed lights
+                    - service: script.turn_light_off
+                      data:
+                        lights: >
+                          {{ expand('group.lights')
+                              | rejectattr('entity_id', 'in', day_lux)
+                              | rejectattr('entity_id', 'in', timed_lights)
+                              | selectattr('state', 'eq', 'on')
+                              | map(attribute='entity_id') | list }}
+                        activate_timer: false
               else:
                 # turn off all lights
                 - service: script.turn_light_off
