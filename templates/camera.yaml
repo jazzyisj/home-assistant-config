@@ -11,22 +11,6 @@
     - platform: state
       entity_id: sensor.time
   binary_sensor:
-    - name: "ONVIF Connected"
-      unique_id: onvif_connected
-      picture: !secret ONVIF_ICON
-      device_class: connectivity
-      state: "{{ integration_entities('onvif') | select('has_value') | list | count > 0 }}"
-
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id: sensor.time
-  binary_sensor:
     - name: "Frigate Connected"
       unique_id: frigate_connected
       picture: !secret FRIGATE_ICON
@@ -56,15 +40,6 @@
             | map(attribute='entity_id') | select('has_value') | list | count > 0
             and is_state('binary_sensor.docker_wyze_bridge_running', 'on') }}
 
-- binary_sensor:
-    - name: "ONVIF Connected Alert"
-      unique_id: onvif_connected_alert
-      device_class: problem
-      delay_on: 60
-      state: >
-        {{ is_state('binary_sensor.onvif_connected', 'off')
-            and is_state('input_boolean.camera_alerts', 'on') }}
-
     - name: "Frigate Connected Alert"
       unique_id: frigate_connected_alert
       icon: mdi:cctv
@@ -84,25 +59,6 @@
             and is_state('binary_sensor.someone_home', 'off')
             and is_state('input_boolean.camera_alerts', 'on') }}
 
-    - name: "Camera Tamper Alert"
-      unique_id: camera_tamper_alert
-      icon: mdi:cctv-off
-      device_class: tamper
-      delay_on: 60
-      state: >
-        {% if now() - states('sensor.uptime') | as_datetime > timedelta(minutes=5) %}
-          {% set entities = state_attr(this.entity_id, 'entity_id') %}
-          {{ entities | count > 0
-              and is_state('input_boolean.camera_tamper_detection', 'on')
-              and is_state('input_boolean.camera_alerts', 'on')
-                if entities != none else false }}
-        {% endif %}
-      attributes:
-        entity_id: >
-          {{ expand('group.camera_tamper')
-              | selectattr('state', 'eq', 'on')
-              | map(attribute='entity_id') | list | sort }}
-
     - name: "Camera Offline Alert"
       unique_id: camera_offline_alert
       icon: mdi:cctv-off
@@ -115,18 +71,16 @@
               and is_state('input_boolean.camera_alerts', 'on') else false }}
         {% endif %}
       attributes:
+        #TEMP exclude garage cam - not working, high cpu on wyze cams (indoor)
         entity_id: > # indoor cams are off when somebody home
           {% set indoor = state_attr('group.indoor_cameras', 'entity_id')
               if is_state('binary_sensor.someone_home', 'on')
                 and state_attr('group.indoor_cameras', 'entity_id') != none else [] %}
-          {% set frigate = expand(integration_entities('frigate'))
+          {{ expand(integration_entities('frigate'))
               | selectattr('domain', 'eq', 'camera')
-              | rejectattr('entity_id', 'search', '_person|_dog|_car')
               | rejectattr('entity_id', 'in', indoor)
-              | map(attribute='entity_id') | reject('has_value') | list %}
-          {% set ipcams = states.device_tracker | selectattr('name', 'contains', 'IPCAM')
-              | selectattr('state', 'ne', 'home') | map(attribute='entity_id') | list %}
-          {{ (frigate + ipcams) | sort }}
+              | rejectattr('entity_id', 'in', ['camera.garage_inside_frigate', 'camera.charlie_crate_frigate', 'camera.living_room_frigate'])
+              | map(attribute='entity_id') | reject('has_value') | list | sort }}
 
     - name: "Camera Object Detected"
       unique_id: camera_object_detected

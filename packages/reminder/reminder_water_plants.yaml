@@ -8,6 +8,10 @@ input_boolean:
   water_plants_active:
     name: "Water Plants Active"
     icon: mdi:sprout
+  water_plants_paused:
+    name: "Water Plants Paused"
+    icon: mdi:sprout
+    initial: false
 
 input_datetime:
   water_plants_days:
@@ -63,20 +67,26 @@ template:
               message: "Water Plants reminder has been turned off."
               duration: 30000
 
-          - service: notify.jason
-            data:
-              message: clear_notification
-              data:
-                tag: water_plants_reminder
+      - name: "Pause Water Plants"
+        unique_id: pause_water_plants
+        icon: mdi:sprout
+        press:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.water_plants_paused
 
   - binary_sensor:
       - name: "Water Plants Reminder"
         unique_id: water_plants_reminder
         icon: mdi:sprout
         picture: >
-          {{ iif(is_state(this.entity_id, 'on'),
-            '/local/images/entity_icons/water_plants.png',
-            '/local/images/entity_icons/water_plants_off.png') }}
+          {% if is_state('input_boolean.water_plants_paused', 'on') %}
+            /local/images/entity_icons/water_plants_paused.png
+          {% elif is_state('input_boolean.water_plants_active', 'on') %}
+            /local/images/entity_icons/water_plants.png
+          {% else %}
+            /local/images/entity_icons/water_plants_off.png
+          {% endif %}
         state: >
           {{ is_state('input_boolean.water_plants_enabled', 'on')
                 and is_state('input_boolean.water_plants_active', 'on') }}
@@ -128,6 +138,68 @@ automation:
           entity_id: button.water_plants_done
 
   ###############################################################################
+  ## Reminders - Pause Water Plants
+  ###############################################################################
+  - id: reminders_pause_water_plants
+    alias: "[Reminders] Pause Water Plants"
+    description: "Pause water plants reminder."
+    max_exceeded: silent
+    trigger:
+      - platform: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_water_plants
+    condition:
+      - condition: state
+        entity_id: binary_sensor.water_plants_reminder
+        state: "on"
+    action:
+      - service: button.press
+        target:
+          entity_id: button.pause_water_plants
+
+  ###############################################################################
+  ## Reminders -  Reset Water Plants Paused
+  ###############################################################################
+  - id: reminders_reset_pause_water_plants_paused
+    alias: "[Reminders] Reset Water Plants Paused"
+    description: "Reset water plants reminder paused."
+    max_exceeded: silent
+    trigger:
+      - platform: state
+        entity_id: input_boolean.water_plants_active
+        to: "off"
+
+      - platform: state
+        entity_id: input_boolean.water_plants_paused
+        to: "on"
+        for:
+          hours: 4
+
+      - platform: state
+        id: check
+        entity_id: input_boolean.water_plants_paused
+        to: "on"
+
+      - platform: state
+        entity_id: binary_sensor.jason_home
+        to: "on"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id: input_boolean.water_plants_paused
+        state: "on"
+
+      - condition: template
+        value_template: "{{ iif(trigger.id == 'check', is_state('input_boolean.water_plants_active', 'off'), true) }}"
+
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.water_plants_paused
+
+  ###############################################################################
   ## Reminders - Reset Water Plants Active
   ###############################################################################
   - id: reminders_reset_water_plants_active
@@ -166,10 +238,18 @@ automation:
         not_from:
           - unknown
           - unavailable
+
+      - platform: state
+        entity_id: input_boolean.water_plants_paused
+        to: "off"
     condition:
       - condition: state
         entity_id: binary_sensor.water_plants_reminder
         state: "on"
+
+      - condition: state
+        entity_id: input_boolean.water_plants_paused
+        state: "off"
     action:
       - repeat:
           sequence:
@@ -181,10 +261,14 @@ automation:
                     data:
                       tag: water_plants_reminder
                       group: Reminder
+                      visibility: public
                       persistent: true
                       notification_icon: mdi:sprout
                       icon_url: !secret PLANTS_ICON
                       actions:
+                        - title: "Pause"
+                          action: pause_water_plants
+
                         - title: "Done"
                           action: water_plants_done
 
@@ -208,10 +292,38 @@ automation:
                           quiet_play: true
                           save_message: true
 
-            - wait_template: "{{ is_state('binary_sensor.water_plants_reminder', 'off') }}"
+            - wait_template: >
+                {{ is_state('binary_sensor.water_plants_reminder', 'off')
+                    or is_state('input_boolean.water_plants_paused', 'on') }}
               timeout:
                 minutes: "{{ states('input_number.water_plants_notification_interval') | int }}"
           until:
-            - condition: state
-              entity_id: binary_sensor.water_plants_reminder
-              state: "off"
+            - or:
+                - condition: state
+                  entity_id: binary_sensor.water_plants_reminder
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.water_plants_paused
+                  state: "on"
+
+  ###############################################################################
+  ## Reminders - Clear Water Plants Notification
+  ###############################################################################
+  - id: reminders_clear_water_plants_notification
+    alias: "[Reminders] Clear Water Plants Notification"
+    description: "Clear reminder notification."
+    trigger:
+      - platform: state
+        entity_id: input_boolean.water_plants_active
+        to: "off"
+
+      - platform: state
+        entity_id: input_boolean.water_plants_paused
+        to: "on"
+    action:
+      - service: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: water_plants_reminder

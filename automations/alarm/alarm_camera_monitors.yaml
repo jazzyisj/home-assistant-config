@@ -4,239 +4,288 @@
 - id: alarm_camera_monitors
   alias: "[Alarm] Camera Monitors"
   description: "Turn camera monitors on."
+  mode: restart
   variables:
     danger: "{{ is_state('binary_sensor.danger_alarm', 'on') }}"
   trigger:
     - platform: state
       entity_id: input_boolean.alarm_triggered
-      to: "on"
+      to:
+        - "on"
+        - "off"
       for: 1 # allow danger sensor to calculate
   condition:
     - condition: state
       entity_id: input_boolean.alarm_enabled
       state: "on"
   action:
-    - repeat:
-        while:
-          - condition: state
-            entity_id: input_boolean.alarm_triggered
-            state: "on"
-        sequence:
-          - parallel:
-              - sequence:
-                  - if: "{{ danger }}"
-                    then:
-                      - service: media_player.turn_on
-                        target:
-                          entity_id: media_player.living_room_chromecast
-                        continue_on_error: true
-                    else:
-                      - service: media_player.turn_on
-                        target:
-                          entity_id: media_player.living_room_tv
-                        continue_on_error: true
-
-                  - wait_template: "{{ not state_attr('media_player.living_room_tv', 'is_volume_muted') == none }}"
-
-                  - service: media_player.volume_mute
-                    target:
-                      entity_id: media_player.living_room_tv
-                    data:
-                      is_volume_muted: true
-                    continue_on_error: true
-
-                  - if: "{{ danger }}"
-                    then:
-                      - wait_template: "{{ 'HDMI 2' in state_attr('media_player.living_room_tv', 'source_list') }}"
-                        timeout: 90
-
-                      - if: "{{ wait.completed }}"
+    - if:
+        - condition: state
+          entity_id: input_boolean.alarm_triggered
+          state: "on"
+      then:
+        - repeat:
+            while:
+              - condition: state
+                entity_id: input_boolean.alarm_triggered
+                state: "on"
+            sequence:
+              - parallel:
+                  - sequence:
+                      - if: "{{ danger }}"
                         then:
-                          - service: media_player.select_source
+                          - if:
+                              - condition: state
+                                entity_id: media_player.living_room_chromecast
+                                state: "off"
+                            then:
+                              - service: media_player.turn_on
+                                target:
+                                  entity_id: media_player.living_room_chromecast
+                                continue_on_error: true
+
+                              - wait_template: "{{ not is_state('media_player.living_room_tv','off') }}"
+                                timeout: 30
+
+                        else:
+                          - if: "{{ is_state('media_player.living_room_tv','off') }}"
+                            then:
+                              - service: media_player.turn_on
+                                target:
+                                  entity_id: media_player.living_room_tv
+                                continue_on_error: true
+
+                      - wait_template: "{{ state_attr('media_player.living_room_tv', 'is_volume_muted') != none }}"
+                        timeout: 30 # waits for tv to turn on
+
+                      - if: "{{ state_attr('media_player.living_room_tv', 'is_volume_muted') != true }}"
+                        then:
+                          - service: media_player.volume_mute
                             target:
                               entity_id: media_player.living_room_tv
                             data:
-                              source: HDMI 2 # chromecast
+                              is_volume_muted: true
                             continue_on_error: true
 
-                      - service: cast.show_lovelace_view
-                        data:
-                          dashboard_path: ui-cast
-                          entity_id: media_player.living_room_chromecast
-                          view_path: danger
-                        continue_on_error: true
-                    else:
-                      - wait_template: "{{ 'HDMI 1' in state_attr('media_player.living_room_tv', 'source_list') }}"
-                        timeout: 90
-
-                      - if: "{{ wait.completed }}"
+                      - if: "{{ danger }}"
                         then:
-                          - delay: 5 # skips if no delay
+                          - wait_template: "{{ 'HDMI 2' in state_attr('media_player.living_room_tv', 'source_list') }}"
+                            timeout: 30
 
-                          - service: media_player.select_source
-                            target:
-                              entity_id: media_player.living_room_tv
-                            data:
-                              source: HDMI 1 # security cameras
-                            continue_on_error: true
+                          - if: "{{ wait.completed and state_attr('media_player.living_room_tv', 'source') != 'HDMI 2' }}"
+                            then:
+                              - service: media_player.select_source
+                                target:
+                                  entity_id: media_player.living_room_tv
+                                data:
+                                  source: HDMI 2 # chromecast
+                                continue_on_error: true
 
-              - sequence: #ISSUE no chromecast
-                  - if: "{{ not danger }}"
-                    then:
-                      - service: media_player.turn_on
-                        target:
-                          entity_id: media_player.bedroom_tv
-                        continue_on_error: true
+                          - if: "{{ state_attr('media_player.living_room_chromecast', 'media_title') != 'Cast: Danger'}}"
+                            then:
+                              - service: cast.show_lovelace_view
+                                data:
+                                  dashboard_path: ui-cast
+                                  entity_id: media_player.living_room_chromecast
+                                  view_path: danger
+                                continue_on_error: true
+                        else:
+                          - wait_template: "{{ 'HDMI 1' in state_attr('media_player.living_room_tv', 'source_list') }}"
+                            timeout: 30
 
-                      - wait_template: "{{ not state_attr('media_player.bedroom_tv', 'is_volume_muted') == none }}"
+                          - if: "{{ wait.completed and state_attr('media_player.living_room_tv', 'source') != 'HDMI 1' }}"
+                            then:
+                              - delay: 5 # skips if no delay
 
-                      - service: media_player.volume_mute
-                        target:
-                          entity_id: media_player.bedroom_tv
-                        data:
-                          is_volume_muted: true
-                        continue_on_error: true
+                              - service: media_player.select_source
+                                target:
+                                  entity_id: media_player.living_room_tv
+                                data:
+                                  source: HDMI 1 # security cameras
+                                continue_on_error: true
 
-                      - wait_template: >
-                          {{ is_state('media_player.bedroom_tv', 'on')
-                              and 'HDMI 1' in state_attr('media_player.bedroom_tv', 'source_list') }}
-                        timeout: 90
-
-                      - if: "{{ wait.completed }}"
+                  - sequence: #ISSUE no chromecast
+                      - if: "{{ not danger and state_attr('media_player.bedroom_tv', 'source_list') != 'HDMI 1' }}"
                         then:
-                          - delay: 5 # skips if no delay
+                          - if: "{{ is_state('media_player.bedroom_tv','off') }}"
+                            then:
+                              - service: media_player.turn_on
+                                target:
+                                  entity_id: media_player.bedroom_tv
+                                continue_on_error: true
 
-                          - service: media_player.select_source
-                            target:
-                              entity_id: media_player.bedroom_tv
-                            data:
-                              source: HDMI 1 # security cameras
-                            continue_on_error: true
+                          - wait_template: "{{ not state_attr('media_player.bedroom_tv', 'is_volume_muted') == none }}"
+                            timeout: 30
 
-              - sequence: #ISSUE roku sometimes unavailable, v1 chromecast - casting doesn't work
-                  - if: "{{ not danger and has_value('media_player.office_tv') }}"
-                    then:
-                      - service: media_player.turn_on
-                        target:
-                          entity_id: media_player.office_tv
-                        continue_on_error: true
+                          - if: "{{ state_attr('media_player.bedroom_tv', 'is_volume_muted') != true }}"
+                            then:
+                              - service: media_player.volume_mute
+                                target:
+                                  entity_id: media_player.bedroom_tv
+                                data:
+                                  is_volume_muted: true
+                                continue_on_error: true
 
-                      - delay: 5 # stateless volume, no is_volume_muted attribute
+                          - wait_template: "{{ 'HDMI 1' in state_attr('media_player.bedroom_tv', 'source_list') }}"
+                            timeout: 30
 
-                      - service: media_player.volume_mute
-                        target:
-                          entity_id: media_player.office_tv
-                        data:
-                          is_volume_muted: true
-                        continue_on_error: true
+                          - if: "{{ wait.completed and state_attr('media_player.bedroom_tv', 'source') != 'HDMI 1' }}"
+                            then:
+                              - delay: 5 # skips if no delay
 
-                      - wait_template: "{{ 'Camera' in state_attr('media_player.office_tv', 'source_list') }}"
-                        timeout: 90
+                              - service: media_player.select_source
+                                target:
+                                  entity_id: media_player.bedroom_tv
+                                data:
+                                  source: HDMI 1 # security cameras
+                                continue_on_error: true
 
-                      - if: "{{ wait.completed }}"
+                  - sequence: #ISSUE roku sometimes unavailable, v1 chromecast - casting doesn't work
+                      - if: "{{ not danger }}"
                         then:
-                          - delay: 1 # skips if no delay
+                          - if: "{{ states('media_player.office_tv') in ['off','standby'] }}"
+                            then:
+                              - service: media_player.turn_on
+                                target:
+                                  entity_id: media_player.office_tv
+                                continue_on_error: true
 
-                          - service: media_player.select_source
+                          - delay: 5 # stateless volume, no is_volume_muted attribute
+
+                          - service: media_player.volume_mute
                             target:
                               entity_id: media_player.office_tv
                             data:
-                              source: Camera # security cameras
+                              is_volume_muted: true
                             continue_on_error: true
-              - sequence:
-                  - if: "{{ danger }}"
-                    then:
-                      - service: browser_mod.navigate
-                        data:
-                          path: /ui-cast/danger
-                          browser_id: kiosk
-                        continue_on_error: true
 
-                      - service: cast.show_lovelace_view
-                        data:
-                          dashboard_path: ui-cast
-                          entity_id: media_player.dining_room_hub
-                          view_path: danger
-                        continue_on_error: true
+                          - wait_template: "{{ 'Camera' in state_attr('media_player.office_tv', 'source_list') }}"
+                            timeout: 30
 
-                      - service: cast.show_lovelace_view
-                        data:
-                          dashboard_path: ui-cast
-                          entity_id: media_player.bedroom_hub
-                          view_path: danger
-                        continue_on_error: true
+                          - if: "{{ wait.completed and state_attr('media_player.office_tv', 'source') != 'Camera' }}"
+                            then:
+                              - delay: 1 #ISSUE skips if no delay
 
-    - wait_template: "{{ is_state('input_boolean.alarm_triggered', 'off') }}"
+                              - service: media_player.select_source
+                                target:
+                                  entity_id: media_player.office_tv
+                                data:
+                                  source: Camera # security cameras
+                                continue_on_error: true
 
-    - parallel:
-        - sequence:
-            - service: media_player.select_source
-              target:
-                entity_id: media_player.living_room_tv
-              data:
-                source: Live TV
-              continue_on_error: true
+                  - sequence:
+                      - parallel:
+                          - sequence:
+                              - if: "{{ danger and states('sensor.kiosk_browser_path') != '/ui-cast/danger' }}"
+                                then:
+                                  - service: browser_mod.navigate
+                                    data:
+                                      path: /ui-cast/danger
+                                      browser_id: kiosk
+                                    continue_on_error: true
 
-            - service: media_player.volume_mute
-              target:
-                entity_id: media_player.living_room_tv
-              data:
-                is_volume_muted: false
-              continue_on_error: true
+                          - sequence:
+                              - if: "{{ danger and state_attr('media_player.dining_room_hub','media_title') != 'Cast: Danger' }}"
+                                then:
+                                  - service: cast.show_lovelace_view
+                                    data:
+                                      dashboard_path: ui-cast
+                                      entity_id: media_player.dining_room_hub
+                                      view_path: danger
+                                    continue_on_error: true
 
-            - service: media_player.turn_off
-              entity_id:
-                - media_player.living_room_chromecast
-                - media_player.living_room_tv
-              continue_on_error: true
+                          - sequence:
+                              - if: "{{ danger and state_attr('media_player.bedroom_hub','media_title') != 'Cast: Danger' }}"
+                                then:
+                                  - service: cast.show_lovelace_view
+                                    data:
+                                      dashboard_path: ui-cast
+                                      entity_id: media_player.bedroom_hub
+                                      view_path: danger
+                                    continue_on_error: true
 
-        - sequence:
-            - if: "{{ not danger }}"
-              then:
-                - service: media_player.select_source
-                  target:
-                    entity_id: media_player.bedroom_tv
-                  data:
-                    source: Live TV
-                  continue_on_error: true
+              - wait_template: "{{ is_state('input_boolean.alarm_triggered','off') }}"
+                timeout: 60 # delay between repeats
+      else:
+        - parallel:
+            - sequence:
+                - if: "{{ states('sensor.kiosk_browser_path') == '/ui-cast/danger' }}"
+                  then:
+                    - service: button.press
+                      target:
+                        entity_id: button.kiosk_tablet_load_start_url
+                      continue_on_error: true
 
-                - service: media_player.volume_mute
-                  target:
-                    entity_id: media_player.bedroom_tv
-                  data:
-                    is_volume_muted: false
-                  continue_on_error: true
+            - sequence:
+                - if: "{{ state_attr('media_player.living_room_chromecast', 'media_title') == 'Cast: Danger'}}"
+                  then:
+                    - service: media_player.select_source
+                      target:
+                        entity_id: media_player.living_room_tv
+                      data:
+                        source: Live TV
+                      continue_on_error: true
 
-                - service: media_player.turn_off
-                  target:
-                    entity_id: media_player.bedroom_tv
-                  continue_on_error: true
+                    - service: media_player.volume_mute
+                      target:
+                        entity_id: media_player.living_room_tv
+                      data:
+                        is_volume_muted: false
+                      continue_on_error: true
 
-        - sequence:
-            - if: "{{ not danger }}"
-              then:
-                - service: media_player.volume_mute
-                  target:
-                    entity_id: media_player.office_tv
-                  data:
-                    is_volume_muted: false
-                  continue_on_error: true
+                    - service: media_player.turn_off
+                      entity_id:
+                        - media_player.living_room_chromecast
+                        - media_player.living_room_tv
+                      continue_on_error: true
 
-                - service: media_player.turn_off
-                  target:
-                    entity_id: media_player.office_tv
-                  continue_on_error: true
+            - sequence:
+                - if: "{{ state_attr('media_player.bedroom_tv', 'source_list') == 'HDMI 1' }}"
+                  then:
+                    - service: media_player.select_source
+                      target:
+                        entity_id: media_player.bedroom_tv
+                      data:
+                        source: Live TV
+                      continue_on_error: true
 
-        - sequence:
-            - if: "{{ danger }}"
-              then:
-                - service: button.press
-                  target:
-                    entity_id: button.kiosk_tablet_load_start_url
-                  continue_on_error: true
+                    - service: media_player.volume_mute
+                      target:
+                        entity_id: media_player.bedroom_tv
+                      data:
+                        is_volume_muted: false
+                      continue_on_error: true
 
-                - service: media_player.turn_off
-                  target:
-                    entity_id:
-                      - media_player.dining_room_hub # stops casting
-                      - media_player.bedroom_hub # stops casting
+                    - service: media_player.turn_off
+                      target:
+                        entity_id: media_player.bedroom_tv
+                      continue_on_error: true
+
+            - sequence:
+                - if: "{{ state_attr('media_player.office_tv', 'source') == 'Camera' }} }}"
+                  then:
+                    - service: media_player.volume_mute
+                      target:
+                        entity_id: media_player.office_tv
+                      data:
+                        is_volume_muted: false
+                      continue_on_error: true
+
+                    - service: media_player.turn_off
+                      target:
+                        entity_id: media_player.office_tv
+                      continue_on_error: true
+
+            - sequence:
+                - if: "{{ state_attr('media_player.dining_room_hub','media_title') == 'Cast: Danger' }}"
+                  then:
+                    - service: media_player.turn_off
+                      target:
+                        entity_id: media_player.dining_room_hub # stops casting
+
+            - sequence:
+                - if: "{{ state_attr('media_player.bedroom_hub','media_title') == 'Cast: Danger' }}"
+                  then:
+                    - service: media_player.turn_off
+                      target:
+                        entity_id: media_player.bedroom_hub # stops casting

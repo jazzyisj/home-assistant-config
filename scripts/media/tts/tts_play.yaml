@@ -7,6 +7,8 @@ tts_play:
   mode: queued
   max: 20
   max_exceeded: error
+  trace:
+    stored_traces: 30 #TEST
   fields:
     message:
       description: "TTS Message to play."
@@ -14,9 +16,9 @@ tts_play:
     alert:
       description: "Message is an alert. (overrides tts, media player, and volume)"
       example: "false"
-    tts_service:
+    tts_provider:
       description: "Override service to use for TTS."
-      example: "tts.cloud_say"
+      example: "Nabu Casa"
     tts_voice:
       description: "Override voice to use for TTS (Nabu Casa only)."
       example: "English (Canada) en-CA Female"
@@ -45,8 +47,10 @@ tts_play:
     ignore_away: "{{ ignore_away | default(false) }}"
     save_message: "{{ save_message | default(is_state('binary_sensor.mobile_phone_in_use', 'on')) }}"
     alert: "{{ alert | default(false) }}"
-    media_player: >
-      {% if is_state('binary_sensor.wan', 'off') %} media_player.kiosk
+    media_player:
+      > #TEMP shower speaker here until we figure out how to add to a group
+      {% if is_state('binary_sensor.wan', 'off') %} media_player.hass_media_player
+      {% elif is_state('switch.shower_scene','on') %} media_player.bathroom_speaker
       {% elif states('select.tts_media_player_manual') != 'None Selected' %}
         {{ expand('group.tts_media_players')
             | selectattr('name', 'eq', states('select.tts_media_player_manual'))
@@ -63,32 +67,29 @@ tts_play:
         {{ media_player }}
       {% endif %}
     media_players: >
-      {{ expand(state_attr('sensor.' ~ media_player.split('.')[1], 'entity_id')
-            if is_state_attr(media_player, 'type', 'group') else [media_player])
-          | map(attribute='entity_id') | list }}
+      {% set media_players = expand(state_attr('sensor.' ~ media_player.split('.')[1], 'entity_id')
+          if is_state_attr(media_player, 'type', 'group') else [media_player])
+          | map(attribute='entity_id') | list %}
+      {{ media_players }}
     tts_service: > # force local tts service if wan disconnected
-      {% if is_state('binary_sensor.wan', 'off') %} tts.piper
-      {% elif states('input_select.tts_service_manual') != 'None Selected' %}
-        {% if is_state('input_select.tts_service_manual', 'Piper TTS') %} tts.piper
-        {% elif is_state('input_select.tts_service_manual', 'Google Cloud') %} tts.google_cloud_say
-        {% elif is_state('input_select.tts_service_manual', 'Broadcast') %} broadcast
-        {% else %} tts.cloud_say
-        {% endif %}
-      {% elif alert %} tts.cloud_say
-      {% else %}
-        {% if is_state('input_select.occupancy_mode', 'Night') %}
-          {% set tts_select = 'input_select.tts_service_night' %}
+      {% set manual = states('input_select.tts_service_manual') %}
+      {% if is_state('binary_sensor.wan', 'off') %} {% set tts_provider = 'Piper TTS' %}
+      {% elif manual != 'None Selected' %} {% set tts_provider = manual %}
+      {% elif tts_provider is not defined %}
+        {% if alert %} {% set tts_provider = 'Nabu Casa' %}
+        {% elif is_state('input_select.occupancy_mode', 'Night') %}
+          {% set tts_provider = states('input_select.tts_service_night') %}
         {% elif is_state('binary_sensor.quiet_time', 'on') %}
-          {% set tts_select = 'input_select.tts_service_quiet' %}
+          {% set tts_provider = states('input_select.tts_service_quiet') %}
         {% else %}
-          {% set tts_select = 'input_select.tts_service' %}
+          {% set tts_provider = states('input_select.tts_service') %}
         {% endif %}
-        {% if is_state(tts_select, 'Piper TTS') %} {% set tts = 'tts.piper' %}
-        {% elif is_state(tts_select, 'Google Cloud') %} {% set tts = 'tts.google_cloud_say' %}
-        {% elif is_state(tts_select, 'Broadcast') %} {% set tts = 'broadcast' %}
-        {% else %} {% set tts = 'tts.cloud_say' %}
-        {% endif %}
-        {{ tts_service | default(tts) }}
+      {% endif %}
+      {% if tts_provider == 'Piper TTS' %} tts.piper
+      {% elif tts_provider == 'Google Cloud' %} tts.google_cloud_say
+      {% elif tts_provider == 'Nabu Casa' %} tts.cloud_say
+      {% elif tts_provider == 'Broadcast' %} broadcast
+      {% else %} tts.cloud_say
       {% endif %}
     volume: >
       {% if states('input_number.tts_volume_manual') | int > 0 %}
@@ -104,8 +105,10 @@ tts_play:
       {% endif %}
       {{ min_volume/100 if min_volume > -1 and (min_volume > volume) else volume/100 }}
     mute_tts: >
-      {% if is_state('switch.system_mute', 'on') %}
-        {{ false if alert else true }}
+      {% if media_players | count == 0 or volume == 0 %}
+        {{ true }}
+      {% elif is_state('switch.system_mute', 'on') %}
+        {{ iif(alert,false,true) }}
       {% else %}
         {{ false if (alert or always_play)
             else is_state('binary_sensor.mobile_phone_in_use', 'on')
@@ -113,9 +116,7 @@ tts_play:
             or (is_state('binary_sensor.scene_active', 'on'))
             or (is_state('input_select.occupancy_mode', 'Night'))
             or (is_state('binary_sensor.quiet_time', 'on') and not quiet_play)
-            or (is_state('binary_sensor.someone_home', 'off') and not ignore_away)
-            or media_players | count == 0
-            or volume == 0 }}
+            or (is_state('binary_sensor.someone_home', 'off') and not ignore_away) }}
       {% endif %}
   sequence:
     - condition: state
@@ -131,7 +132,7 @@ tts_play:
             variables:
               tts_service: "{{ tts_service }}"
               media_player: "{{ media_player }}"
-              tts_player: "{{ media_player }}"
+              tts_player: "{{ media_player }}" #MASS tts_player
               message: "ERROR - Message not defined"
           continue_on_error: true
 
@@ -313,16 +314,6 @@ tts_play:
             volume_level: "{{ volume }}"
           continue_on_error: true
 
-        #ISSUE ensure kiosk tablet media player volume is set, no mute - must be before muted players filtered out
-        - if: "{{ 'media_player.kiosk' in active_players }}"
-          then:
-            - service: media_player.volume_set
-              target:
-                entity_id: media_player.kiosk_tablet
-              data:
-                volume_level: 0.8
-              continue_on_error: true
-
         # volume exceptions - skip exceptions if alert (use alert volume)
         - if: "{{ not alert }}"
           then:
@@ -399,19 +390,24 @@ tts_play:
         - wait_template: >
             {% set media = state_attr(media_player, 'media_content_id') %}
             {{ false if media == none else media | contains('http://192.168.1.100:8123/api/tts_proxy')
-                  or is_state('input_boolean.tts', 'off') }}
+                or is_state('input_boolean.tts', 'off') }}
           timeout: 30
 
         - wait_template: >
             {{ states(media_player) in ['playing','buffering']
                 or is_state('input_boolean.tts', 'off') }}
-          timeout: 30
+          timeout: 60 #TEST
 
         # tts failed script if announcement is not playing after wait timeout
-        - if: >
-            {{ not states(media_player) in ['playing','buffering']
-                or is_state('input_boolean.tts', 'off') }}
+        - if: "{{ wait.completed }}"
           then:
+            # wait for media player to stop playing tts media
+            - wait_template: >
+                {{ not states(media_player) in ['playing','buffering']
+                    or is_state('input_boolean.tts', 'off') }}
+              timeout: 120 # longest possible tts message
+              continue_on_error: true
+          else:
             - service: script.turn_on
               target:
                 entity_id: script.tts_failed
@@ -422,9 +418,3 @@ tts_play:
                   tts_player: "{{ media_player }}" #MASS tts_player
                   message: "{{ message }}"
               continue_on_error: true
-          else:
-            # wait for media player to stop playing tts media
-            - wait_template: >
-                {{ not states(media_player) in ['playing','buffering']
-                    or is_state('input_boolean.tts', 'off') }}
-              timeout: 120 # longest possible tts message
