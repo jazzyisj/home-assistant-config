@@ -6,11 +6,22 @@
   description: "Control camera detection mode."
   mode: queued
   variables:
-    state: "{{ states('alarm_control_panel.master') }}"
+    state: "{{ states('alarm_control_panel.master') | replace('armed_vacation', 'armed_away') | replace('armed_', '') }}"
+    on_cams: >
+      {{ expand('group.frigate_cameras') | selectattr('attributes.' ~ state, 'eq', true)
+          | rejectattr('attributes.location', 'eq', 'indoor') | map(attribute='object_id') | list }}
+    off_cams: >
+      {{ expand('group.frigate_cameras') | rejectattr('attributes.' ~ state, 'eq', true)
+          | rejectattr('attributes.location', 'eq', 'indoor') | map(attribute='object_id') | list }}
   trigger:
     - platform: state
       entity_id: input_boolean.startup_pending
       to: "off"
+
+    # reset detect/motion after frigate restart
+    - platform: state
+      entity_id: binary_sensor.frigate_full_access_running
+      to: "on"
 
     - platform: state
       entity_id: alarm_control_panel.master
@@ -26,37 +37,33 @@
         minutes: 10
       continue_on_timeout: false
 
-    - delay: 5
-
     - service: switch.turn_on
       target:
+        # no detection on side gate, back yard cams
         entity_id: >
-          {% set state = states('alarm_control_panel.master')
-              | replace('armed_vacation', 'armed_away') | replace('armed_', '') %}
-          {% set cams = expand('group.frigate_cameras') | selectattr('attributes.' ~ state, 'eq', true)
-              | rejectattr('attributes.location', 'eq', 'indoor') | map(attribute='object_id') | list %}
-          {% set detect = cams | map('regex_replace',
+          {% set detect = on_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_detect', ignorecase=False) | list %}
-          {% set motion = cams | map('regex_replace',
+          {% set motion = on_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_motion', ignorecase=False) | list %}
-          {% set snapshots = cams | map('regex_replace',
+          {% set snapshots = on_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_snapshots', ignorecase=False) | list %}
           {{ detect + motion + snapshots }}
 
     - service: switch.turn_off
       target:
         entity_id: >
-          {% set state = states('alarm_control_panel.master')
-              | replace('armed_vacation', 'armed_away') | replace('armed_', '') %}
-          {% set cams = expand('group.frigate_cameras') | rejectattr('attributes.' ~ state, 'eq', true)
-              | rejectattr('attributes.location', 'eq', 'indoor') | map(attribute='object_id') | list %}
-          {% set detect = cams | map('regex_replace',
+          {% set detect = off_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_detect', ignorecase=False) | list %}
-          {% set motion = cams | map('regex_replace',
-              find='(.*)_frigate', replace='switch.\\1_frigate_motion', ignorecase=False) | list %}
-          {% set snapshots = cams | map('regex_replace',
+          {% set snapshots = off_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_snapshots', ignorecase=False) | list %}
-          {{ detect + motion + snapshots }}
+          {{ detect + snapshots }}
+
+    # detect switches must bet turned off first or motion switches won't turn off
+    - service: switch.turn_off
+      target:
+        entity_id: >
+          {{ off_cams | map('regex_replace', find='(.*)_frigate',
+                replace='switch.\\1_frigate_motion', ignorecase=False) | list }}
 
 ###############################################################################
 ## Camera - Pause Object Detection

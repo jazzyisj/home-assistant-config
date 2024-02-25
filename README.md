@@ -160,7 +160,6 @@
 - #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
 - #TV - TV notes
 - #ALARMO - alarmo issues/notes
-- #APEX - apex graph issues
 - #MASS - music assistant issues/notes
 - #INFO - info level log tag
 - #WARNING - warning level log tag

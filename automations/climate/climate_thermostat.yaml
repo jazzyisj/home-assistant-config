@@ -58,6 +58,47 @@
         option: "{{ states('climate.thermostat') }}"
 
 ###############################################################################
+## Climate - Update Thermostat Target Temperature
+###############################################################################
+- id: climate_udate_thermostat_target_temperature
+  alias: "[Climate] Update Thermostat Target Temperature"
+  description: "Update stored thermostat target temperature."
+  mode: restart
+  variables:
+    temp: >
+      {% set hvac = states('climate.thermostat') %}
+      {% set temp = state_attr('climate.thermostat', 'temperature') %}
+      {% set high = state_attr('climate.thermostat', 'target_temp_high') %}
+      {% set low = state_attr('climate.thermostat', 'target_temp_low') %}
+      {% set stored = states('input_number.thermostat_target_temperature') %}
+      {% set outdoor = states('sensor.outdoor_temperature') %}
+      {% if hvac in ['heat', 'cool'] %}{{ temp | int if is_number(temp) else stored }}
+      {% elif hvac == 'heat_cool' %}
+        {% if is_number(high)and is_number(low) and is_number(outdoor) %}
+          {% if outdoor | int > high %} {{ high | int }}
+          {% else %} {{ low | int }}
+          {% endif %}
+        {% else %} {{ low }} {# defaults to heat target if no outdoor temp #}
+        {% endif %}
+      {% else %} {{ stored }} {# defaults to stored if hvac off #}
+      {% endif %}
+  trigger:
+    - platform: state
+      entity_id: climate.thermostat
+      attribute: temperature
+  condition:
+    - condition: numeric_state
+      entity_id: climate.thermostat
+      attribute: temperature
+      above: 0
+  action:
+    - service: input_number.set_value
+      target:
+        entity_id: input_number.thermostat_target_temperature
+      data:
+        value: "{{ temp }}"
+
+###############################################################################
 ## Climate - Set Thermostat
 ###############################################################################
 - id: climate_set_thermostat
@@ -143,7 +184,7 @@
         {% else %} true
         {% endif %}
   action:
-    #ERROR (MainThread) [homeassistant.components.script.set_thermostat] Set Thermostat: Choose at step 6: choice 1: Error executing script. Unexpected error for call_service at pos 1: Error from API: 429: RESOURCE_EXHAUSTED: Rate limited for the Thermostat.: Too Many Requests
+    #ISSUE #ERROR (MainThread) [homeassistant.components.script.set_thermostat] Set Thermostat: Choose at step 6: choice 1: Error executing script. Unexpected error for call_service at pos 1: Error from API: 429: RESOURCE_EXHAUSTED: Rate limited for the Thermostat.: Too Many Requests
     # delay to allow user to finish setting temps, restart mode - will finish with last set value
     - delay: 60 # throttle
 
