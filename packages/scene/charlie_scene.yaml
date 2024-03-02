@@ -6,6 +6,22 @@ homeassistant:
     switch.charlie_scene:
       assumed_state: false
 
+input_select:
+  media_preset_type_charlie:
+    name: "Charlie Scene Preset Type"
+    options:
+      - Audio
+      - Video
+
+  media_preset_video_display_charlie:
+    name: "Charlie Scene Video Display"
+    options:
+      - Living Room Chromecast
+      - Living Room TV
+      - Dining Room Hub
+      - Bedroom TV
+      - Bedroom Hub
+
 switch:
   - platform: template
     switches:
@@ -26,47 +42,58 @@ switch:
                   - Guest
                   - Away
             then:
-              - service: media_player.play_media #TODO add video to presets
-                target:
-                  entity_id: media_player.living_room_tv #_chromecast
-                data:
-                  media_content_type: cast
-                  media_content_id: '
-                    {
-                    "app_name": "youtube",
-                    "media_id": "CVdkGFNCXAA"
-                    }'
-                  enqueue: replace
-                  extra:
-                    autoplay: true
-
-              #TODO play video instead
-              # - service: script.media_play
-              #   data:
-              #     preset: charlie
+              - if: "{{ is_state('input_select.media_preset_type_charlie','Video') }}"
+                then:
+                  - service: media_player.play_media
+                    target:
+                      entity_id: >
+                        {{ expand('group.media_players')
+                            | selectattr('attributes.type', 'in', ['single','group'])
+                            | selectattr('name', 'eq', states('input_select.media_preset_video_display_charlie'))
+                            | map(attribute='entity_id') | list }}
+                    data:
+                      media_content_type: cast
+                      #ISSUE can't template media_content_id?
+                      #IDEA add video to other presets, do in script.media_play
+                      media_content_id: '
+                        {
+                        "app_name": "youtube",
+                        "media_id": "CVdkGFNCXAA"
+                        }'
+                      enqueue: replace
+                      extra:
+                        autoplay: true
+                else:
+                  - service: script.media_play
+                    data:
+                      preset: charlie
         turn_off:
           - if:
-              - condition: template
-                value_template: >
-                  {{ is_state('input_boolean.media_preset_enabled_charlie','on')
-                      and is_state_attr('media_player.living_room_tv','source','HDMI 2')
-                      and is_state_attr('media_player.living_room_chromecast','media_content_id','CVdkGFNCXAA') }}
+              - condition: state
+                entity_id: input_boolean.media_preset_enabled_charlie
+                state: "on"
             then:
-              - service: media_player.turn_off
-                target:
-                  entity_id: media_player.living_room_chromecast
-
-          #TODO - if:
-          #     - condition: state
-          #       entity_id: input_boolean.media_preset_enabled_charlie
-          #       state: "on"
-          #   then:
-          #     - service: media_player.turn_off
-          #       target: >
-          #         {{ expand('group.media_players')
-          #             | selectattr('attributes.type', 'in', ['single','group'])
-          #             | selectattr('name','eq',states('select.media_preset_speaker_charlie'))
-          #             | map(attribute='entity_id') | list }}
+              - if:
+                  - condition: state
+                    entity_id: input_select.media_preset_type_charlie
+                    state: Video
+                then:
+                  - if:
+                      - condition: template
+                        value_template: >
+                          {{ is_state_attr('media_player.living_room_tv','source','HDMI 2')
+                              and is_state_attr('media_player.living_room_chromecast','media_content_id','CVdkGFNCXAA') }}
+                    then:
+                      - service: media_player.turn_off
+                        target:
+                          entity_id: media_player.living_room_chromecast
+                else:
+                  - service: media_player.turn_off
+                    target: >
+                      {{ expand('group.media_players')
+                          | selectattr('attributes.type', 'in', ['single','group'])
+                          | selectattr('name','eq',states('select.media_preset_speaker_charlie'))
+                          | map(attribute='entity_id') | list }}
 
 automation:
   ###############################################################################
