@@ -49,6 +49,13 @@ tts_play:
     alert: "{{ alert | default(false) }}"
     media_player:
       > #TEMP shower speaker here until we figure out how to add to a group
+      {% if is_state('input_select.occupancy_mode', 'Night') %}
+        {% set tplayer = states('select.tts_media_player_night') %}
+      {% elif is_state('binary_sensor.quiet_time', 'on') %}
+        {% set tplayer = states('select.tts_media_player_quiet') %}
+      {% else %}
+        {% set tplayer = states('select.tts_media_player') %}
+      {% endif %}
       {% if is_state('binary_sensor.wan', 'off') %} media_player.hass_media_player
       {% elif is_state('switch.shower_scene','on') %} media_player.bathroom_speaker
       {% elif states('select.tts_media_player_manual') != 'None Selected' %}
@@ -57,7 +64,7 @@ tts_play:
             | map(attribute='entity_id') | join('') }}
       {% else %}
         {% if media_player is defined %} {{ media_player }}
-        {% else %} {{ iif(alert, states('sensor.tts_alert_media_player'), states('sensor.tts_media_player')) }}
+        {% else %} {{ iif(alert, states('sensor.tts_alert_media_player'), tplayer) }}
         {% endif %}
       {% endif %}
     tts_player: > #MASS not using snapshot not working
@@ -119,6 +126,10 @@ tts_play:
             or (is_state('binary_sensor.someone_home', 'off') and not ignore_away) }}
       {% endif %}
   sequence:
+    - service: system_log.write #TEST
+      data:
+        message: TTS PLAY START
+
     - condition: state
       entity_id: input_boolean.tts_enabled
       state: "on"
@@ -205,10 +216,6 @@ tts_play:
               {{ states.media_player | selectattr('attributes.group_members', 'defined')
                   | selectattr('state', 'in', ['playing', 'paused', 'buffering', 'on']) | map(attribute='entity_id') | list }}
 
-        - service: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.tts_muted
-
         # store tts player for tts sensor
         - service: input_text.set_value
           target:
@@ -216,88 +223,89 @@ tts_play:
           data:
             value: "{{ media_player }}"
 
-        # store tts players for tts queue finished
-        - service: input_text.set_value
+        - service: input_boolean.turn_off
           target:
-            entity_id: input_text.tts_active_players
-          data:
-            value: "{{ media_players | join(', ') }}"
+            entity_id: input_boolean.tts_muted
 
-        #MASS media playing on tts player, turn on resume boolean
-        - if:
-            - condition: state
-              entity_id: binary_sensor.mass_media
-              state: "on"
-
-            - condition: state
-              entity_id: input_boolean.resume_mass
-              state: "off"
+        - if: "{{ is_state('input_boolean.tts','off') }}"
           then:
-            - variables:
-                mass_queues: >
-                  {% set mass_queues = namespace(entity_id=[]) %}
-                  {% if mass_players | count > 0 %}
-                    {% for player in expand(mass_players) %}
-                      {% if player.attributes.mass_player_id == player.attributes.active_queue %}
-                      {% set hass_player = player.entity_id | replace('_2', '') %}
-                        {% if is_state_attr(hass_player, 'type', 'group') %}
-                          {% set tts_group = state_attr('sensor.' ~ hass_player.split('.')[1], 'entity_id') %}
-                          {% for item in tts_group %}
-                            {% if item == states('sensor.tts_media_player')
-                                or item in state_attr('sensor.tts_media_player', 'entity_id') %}
-                              {% set mass_queues.entity_id = mass_queues.entity_id + [player.entity_id] %}
+            #MASS media playing on tts player, turn on resume boolean
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.mass_media
+                  state: "on"
+
+                #MASS #ISSUE if second + iteration on different mass speakers queue not saved
+                - condition: state
+                  entity_id: input_boolean.resume_mass
+                  state: "off"
+              then:
+                - variables:
+                    mass_queues: >
+                      {% set mass_queues = namespace(entity_id=[]) %}
+                      {% if mass_players | count > 0 %}
+                        {% for player in expand(mass_players) %}
+                          {% if player.attributes.mass_player_id == player.attributes.active_queue %}
+                          {% set hass_player = player.entity_id | replace('_2', '') %}
+                            {% if is_state_attr(hass_player, 'type', 'group') %}
+                              {% set tts_group = state_attr('sensor.' ~ hass_player.split('.')[1], 'entity_id') %}
+                              {% for item in tts_group %}
+                                {% if item == states('sensor.tts_active_media_player')
+                                    or item in state_attr('sensor.tts_active_media_player', 'entity_id') %}
+                                  {% set mass_queues.entity_id = mass_queues.entity_id + [player.entity_id] %}
+                                {% endif %}
+                              {% endfor %}
+                            {% else %}
+                              {% if hass_player == states('sensor.tts_active_media_player')
+                                  or hass_player in state_attr('sensor.tts_active_media_player', 'entity_id') %}
+                                {% set mass_queues.entity_id = mass_queues.entity_id + [player.entity_id] %}
+                              {% endif %}
                             {% endif %}
-                          {% endfor %}
-                        {% else %}
-                          {% if hass_player == states('sensor.tts_media_player')
-                              or hass_player in state_attr('sensor.tts_media_player', 'entity_id') %}
-                            {% set mass_queues.entity_id = mass_queues.entity_id + [player.entity_id] %}
                           {% endif %}
-                        {% endif %}
+                        {% endfor %}
                       {% endif %}
-                    {% endfor %}
-                  {% endif %}
-                  {{ mass_queues.entity_id | unique | list }}
+                      {{ mass_queues.entity_id | unique | list }}
 
-            - condition: template
-              value_template: "{{ mass_queues | count > 0 }}"
+                - condition: template
+                  value_template: "{{ mass_queues | count > 0 }}"
 
-            # store active mass players for tts queue finished
-            - service: input_text.set_value
-              target:
-                entity_id: input_text.tts_restore_mass
+                # store active mass players for tts queue finished
+                - service: input_text.set_value
+                  target:
+                    entity_id: input_text.tts_restore_mass
+                  data:
+                    value: "{{ mass_queues | join(', ') }}"
+
+                - service: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.resume_mass
+
+                # create queue snapshot for mass players #DISABLED until #MASS tts working
+                # - repeat:
+                #     for_each: "{{ mass_queues }}"
+                #     sequence:
+                #       - service: mass.queue_command
+                #         data:
+                #           player_id: "{{ mass_queues[repeat.index-1] }}"
+                #           command: snapshot_create
+
+            - service: script.media_player_set_volumes
               data:
-                value: "{{ mass_queues | join(', ') }}"
-
-            - service: input_boolean.turn_on
-              target:
-                entity_id: input_boolean.resume_mass
-
-        # create queue snapshot for mass players #DISABLED until #MASS tts working
-        # - repeat:
-        #     for_each: "{{ mass_queues }}"
-        #     sequence:
-        #       - service: mass.queue_command
-        #         data:
-        #           player_id: "{{ mass_queues[repeat.index-1] }}"
-        #           command: snapshot_create
+                source: tts_all # lower active media player volumes for tts
+              continue_on_error: true
 
         # turn boolean on to start announcement queue
         - service: input_boolean.turn_on
           target:
             entity_id: input_boolean.tts
 
-        - service: script.media_player_set_volumes
-          data:
-            source: tts_all # lower active media player volumes for tts
-          continue_on_error: true
-
-        - service: script.media_players_pause
+        # must be ran every time in case subsequent iterations on different media players
+        - service: script.turn_media_player_on
           data:
             entity_id: "{{ media_player }}"
           continue_on_error: true
 
-        - service: script.turn_media_player_on
+        - service: script.media_players_pause
           data:
             entity_id: "{{ media_player }}"
           continue_on_error: true
@@ -330,7 +338,7 @@ tts_play:
                   target:
                     entity_id: media_player.bathroom_speaker
                   data:
-                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time', 'off'), 0.9, 0.6) }}"
+                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time', 'off'), 1, 0.8) }}"
 
         - delay: 1 # allow volumes to set
 
@@ -357,7 +365,7 @@ tts_play:
 
                 - service: tts.cloud_say
                   target:
-                    entity_id: "{{ media_player }}" #MASS tts_player
+                    entity_id: "{{ media_player }}" #MASS tts_player wnen mass tts working
                   data:
                     message: "{{ message }}"
                     language: >
@@ -397,7 +405,8 @@ tts_play:
                 or is_state('input_boolean.tts', 'off') }}
           timeout: 30
 
-        - delay: 1 #TEST tts failing
+        - delay:
+            milliseconds: 500 #TEST tts failing
 
         - wait_template: >
             {{ states(media_player) in ['playing','buffering']
@@ -424,3 +433,16 @@ tts_play:
                   tts_player: "{{ media_player }}" #MASS tts_player
                   message: "{{ message }}"
               continue_on_error: true
+
+    #MASS resume on wrong queue (tts group if mass was single) even when queue cleared
+    #TODO players must be turned off to prevent it
+    - if: "{{ mass_queues is defined }}"
+      then:
+        - service: media_player.clear_playlist
+          target:
+            entity_id: "{{ mass_queues }}"
+          continue_on_error: true
+
+    - service: system_log.write #TEST
+      data:
+        message: TTS PLAY FINISHED
