@@ -20,7 +20,7 @@
       entity_id: &forecasts
         - weather.windsor
         - weather.pirateweather
-        - weather.forecast_home
+        - weather.forecast_home #ISSUE core forecast missing forecast attributes
       from:
         - unknown
         - unavailable
@@ -50,6 +50,48 @@
         pirate_daily: "{% if daily is defined and daily['weather.pirateweather'] is defined %}{{ daily['weather.pirateweather']['forecast'] }}{% endif %}"
         weatherflow_hourly: "{% if hourly is defined and hourly['weather.forecast_home'] is defined %}{{ hourly['weather.forecast_home']['forecast'] }}{% endif %}"
         weatherflow_daily: "{% if daily is defined and daily['weather.forecast_home'] is defined %}{{ daily['weather.forecast_home']['forecast'] }}{% endif %}"
+
+    - name: "Hourly Weather"
+      unique_id: hourly_weather
+      state: "{{ states('weather.home_daily') }}"
+      attributes:
+        temperature: "{{ state_attr('weather.home_daily', 'temperature') }}"
+        dew_point: "{{ state_attr('weather.home_daily', 'dew_point') }}"
+        temperature_unit: "{{ state_attr('weather.home_daily', 'temperature_unit') }}"
+        humidity: "{{ state_attr('weather.home_daily', 'humidity') }}"
+        cloud_coverage: "{{ state_attr('weather.home_daily', 'cloud_coverage') }}"
+        pressure: "{{ state_attr('weather.home_daily', 'pressure') }}"
+        pressure_unit: "{{ state_attr('weather.home_daily', 'pressure_unit') }}"
+        wind_bearing: "{{ state_attr('weather.home_daily', 'wind_bearing') }}"
+        wind_gust_speed: "{{ state_attr('weather.home_daily', 'wind_gust_speed') }}"
+        wind_speed: "{{ state_attr('weather.home_daily', 'wind_speed') }}"
+        wind_speed_unit: "{{ state_attr('weather.home_daily', 'wind_speed_unit') }}"
+        visibility: "{{ state_attr('weather.home_daily', 'visibility') }}"
+        visibility_unit: "{{ state_attr('weather.home_daily', 'visibility_unit') }}"
+        precipitation: "{{ state_attr('weather.home_daily', 'precipitation') }}"
+        precipitation_unit: "{{ state_attr('weather.home_daily', 'precipitation_unit') }}"
+        forecast: "{% if hourly is defined and hourly['weather.forecast_home'] is defined %}{{ hourly['weather.forecast_home']['forecast'] }}{% endif %}"
+
+    - name: "Daily Weather"
+      unique_id: daily_weather
+      state: "{{ states('weather.home_daily') }}"
+      attributes:
+        temperature: "{{ state_attr('weather.home_daily', 'temperature') }}"
+        dew_point: "{{ state_attr('weather.home_daily', 'dew_point') }}"
+        temperature_unit: "{{ state_attr('weather.home_daily', 'temperature_unit') }}"
+        humidity: "{{ state_attr('weather.home_daily', 'humidity') }}"
+        cloud_coverage: "{{ state_attr('weather.home_daily', 'cloud_coverage') }}"
+        pressure: "{{ state_attr('weather.home_daily', 'pressure') }}"
+        pressure_unit: "{{ state_attr('weather.home_daily', 'pressure_unit') }}"
+        wind_bearing: "{{ state_attr('weather.home_daily', 'wind_bearing') }}"
+        wind_gust_speed: "{{ state_attr('weather.home_daily', 'wind_gust_speed') }}"
+        wind_speed: "{{ state_attr('weather.home_daily', 'wind_speed') }}"
+        wind_speed_unit: "{{ state_attr('weather.home_daily', 'wind_speed_unit') }}"
+        visibility: "{{ state_attr('weather.home_daily', 'visibility') }}"
+        visibility_unit: "{{ state_attr('weather.home_daily', 'visibility_unit') }}"
+        precipitation: "{{ state_attr('weather.home_daily', 'precipitation') }}"
+        precipitation_unit: "{{ state_attr('weather.home_daily', 'precipitation_unit') }}"
+        forecast: "{% if daily is defined and daily['weather.forecast_home'] is defined %}{{ daily['weather.forecast_home']['forecast'] }}{% endif %}"
 
 - trigger:
     - platform: homeassistant
@@ -142,8 +184,8 @@
       state: >
         {% set time = states('sensor.precipitation_start') | as_datetime
             if has_value('sensor.precipitation_start') else none %}
-        {{ states('sensor.precipitation_type') == 'none'
-            and time != none and now() - time < timedelta(hours=2) }}
+        {{ is_state('binary_sensor.precipitation_active','off')
+            and time != none and time > now() and time - now() < timedelta(hours=2) }}
 
     - name: "Precipitation Likely Today" # next 12 hours
       unique_id: precipitation_likely_today
@@ -151,8 +193,8 @@
       state: >
         {% set time = states('sensor.precipitation_start') | as_datetime
             if has_value('sensor.precipitation_start') else none %}
-        {{ time != none and now() - time < timedelta(hours=12)
-            or states('sensor.precipitation_probability_today') | int(0) > 50 }}
+        {{ (time != none and time > now() and time - now() < timedelta(hours=12))
+              or states('sensor.precipitation_probability_today') | int(0) >= 40 }}
 
     - name: "Precipitation Alert"
       unique_id: precipitation_alert
@@ -201,21 +243,6 @@
             or is_state('binary_sensor.outdoor_high_temperature_alert', 'on')
             or is_state('alert.precipitation', 'on') }}
 - sensor:
-    - name: "Outdoor Temperature Trend"
-      unique_id: outdoor_temperature_trend
-      icon: >
-        {% if is_state(this.entity_id, 'rising') %} mdi:thermometer-chevron-up
-        {% elif is_state(this.entity_id, 'falling') %} mdi:thermometer-chevron-down
-        {% else %} mdi:thermometer
-        {% endif %}
-      state: >
-        {% set change = states('sensor.outdoor_temperature_change') | float %}
-        {% if change >= 0.25 %} rising
-        {% elif change < -0.25 %} falling
-        {% else %} steady
-        {% endif %}
-      availability: "{{ is_number(states('sensor.outdoor_temperature_change')) }}"
-
     #IDEA add icons for envcan extra values - req custom weather card
     - name: "Current Condition"
       unique_id: current_condition
@@ -259,11 +286,11 @@
     - name: "Condition Tomorrow"
       unique_id: condition_tomorrow
       icon: mdi:weather-partly-snowy-rainy
-      state: "{{ state_attr('weather.home_daily', 'forecast')[1].condition }}"
+      state: "{{ state_attr('sensor.weather_forecasts', 'envcan_daily')[1].condition }}"
       availability: >
-        {{ state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[1] is defined
-            and state_attr('weather.home_daily', 'forecast')[1].condition is defined }}
+        {{ state_attr('sensor.weather_forecasts', 'envcan_daily') != none
+            and state_attr('sensor.weather_forecasts', 'envcan_daily')[1] is defined
+            and state_attr('sensor.weather_forecasts', 'envcan_daily')[1].condition is defined }}
 
     - name: "Outdoor Temperature"
       unique_id: outdoor_temperature
@@ -353,17 +380,50 @@
             or (is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_apparent_temperature'))) }}
 
+    - name: "Outdoor Temperature Level"
+      unique_id: outdoor_temperature_level
+      icon: mdi:thermometer
+      state: >
+        {% set temp = states('sensor.outdoor_temperature') | float %}
+        {% if temp >= 40 %} Inferno
+        {% elif temp >= 35 %} Very Hot
+        {% elif temp >= 30 %} Hot
+        {% elif temp >= 25 %} Warm
+        {% elif temp >= 20 %} Nice
+        {% elif temp >= 15 %} Cool
+        {% elif temp >= 5 %} Chilly
+        {% elif temp >= 0 %} Cold
+        {% elif temp >= -7 %} Freezing
+        {% else %} Frigid
+        {% endif %}
+      availability: "{{ is_number(states('sensor.outdoor_temperature')) }}"
+
+    - name: "Outdoor Temperature Trend"
+      unique_id: outdoor_temperature_trend
+      icon: >
+        {% if is_state(this.entity_id, 'rising') %} mdi:thermometer-chevron-up
+        {% elif is_state(this.entity_id, 'falling') %} mdi:thermometer-chevron-down
+        {% else %} mdi:thermometer
+        {% endif %}
+      state: >
+        {% set change = states('sensor.outdoor_temperature_change') | float %}
+        {% if change >= 0.25 %} rising
+        {% elif change < -0.25 %} falling
+        {% else %} steady
+        {% endif %}
+      availability: "{{ is_number(states('sensor.outdoor_temperature_change')) }}"
+
     - name: "Outdoor High Temperature"
       unique_id: outdoor_high_temperature
       device_class: temperature
       state_class: measurement
       unit_of_measurement: °C
       state: >
-        {% if state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[0] is defined
-            and state_attr('weather.home_daily', 'forecast')[0].temperature is defined
-            and is_number(state_attr('weather.home_daily', 'forecast')[0].temperature) %}
-          {{ state_attr('weather.home_daily', 'forecast')[0].temperature | float }}
+        {% if state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature is defined
+            and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature) %}
+          {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature | float }}
         {% elif is_state('binary_sensor.envcan_connected', 'on')
             and is_number(states('sensor.windsor_high_temperature')) %}
           {{ states('sensor.windsor_high_temperature') | float }}
@@ -373,10 +433,10 @@
         {% endif %}
       attributes:
         provider: >
-          {% if state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].temperature is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].temperature) %}
+          {% if state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature) %}
             Daily Forecast
           {% elif is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_high_temperature')) %}
@@ -386,10 +446,10 @@
             Pirate Weather
           {% endif %}
       availability: >
-        {{ (state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].temperature is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].temperature))
+        {{ (state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].temperature))
             or (is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_high_temperature')))
             or (is_state('binary_sensor.pirateweather_connected', 'on')
@@ -399,12 +459,12 @@
       unique_id: outdoor_high_temperature_tomorrow
       device_class: temperature
       unit_of_measurement: °C
-      state: "{{ state_attr('weather.home_daily', 'forecast')[1].temperature | int }}"
+      state: "{{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1].temperature | int }}"
       availability: >
-        {{ state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[1] is defined
-            and state_attr('weather.home_daily', 'forecast')[1].temperature is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[1].temperature) }}
+        {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1].temperature is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1].temperature) }}
 
     - name: "Outdoor Low Temperature"
       unique_id: outdoor_low_temperature
@@ -412,11 +472,11 @@
       state_class: measurement
       unit_of_measurement: °C
       state: >
-        {% if state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[0] is defined
-            and state_attr('weather.home_daily', 'forecast')[0].templow is defined
-            and is_number(state_attr('weather.home_daily', 'forecast')[0].templow) %}
-          {{ state_attr('weather.home_daily', 'forecast')[0].templow | float }}
+        {% if state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow is defined
+            and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow) %}
+          {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow | float }}
         {% elif is_state('binary_sensor.envcan_connected', 'on')
             and is_number(states('sensor.windsor_low_temperature')) %}
           {{ states('sensor.windsor_low_temperature') | float }}
@@ -426,10 +486,10 @@
         {% endif %}
       attributes:
         provider: >
-          {% if state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].templow is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].templow) %}
+          {% if state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow) %}
             Daily Forecast
           {% elif is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_low_temperature')) %}
@@ -439,10 +499,10 @@
             Pirate Weather
           {% endif %}
       availability: >
-        {{ (state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].templow is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].templow))
+        {{ (state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].templow))
             or (is_state('binary_sensor.envcan_connected', 'on')
               and is_number(states('sensor.windsor_high_temperature')))
             or (is_state('binary_sensor.pirateweather_connected', 'on')
@@ -562,6 +622,24 @@
             or (is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_humidity'))) }}
 
+    - name: "Dew Point Comfort Level"
+      unique_id: dew_point_comfort_level
+      icon: mdi:thermometer
+      state: >
+        {% set dewpoint = states('sensor.dew_point') | float %}
+        {% if dewpoint >= 80 %} Severely High
+        {% elif dewpoint >= 75 %} Miserable
+        {% elif dewpoint >= 70 %} Oppressive
+        {% elif dewpoint >= 65 %} Uncomfortable
+        {% elif dewpoint >= 60 %} Ok for Most
+        {% elif dewpoint >= 55 %} Comfortable
+        {% elif dewpoint >= 50 %} Very Comfortable
+        {% elif dewpoint >= 30 %} Somewhat Dry
+        {% elif dewpoint >= -0.5 %} Dry
+        {% else %} Very Dry
+        {% endif %}
+      availability: "{{ is_number(states('sensor.dew_point')) }}"
+
     - name: "Outdoor Humidity Today"
       unique_id: outdoor_humidity_today
       device_class: humidity
@@ -621,31 +699,31 @@
       icon: mdi:weather-rainy
       unit_of_measurement: "%"
       state: >
-        {% if state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[0] is defined
-            and state_attr('weather.home_daily', 'forecast')[0].precipitation_probability is defined
-            and is_number(state_attr('weather.home_daily', 'forecast')[0].precipitation_probability) %}
-          {{ state_attr('weather.home_daily', 'forecast')[0].precipitation_probability | int }}
+        {% if state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability is defined
+            and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability) %}
+          {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability | int }}
         {% elif is_state('binary_sensor.pirateweather_connected', 'on')
             and is_number(states('sensor.pirateweather_precip_probability_0d')) %}
           {{ states('sensor.pirateweather_precip_probability_0d') }}
         {% endif %}
       attributes:
         provider: >
-          {% if state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].precipitation_probability is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].precipitation_probability) %}
+          {% if state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability) %}
             Daily Forecast
           {% elif is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_precip_probability_0d')) %}
             Pirate Weather
           {% endif %}
       availability: >
-        {{ (state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].precipitation_probability is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].precipitation_probability))
+        {{ (state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation_probability))
             or (is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_precip_probability_0d'))) }}
 
@@ -653,14 +731,14 @@
       unique_id: precipitation_probability_tomorrow
       icon: mdi:weather-rainy
       unit_of_measurement: "%"
-      state: "{{ state_attr('weather.home_daily', 'forecast')[1].precipitation_probability | int }}"
+      state: "{{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1].precipitation_probability | int }}"
       attributes:
         provider: Daily Forecast
       availability: >
-        {{ state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[1] is defined
-            and state_attr('weather.home_daily', 'forecast')[1].precipitation_probability is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[1].precipitation_probability) }}
+        {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1].precipitation_probability is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[1].precipitation_probability) }}
 
     - name: "Fog Probability"
       unique_id: fog_probability
@@ -739,14 +817,14 @@
       icon: mdi:weather-pouring
       device_class: precipitation
       unit_of_measurement: mm
-      state: "{{ state_attr('weather.home_daily', 'forecast')[0].precipitation | int }}"
+      state: "{{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation | float }}"
       attributes:
         provider: Daily Forecast
       availability: >
-        {{ state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[0] is defined
-            and state_attr('weather.home_daily', 'forecast')[0].precipitation is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].precipitation) }}
+        {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].precipitation) }}
 
     - name: "Precipitation Today"
       unique_id: precipitation_today
@@ -757,16 +835,16 @@
       state: >
         {% if is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.home_sensors_precipitation_today_checked')) %}
-          {{ states('sensor.home_sensors_precipitation_today_checked') | int }}
+          {{ states('sensor.home_sensors_precipitation_today_checked') | float }}
         {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.home_sensors_precipitation_today')) %}
-          {{ states('sensor.home_sensors_precipitation_today') | int }}
+          {{ states('sensor.home_sensors_precipitation_today') | float }}
         {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
             and is_number(states('sensor.tempest_st_00057689_rain_today')) %}
-          {{ states('sensor.tempest_st_00057689_rain_today') | int }}
+          {{ states('sensor.tempest_st_00057689_rain_today') | float }}
         {% elif is_state('binary_sensor.pirateweather_connected', 'on')
             and is_number(states('sensor.pirateweather_precip_accumulation_0d')) %}
-          {{ states('sensor.pirateweather_precip_accumulation_0d') | int }}
+          {{ states('sensor.pirateweather_precip_accumulation_0d') | float }}
         {% endif %}
       attributes:
         provider: >
@@ -802,16 +880,16 @@
       state: >
         {% if is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.home_sensors_precipitation_yesterday_checked')) %}
-          {{ states('sensor.home_sensors_precipitation_yesterday_checked') | int }}
+          {{ states('sensor.home_sensors_precipitation_yesterday_checked') | float }}
         {% elif is_state('binary_sensor.weatherflow_cloud_connected', 'on')
             and is_number(states('sensor.home_sensors_precipitation_yesterday')) %}
-          {{ states('sensor.home_sensors_precipitation_yesterday') | int }}
+          {{ states('sensor.home_sensors_precipitation_yesterday') | float }}
         {% elif is_state('binary_sensor.weatherflow_local_connected', 'on')
             and is_number(states('sensor.tempest_st_00057689_rain_yesterday')) %}
-          {{ states('sensor.tempest_st_00057689_rain_yesterday') | int }}
+          {{ states('sensor.tempest_st_00057689_rain_yesterday') | float }}
         {% elif is_state('binary_sensor.envcan_connected', 'on')
             and is_number(states('sensor.windsor_precipitation_yesterday')) %}
-          {{ states('sensor.windsor_precipitation_yesterday') | int }}
+          {{ states('sensor.windsor_precipitation_yesterday') | float }}
         {% endif %}
       attributes:
         provider: >
@@ -850,7 +928,7 @@
         {% endif %}
       availability: "{{ has_value('sensor.current_condition') }}"
 
-    # uses envcan forecast, most accurate
+    # uses envcan forecast first, most accurate
     - name: "Precipitation Start" # next 12 hours
       unique_id: precipitation_start
       icon: mdi:weather-pouring
@@ -872,7 +950,7 @@
         {% elif forecast not in ['', none] %}
           {% for item in forecast %}
             {% if loop.index0 < 12
-                and item.precipitation_probability | int(-1) >= 50
+                and item.precipitation_probability | int(-1) >= 40
                 and (item.condition | contains('rain')
                   or item.condition | contains('snow')
                   or item.condition | contains('storm')) %}
@@ -1081,30 +1159,30 @@
         {% if is_state('binary_sensor.pirateweather_connected', 'on')
             and is_number(states('sensor.pirateweather_wind_speed_0d')) %}
           {{ states('sensor.pirateweather_wind_speed_0d') | float }}
-        {% elif state_attr('weather.home_daily', 'forecast') != none
-            and state_attr('weather.home_daily', 'forecast')[0] is defined
-            and state_attr('weather.home_daily', 'forecast')[0].wind_speed is defined
-            and is_number(state_attr('weather.home_daily', 'forecast')[0].wind_speed) %}
-          {{ state_attr('weather.home_daily', 'forecast')[0].wind_speed | float }}
+        {% elif state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+            and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed is defined
+            and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed) %}
+          {{ state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed | float }}
         {% endif %}
       attributes:
         provider: >
           {% if is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_wind_speed_0d')) %}
             Pirate Weather
-          {% elif state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].wind_speed is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].wind_speed) %}
+          {% elif state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed) %}
             Daily Forecast
           {% endif %}
       availability: >
         {{ (is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_wind_speed_0d')))
-            or (state_attr('weather.home_daily', 'forecast') != none
-              and state_attr('weather.home_daily', 'forecast')[0] is defined
-              and state_attr('weather.home_daily', 'forecast')[0].wind_speed is defined
-              and is_number(state_attr('weather.home_daily', 'forecast')[0].wind_speed)) }}
+            or (state_attr('sensor.weather_forecasts', 'weatherflow_daily') != none
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0] is defined
+              and state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed is defined
+              and is_number(state_attr('sensor.weather_forecasts', 'weatherflow_daily')[0].wind_speed)) }}
 
     # pirate, envcan priority - more accurate
     # if envcan gust n/a use envcan speed - gust never < speed

@@ -97,48 +97,48 @@
 
 ## ENTITY COUNTS
 
-- alarm_control_panel: 3
-- alert: 101
-- automation: 312
-- binary_sensor: 460
-- button: 105
-- calendar: 16
-- camera: 24
-- climate: 5
-- counter: 2
-- device_tracker: 75
-- event: 75
-- fan: 10
-- group: 65
-- image: 15
-- input_boolean: 201
-- input_button: 2
-- input_datetime: 41
-- input_number: 190
-- input_select: 18
-- input_text: 46
-- light: 54
-- lock: 4
-- media_player: 41
-- number: 95
-- person: 2
-- proximity: 1
-- remote: 1
-- scene: 8
-- script: 72
-- select: 123
-- sensor: 1139
-- siren: 2
-- stt: 1
-- sun: 1
-- switch: 156
-- timer: 54
-- todo: 4
-- tts: 2
-- update: 125
-- valve: 12
-- weather: 6
-- zone: 10
+- alarm_control_panel - 3
+- alert - 101
+- automation - 313
+- binary_sensor - 482
+- button - 107
+- calendar - 16
+- camera - 30
+- climate - 5
+- counter - 1
+- device_tracker - 75
+- event - 75
+- fan - 10
+- group - 65
+- image - 21
+- input_boolean - 199
+- input_button - 2
+- input_datetime - 42
+- input_number - 191
+- input_select - 20
+- input_text - 45
+- light - 54
+- lock - 4
+- media_player - 38
+- number - 108
+- person - 2
+- proximity - 1
+- remote - 1
+- scene - 8
+- script - 73
+- select - 127
+- sensor - 1194
+- siren - 2
+- stt - 1
+- sun - 1
+- switch - 186
+- timer - 53
+- todo - 4
+- tts - 2
+- update - 126
+- valve - 12
+- weather - 6
+- zone - 10
 
 ## TAGS USED IN CODE
 

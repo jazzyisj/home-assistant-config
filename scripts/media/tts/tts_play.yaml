@@ -48,7 +48,7 @@ tts_play:
     save_message: "{{ save_message | default(is_state('binary_sensor.mobile_phone_in_use', 'on')) }}"
     alert: "{{ alert | default(false) }}"
     media_player:
-      > #TEMP shower speaker here until we figure out how to add to a group
+      > #TEMP shower speaker here until we figure out how to add to a group, will only play on shower speaker
       {% if is_state('input_select.occupancy_mode', 'Night') %}
         {% set tplayer = states('select.tts_media_player_night') %}
       {% elif is_state('binary_sensor.quiet_time', 'on') %}
@@ -56,6 +56,8 @@ tts_play:
       {% else %}
         {% set tplayer = states('select.tts_media_player') %}
       {% endif %}
+      {% set tplayer = expand('group.tts_media_players') | selectattr('name', 'eq', tplayer)
+          | map(attribute='entity_id') | join('') %}
       {% if is_state('binary_sensor.wan', 'off') %} media_player.hass_media_player
       {% elif is_state('switch.shower_scene','on') %} media_player.bathroom_speaker
       {% elif states('select.tts_media_player_manual') != 'None Selected' %}
@@ -289,22 +291,23 @@ tts_play:
                 #           player_id: "{{ mass_queues[repeat.index-1] }}"
                 #           command: snapshot_create
 
-            - service: script.media_player_set_volumes
-              data:
-                source: tts_all # lower active media player volumes for tts
-              continue_on_error: true
+                - service: script.media_player_set_volumes
+                  data:
+                    source: tts_all # lower active media player volumes for tts
+                  continue_on_error: true
 
         # turn boolean on to start announcement queue
         - service: input_boolean.turn_on
           target:
             entity_id: input_boolean.tts
 
-        # must be ran every time in case subsequent iterations on different media players
+        # avoid bloops - must be called every time in case subsequent iterations are on different media players
         - service: script.turn_media_player_on
           data:
             entity_id: "{{ media_player }}"
           continue_on_error: true
 
+        # avoid jump in active media volumes
         - service: script.media_players_pause
           data:
             entity_id: "{{ media_player }}"
@@ -401,17 +404,10 @@ tts_play:
         # wait for media player to start playing tts media
         - wait_template: >
             {% set media = state_attr(media_player, 'media_content_id') %}
-            {{ false if media == none else media | contains('http://192.168.1.100:8123/api/tts_proxy')
+            {{ (media | contains('http://192.168.1.100:8123/api/tts_proxy')
+                  and states(media_player) in ['playing','buffering'])
                 or is_state('input_boolean.tts', 'off') }}
-          timeout: 30
-
-        - delay:
-            milliseconds: 500 #TEST tts failing
-
-        - wait_template: >
-            {{ states(media_player) in ['playing','buffering']
-                or is_state('input_boolean.tts', 'off') }}
-          timeout: 60 #TEST tts failing
+          timeout: 60
 
         # tts failed script if announcement is not playing after wait timeout
         - if: "{{ wait.completed }}"
@@ -433,15 +429,6 @@ tts_play:
                   tts_player: "{{ media_player }}" #MASS tts_player
                   message: "{{ message }}"
               continue_on_error: true
-
-    #MASS resume on wrong queue (tts group if mass was single) even when queue cleared
-    #TODO players must be turned off to prevent it
-    - if: "{{ mass_queues is defined }}"
-      then:
-        - service: media_player.clear_playlist
-          target:
-            entity_id: "{{ mass_queues }}"
-          continue_on_error: true
 
     - service: system_log.write #TEST
       data:
