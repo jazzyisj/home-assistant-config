@@ -7,8 +7,6 @@ tts_play:
   mode: queued
   max: 20
   max_exceeded: error
-  trace:
-    stored_traces: 30 #TEST tts failing
   fields:
     message:
       description: "TTS Message to play."
@@ -26,6 +24,9 @@ tts_play:
       description: "Override default media player."
       example: "media_player.broadcast_speakers"
     min_volume:
+      description: "Percent - override volume level if less than minimum volume"
+      example: "50"
+    tts_volume:
       description: "Percent - override volume level"
       example: "50"
     quiet_play:
@@ -69,12 +70,9 @@ tts_play:
         {% else %} {{ iif(alert, states('sensor.tts_alert_media_player'), tplayer) }}
         {% endif %}
       {% endif %}
-    tts_player: > #MASS not using snapshot not working
-      {% if is_state('binary_sensor.mass_media', 'on') %}
-        {{ iif(has_value(media_player ~ '_2'), media_player ~ '_2', media_player) }}
-      {% else %}
-        {{ media_player }}
-      {% endif %}
+    tts_player: > #MASS change media player to mass player
+      {% set mass = media_player ~ '_2' %}
+      {{ iif(has_value(mass), mass, media_player) }}
     media_players: >
       {% set media_players = expand(state_attr('sensor.' ~ media_player.split('.')[1], 'entity_id')
           if is_state_attr(media_player, 'type', 'group') else [media_player])
@@ -101,7 +99,9 @@ tts_play:
       {% else %} tts.cloud_say
       {% endif %}
     volume: >
-      {% if states('input_number.tts_volume_manual') | int > 0 %}
+      {% if tts_volume is defined %}
+        {% set volume = tts_volume | int %}
+      {% elif states('input_number.tts_volume_manual') | int > 0 %}
         {% set volume = states('input_number.tts_volume_manual') | int %}
       {% elif alert %}
         {% set volume = states('input_number.tts_volume_alert') | int %}
@@ -112,7 +112,7 @@ tts_play:
       {% else %}
         {% set volume = states('input_number.tts_volume') | int %}
       {% endif %}
-      {{ min_volume/100 if min_volume > -1 and (min_volume > volume) else volume/100 }}
+      {{ min_volume / 100 if min_volume > -1 and (min_volume > volume) else volume / 100 }}
     mute_tts: >
       {% if media_players | count == 0 or volume == 0 %}
         {{ true }}
@@ -128,10 +128,6 @@ tts_play:
             or (is_state('binary_sensor.someone_home', 'off') and not ignore_away) }}
       {% endif %}
   sequence:
-    - service: system_log.write #TEST
-      data:
-        message: TTS PLAY START
-
     - condition: state
       entity_id: input_boolean.tts_enabled
       state: "on"
@@ -149,7 +145,7 @@ tts_play:
             variables:
               tts_service: "{{ tts_service }}"
               media_player: "{{ media_player }}"
-              tts_player: "{{ media_player }}" #MASS tts_player
+              tts_player: "{{ tts_player }}"
               message: "ERROR - Message not defined"
           continue_on_error: true
 
@@ -186,8 +182,7 @@ tts_play:
                       channel: alarm_stream
 
             # save message if message is flagged for save
-            - if:
-                - "{{ save_message }}"
+            - if: "{{ save_message }}"
               then:
                 - service: script.turn_on
                   target:
@@ -213,11 +208,6 @@ tts_play:
 
             - delay: 10 # keep script running for a few seconds
       default:
-        - variables:
-            mass_players: >
-              {{ states.media_player | selectattr('attributes.group_members', 'defined')
-                  | selectattr('state', 'in', ['playing', 'paused', 'buffering', 'on']) | map(attribute='entity_id') | list }}
-
         # store tts player for tts sensor
         - service: input_text.set_value
           target:
@@ -231,7 +221,6 @@ tts_play:
 
         - if: "{{ is_state('input_boolean.tts','off') }}"
           then:
-            #MASS media playing on tts player, turn on resume boolean
             - if:
                 - condition: state
                   entity_id: binary_sensor.mass_media
@@ -245,6 +234,9 @@ tts_play:
                 - variables:
                     mass_queues: >
                       {% set mass_queues = namespace(entity_id=[]) %}
+                      {% set mass_players =  expand('group.mass_media_players')
+                          | selectattr('state', 'in', ['playing', 'paused', 'buffering', 'on'])
+                          | map(attribute='entity_id') | list %}
                       {% if mass_players | count > 0 %}
                         {% for player in expand(mass_players) %}
                           {% if player.attributes.mass_player_id == player.attributes.active_queue %}
@@ -268,6 +260,7 @@ tts_play:
                       {% endif %}
                       {{ mass_queues.entity_id | unique | list }}
 
+                #MASS media playing on tts player
                 - condition: template
                   value_template: "{{ mass_queues | count > 0 }}"
 
@@ -301,19 +294,19 @@ tts_play:
           target:
             entity_id: input_boolean.tts
 
-        # avoid bloops - must be called every time in case subsequent iterations are on different media players
-        - service: script.turn_media_player_on
+        # avoid google bloops - must be called every time in case subsequent iterations are on different media players
+        - service: script.turn_media_player_on #TEST
           data:
             entity_id: "{{ media_player }}"
           continue_on_error: true
 
-        # avoid jump in active media volumes
+        # avoid jump in active media volumes when tts volume set
         - service: script.media_players_pause
           data:
             entity_id: "{{ media_player }}"
           continue_on_error: true
 
-        # filter out muted media players so we don't unmute (player must be on for is_volume_muted)
+        # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
         - variables:
             active_players: >
               {% set muted_players = expand(media_players) | selectattr('attributes.is_volume_muted', 'defined')
@@ -343,7 +336,7 @@ tts_play:
                   data:
                     volume_level: "{{ iif(is_state('binary_sensor.quiet_time', 'off'), 1, 0.8) }}"
 
-        - delay: 1 # allow volumes to set
+        - delay: 1 # allow volumes to adjust
 
         # play tts message
         - choose:
@@ -368,7 +361,7 @@ tts_play:
 
                 - service: tts.cloud_say
                   target:
-                    entity_id: "{{ media_player }}" #MASS tts_player wnen mass tts working
+                    entity_id: "{{ media_player }}" #MASS #TEST tts_player
                   data:
                     message: "{{ message }}"
                     language: >
@@ -382,30 +375,34 @@ tts_play:
                       {% endif %}
                     options:
                       gender: "{{ iif('female' in voice | lower, 'female', 'male') }}"
-                  continue_on_error: true #VERIFY #MASS script does not continue if mass fails
+                  continue_on_error: true
 
             - conditions: "{{ tts_service == 'tts.piper' }}"
               sequence:
                 - service: tts.speak
                   data:
                     cache: true
-                    media_player_entity_id: "{{ media_player }}" #MASS tts_player
+                    media_player_entity_id: "{{ media_player }}" #MASS #TEST tts_player
                     message: "{{ message }}"
                   target:
                     entity_id: tts.piper
           default:
             - service: "{{ tts_service }}"
               target:
-                entity_id: "{{ media_player }}" #MASS tts_player
+                entity_id: "{{ media_player }}" #MASS #TEST tts_player
               data:
                 message: "{{ message }}"
-              continue_on_error: true #VERIFY #MASS script does not continue if mass fails
+              continue_on_error: true
 
-        # wait for media player to start playing tts media
+        #MASS #ISSUE if tts plays on mass player tts call does not release until message done playing
+        # this prevents testing for tts failed (done playing before wait_template)
+
         - wait_template: >
-            {% set media = state_attr(media_player, 'media_content_id') %}
-            {{ (media | contains('http://192.168.1.100:8123/api/tts_proxy')
-                  and states(media_player) in ['playing','buffering'])
+            {% set media = state_attr(media_player, 'media_content_id')
+                if state_attr(media_player, 'media_content_id') != none else '' %}
+            {{ ((media | contains('/tts_proxy')
+                or media | contains('/announcement'))
+                and states(media_player) in ['playing','buffering'])
                 or is_state('input_boolean.tts', 'off') }}
           timeout: 60
 
@@ -414,7 +411,11 @@ tts_play:
           then:
             # wait for media player to stop playing tts media
             - wait_template: >
-                {{ not states(media_player) in ['playing','buffering']
+                {% set media = state_attr(media_player, 'media_content_id')
+                    if state_attr(media_player, 'media_content_id') != none else '' %}
+                {{ (not media | contains('/tts_proxy')
+                    and not media | contains('/announcement'))
+                    or not states(media_player) in ['playing']
                     or is_state('input_boolean.tts', 'off') }}
               timeout: 120 # longest possible tts message
               continue_on_error: true
@@ -426,10 +427,17 @@ tts_play:
                 variables:
                   tts_service: "{{ tts_service }}"
                   media_player: "{{ media_player }}"
-                  tts_player: "{{ media_player }}" #MASS tts_player
+                  tts_player: "{{ tts_player }}"
                   message: "{{ message }}"
               continue_on_error: true
 
-    - service: system_log.write #TEST
-      data:
-        message: TTS PLAY FINISHED
+    # wait for media player to stop playing tts media
+    # - wait_template: > #TEST - use when using mass tts_player
+    #     {% set media = state_attr(media_player, 'media_content_id')
+    #         if state_attr(media_player, 'media_content_id') != none else '' %}
+    #     {{ (not media | contains('/tts_proxy')
+    #         and not media | contains('/announcement'))
+    #         or not states(media_player) in ['playing']
+    #         or is_state('input_boolean.tts', 'off') }}
+    #   timeout: 120 # longest possible tts message
+    #   continue_on_error: true

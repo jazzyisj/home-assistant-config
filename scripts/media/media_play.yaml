@@ -13,13 +13,12 @@ media_play:
     preset: "{{ preset | default('play') }}"
     media_player: >
       {{ expand('group.media_players')
-          | selectattr('attributes.type', 'in', ['single','group'])
           | selectattr('name', 'eq', states('select.media_preset_speaker_' ~ preset))
           | map(attribute='entity_id') | join('') }}
-    mass_player: > #MASS change player to mass player
+    mass_player: > #MASS change media player to mass player
       {% set mass = media_player ~ '_2' %}
       {{ iif(has_value(mass), mass, none) }}
-    play_players: >
+    preset_players: >
       {% if mass_player != none %}
         {% set players = namespace(entity_id=[]) %}
         {% set devices = state_attr(mass_player, 'group_members')
@@ -61,7 +60,8 @@ media_play:
         {% else %}
           {% for group_speaker in groups %}
             {% set sensor = 'sensor.' ~ group_speaker.split('.')[1] %}
-            {% if states(sensor) == 'on' and media_player in state_attr(sensor, 'entity_id') %}
+            {% if media_player in state_attr(sensor, 'entity_id')
+                and states(group_speaker) not in ['off', 'unknown', 'unavailable'] %}
               {% set stop_player.entity_id = group_speaker %}
               {% break %}
             {% endif %}
@@ -70,10 +70,6 @@ media_play:
       {% endif %}
       {{ stop_player.entity_id }}
   sequence:
-    - service: system_log.write #TEST
-      data:
-        message: MEDIA PLAY START
-
     - if:
         - condition: state
           entity_id: switch.system_mute
@@ -86,7 +82,7 @@ media_play:
 
         - stop: "System mute is on - media preset cannot not be played."
 
-    - if: "{{ play_players == none }}"
+    - if: "{{ preset_players == none }}"
       then:
         - service: browser_mod.notification
           data:
@@ -106,7 +102,8 @@ media_play:
         minutes: 5
       continue_on_timeout: false
 
-    #MASS turn off currently playing group if overlap with preset players
+    #MASS turn off currently playing mass players if overlap with new preset players
+    #MASS media playing group player -> new preset single player in group -> preset plays on group
     - if: "{{ stop_player != none }}"
       then:
         - service: script.turn_media_player_off
@@ -122,7 +119,7 @@ media_play:
 
     - service: script.media_player_set_volumes
       target:
-        entity_id: "{{ play_players }}"
+        entity_id: "{{ preset_players }}"
       data:
         volume: "{{ states('input_number.media_preset_volume_' ~ preset) | int }}"
         quiet_override: "{{ preset == 'shower' }}"
@@ -152,25 +149,51 @@ media_play:
         enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
       continue_on_error: true #MASS script does not continue if mass fails
 
-    - wait_template: "{{ is_state(mass_player, 'playing') }}"
+    - wait_template: "{{ is_state(media_player, 'playing') }}"
       timeout: 60
 
+    # media didn't play - turn off media player and reset volumes
     - if: "{{ not wait.completed }}"
       then:
-        - service: script.media_player_reset_volumes
+        - service: system_log.write
           data:
-            force_reset: true
-          continue_on_error: true
+            logger: "{{ this.entity_id }}"
+            level: critical
+            message: |
+              MEDIA PLAY FAILED
+              preset: {{ preset }}
+              media_player: {{ media_player }}
+              mass_player: {{ mass_player }}
+              preset_players: {{ preset_players }}
+              stop_player: {{ stop_player }}
+              media_id: "{{ states('select.media_preset_' ~ preset) }}"
+              media_type: "{{ iif(is_state('input_boolean.radio_' ~ preset, 'on'), 'radio', 'playlist') }}"
+              enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
 
         - service: script.turn_media_player_off
           data:
             entity_id: "{{ media_player }}"
             reset_volume: false
           continue_on_error: true
+
+        - service: script.media_player_reset_volumes
+          data:
+            force_reset: true
+          continue_on_error: true
       else:
+        - if: "{{ has_value('timer.media_preset_' ~ preset) }}"
+          then:
+            - service: timer.start
+              target:
+                entity_id: "timer.media_preset_{{ preset }}"
+              data:
+                duration:
+                  minutes: "{{ states('input_number.media_preset_' ~ preset ~ '_time') | int }}"
+
+        #TEMP #MASS until tts resume working properly
+        # set media preset play values for mass resume
         - if: "{{ preset != 'play' }}"
           then:
-            #TEMP #MASS until resume working properly
             - service: select.select_option
               target:
                 entity_id: select.media_preset_play
@@ -211,16 +234,3 @@ media_play:
     - service: input_boolean.turn_off
       target:
         entity_id: group.media_launchers
-
-    - if: "{{ has_value('timer.media_preset_' ~ preset) }}"
-      then:
-        - service: timer.start
-          target:
-            entity_id: "timer.media_preset_{{ preset }}"
-          data:
-            duration:
-              minutes: "{{ states('input_number.media_preset_' ~ preset ~ '_time') | int }}"
-
-    - service: system_log.write #TEST
-      data:
-        message: MEDIA PLAY FINISHED

@@ -38,6 +38,7 @@ weather_report:
         save_message: false
         message: |
           {%- from 'speech.jinja' import iarticle %}
+          {%- from 'speech.jinja' import plural_qty %}
           {%- set temp = states('sensor.outdoor_temperature') | int('unknown') %}
           {%- set app_temp = states('sensor.outdoor_apparent_temperature') | int('unknown') %}
           {%- set high_temp = states('sensor.outdoor_high_temperature') | int('unknown') %}
@@ -56,7 +57,7 @@ weather_report:
           {%- set precip_start = state_attr('sensor.precipitation_start', '12hour') %}
           {%- set pop = states('sensor.precipitation_probability_today') | int('unknown') %}
           {%- set precip_type = states('sensor.precipitation_type') | lower | replace('none', 'precipitation') | replace('hail', 'rain') %}
-          {%- set expected_precip = states('sensor.precipitation_expected_today') | int(-1) %}
+          {%- set expected_precip = states('sensor.precipitation_expected_today') | float(-1) %}
           {%- set wind_max = states('sensor.wind_gust_today') | int('unknown') %}
           {%- set wind_gust = states('sensor.wind_gust') | int('unknown') %}
           {%- set wind_dir = state_attr('sensor.wind_bearing', 'full_cardinal') %}
@@ -73,39 +74,42 @@ weather_report:
           Environment Canada has issued a {{ state_attr('binary_sensor.envcan_weather_alert', 'title') }} for the immediate area
           {{- ' until ' ~ until if until != none -}}.
           {%- endif %}
-          It is currently {{ temp }} degree{{ iif(temp | abs != 1,'s','') }} and {{ current }}
+          It is currently {{ plural_qty('degree', temp, false) }} and {{ current }}
           {%- if (temp - app_temp ) | abs > 2 %}, but it feels more like {{ app_temp }} {%- endif %}.
           {%- if high_temp > states('input_number.outdoor_high_temperature_threshold') | int %}
           It will be bloody hot
           {%- if humidty_today > 70 %} and humid today, with a humdity level around {{ humidty_today }} percent and
           {%- else %} today, with
           {%- endif %} a humidex topping {{ app_high_temp }} ball sweatin degrees.
-          {% if show_normal_high %} That's {{ normal_high_diff | abs }} degree{{ iif(normal_high_diff | abs != 1,'s') }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal!{% endif %}
+          {% if show_normal_high %} That's {{ plural_qty('degree', normal_high_diff | abs, false) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal!{% endif %}
           {%- if wind_max > 15 %} It will be {{ 'rather' if wind_max <  25 else 'very' }} windy with wind speeds approaching {{ wind_max }} kilometers per hour.{% endif %}
-          {%- elif low_temp < states('input_number.outdoor_low_temperature_threshold') | int %}
+          {%- elif app_low_temp < states('input_number.outdoor_low_temperature_threshold') | int %}
           Today will be friggin cold
-          {%- if humidty_today > 70 %}{{ ' and' if wind_max <= 15 else ', ' }} damp {% endif %}
-          {%- if wind_max > 15 %} and {{ 'rather' if wind_max <  25 else 'very' }} windy, with wind speeds topping {{ wind_max }} kilometers per hour and
-          {%- else %}, with
-          {%- endif %} a high of {{ high_temp }}, and a low of {{ low_temp }} degree{{ iif(low_temp | abs != 1,'s') }}.
-          {% if show_normal_high %} Today's high temperature is about {{ normal_high_diff | abs }} degree{{ iif(normal_high_diff | abs != 1,'s') }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal{% endif %}
-          {%- if show_normal_high and show_normal_low %} and the {% elif show_normal_low %}Today's {% endif %}
-          {%- if show_normal_low %} low is {{ normal_low_diff | abs }} {{ 'degree' if normal_low_diff | abs == 1 else 'degrees' }} {{ 'lower' if normal_low_diff < 0 else 'higher' }}{% endif %}
-          {%- if show_normal_high or show_normal_low %} than normal!{% endif %}
-          {%- else %}
-          Today's high temperature will be {% if show_normal_high %}{{ normal_high_diff | abs }} {{ 'degree' if normal_high_diff | abs == 1 else 'degrees' }}
-          {{- ' lower' if normal_high_diff < 0 else ' higher' }} than normal, with a high of {{ 'only ' if normal_high_diff <  0 }}{% endif %}
-          {{- high_temp }} degree{{ iif(high_temp | abs != 1,'s','') }}.  The overnight low temperature will be {{ low_temp }} {{ 'degree' if low_temp in [-1, 1] else 'degrees' }}
-          {%- if show_normal_low %}, which is {{ normal_low_diff | abs }} degree{{ iif(normal_low_diff | abs != 1,'s') }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
+          {%- if humidty_today > 60 %}, damp,{% endif %}
+          {%- if wind_max > 15 %} and {{ 'rather' if wind_max <  25 else 'very' }} windy.
           {%- endif %}
-          The current humidity level is {{ humidity }} percent, and
-          {%- if precip_now %} it is {{ precip_type }}ing right now.
-          {%- elif precipitation_today %} there is a {{ pop }} percent chance of {{ precip_type }} today
-            {%- if precip_start != none %}, starting around {{ precip_start }}{% endif -%}.
+          The expected high temperature is {{ high_temp }} with a windchill of {{ app_high_temp -}}
+          , and the overnight low is {{ low_temp }} with a windchill of {{ plural_qty('degree', app_low_temp, false) }}.
+          {%- if show_normal_high %}
+          The high temperature will be about {{ plural_qty('degree', normal_high_diff | abs, false) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }}{% endif %}
+          {%- if show_normal_high and show_normal_low %} and the {% elif show_normal_low %}Today's {% endif %}
+          {%- if show_normal_low %} low is {{ plural_qty('degree', normal_low_diff | abs, false) }} {{ 'lower' if normal_low_diff < 0 else 'higher' }}{% endif %}
+          {%- if show_normal_high or show_normal_low %} than normal.{% endif %}
+          {%- else %}
+          The current humidity level is {{ humidity }} percent.
+          {%- endif %}
+          {%- if wind_max > 15 %}
+          Wind speeds will top {{ wind_max }} kilometers per hour today.{% endif %}
+          {%- if precipitation_today %}
+            {%- if not precip_now %}
+          There is a {{ pop }} percent chance of {{ precip_type }}
+            {%- if precip_start != none %}, starting around {{ precip_start }}{% endif -%}
+            {%- endif %}.
             {%- if expected_precip > 0 %}
-            Today's expected precipitation is {{ expected_precip }} millimeter{{ iif(expected_precip != 1, 's', '') }}
-            {%- endif -%}
-          {%- else %} there is no {{ precip_type }} expected today
+          The expected precipitation today is {{ iif(expected_precip < 1, 'less than one millimeter', plural_qty('millimeter', expected_precip | int, false)) }}
+            {%- endif %}
+            {%- else %}
+          There is no {{ precip_type }} expected today
           {%- endif -%}.
           {%- if fog > 25 %} There is {{ iif(precipitation_today, 'also', 'however,') }} {{ iarticle(fog) }} percent chance of fog.
           {%- endif -%}
@@ -123,7 +127,7 @@ weather_report:
           Get your snot rags ready! The allergy risk is {{ states('sensor.allergy_risk_today') }} today.
           {%- endif %}
           {%- if states('sensor.flu_risk_today') | lower in ['medium', 'medium-high', 'high'] %}
-          The current cold and flu risk is {{ states('sensor.flu_risk_today') }}, so I highly suggest you mask up, hide in your basement, and avoid all contact with any other human beings today.
+          The current cold and flu risk is {{ states('sensor.flu_risk_today') }}, so I highly suggest you mask up, hide in your basement, and avoid all contact with any other human beings.
           {%- endif %}
           The sun
           {%- if night %} has already set
