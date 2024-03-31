@@ -9,13 +9,13 @@ entities:
   - entity: weather.home_daily
     name: "Home"
 
-  - entity: sensor.current_condition
+  - type: custom:template-entity-row
+    entity: sensor.current_condition
     name: "Current Condition"
-
-  - entity: sensor.windsor_condition #TEST
+    state: "{{ states('sensor.current_condition') | title }}"
 
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       name: "Temperature"
@@ -44,42 +44,10 @@ entities:
       - entity: sensor.outdoor_apparent_temperature
         name: "Feels Like"
       - entity: sensor.outdoor_temperature_trend
-        name: "Temperature Trend"
-
-      - type: conditional
-        conditions:
-          - entity: alert.outdoor_high_temperature
-            state_not: idle
-        row:
-          entity: alert.outdoor_high_temperature
-          name: "High Temperature Alert"
-
-      - type: conditional
-        conditions:
-          - entity: alert.outdoor_low_temperature
-            state_not: idle
-        row:
-          entity: alert.outdoor_low_temperature
-          name: "Low Temperature Alert"
-
-      - type: button
-        icon: mdi:thermometer
-        name: "Temperature Detail"
-        action_name: "VIEW"
-        tap_action:
-          action: navigate
-          navigation_path: outdoor-temperature
-
-      - type: button
-        name: "Temperature Map"
-        icon: mdi:thermometer
-        action_name: "VIEW"
-        tap_action:
-          action: navigate
-          navigation_path: temperature-radar
+        name: "Trend"
 
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       entity: sensor.outdoor_humidity
@@ -91,54 +59,103 @@ entities:
         name: "Humidity"
       - entity: sensor.dew_point
 
-      - type: button
-        name: "Humidity Map"
-        icon: mdi:water-percent
-        action_name: "VIEW"
-        tap_action:
-          action: navigate
-          navigation_path: humidity-radar
-
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       entity: sensor.barometric_pressure
       name: "Barometric Pressure"
       state: "{{ states('sensor.barometric_pressure_description') | title }}"
-      secondary: "{{ states('sensor.barometric_pressure', with_unit=true) ~ ' - ' ~ states('sensor.pressure_trend') | title }}"
+      secondary: "{{ states('sensor.barometric_pressure', with_unit=true) ~ ': ' ~ states('sensor.pressure_trend') | title }}"
     entities:
       - entity: sensor.barometric_pressure
 
-  - type: custom:fold-entity-row
-    padding: 0
-    head:
+  - type: conditional
+    conditions:
+      - entity: binary_sensor.precipitation_likely_soon
+        state: "on"
+      - entity: sensor.precipitation_type
+        state: "none"
+    row:
       type: custom:template-entity-row
-      entity: sensor.precipitation_type
-      name: "Precipitation"
-      state: >
-        {% if states('sensor.precipitation_type') | lower == 'none' %} Dry
-        {% else %} {{  states('sensor.precipitation_type') | title }}
-        {% endif %}
-      secondary: "Probability: {{ states('sensor.precipitation_probability', with_unit=true) }}"
-      active: "{{  states('sensor.precipitation_type') | lower != 'none' }}" #ISSUE not working
+      entity: binary_sensor.precipitation_likely_soon
+      name: "Precipitation Likely Soon"
+      state: "{{ state_attr('sensor.precipitation_start', 'type') }}"
+      secondary: >
+        {%- if has_value('sensor.precipitation_start') %}
+          Expected at {{ state_attr('sensor.precipitation_start','12hour') }}
+        {%- endif %}
       card_mod:
         style: |
           :host {
             --paper-item-icon-color:
-              {% if states('sensor.precipitation_type') | lower != 'none' %} var(--state-active-color)
+              {% if is_state('binary_sensor.precipitation_likely_soon', 'on') %} var(--state-active-color)
+              {% else %} var(--state-icon-color)
+              {% endif %}
+            ;
+          }
+
+  - type: conditional
+    conditions:
+      - entity: binary_sensor.precipitation_likely_today
+        state: "on"
+      - entity: binary_sensor.precipitation_likely_soon
+        state: "off"
+      - entity: sensor.precipitation_type
+        state: "none"
+    row:
+      type: custom:template-entity-row
+      entity: binary_sensor.precipitation_likely_today
+      name: "Precipitation Likely Today"
+      state: "{{ state_attr('sensor.precipitation_start', 'type') }}"
+      secondary: >
+        {%- if has_value('sensor.precipitation_start') %}
+          Expected at {{ state_attr('sensor.precipitation_start','12hour') }}
+        {%- endif %}
+      card_mod:
+        style: |
+          :host {
+            --paper-item-icon-color:
+              {% if is_state('binary_sensor.precipitation_likely_today', 'on') %} var(--state-active-color)
+              {% else %} var(--state-icon-color)
+              {% endif %}
+            ;
+          }
+
+  - type: custom:fold-entity-row
+    padding: 10
+    head:
+      type: custom:template-entity-row
+      entity: sensor.precipitation_type
+      name: "Current Precipitation"
+      state: "{{ states('sensor.precipitation_type') | title }}"
+      secondary: "Probability: {{ states('sensor.precipitation_probability', with_unit=true) }}"
+      active: "{{  states('sensor.precipitation_type') != 'none' }}" #ISSUE not working
+      card_mod:
+        style: |
+          :host {
+            --paper-item-icon-color:
+              {% if states('sensor.precipitation_type') != 'none' %} var(--state-active-color)
               {% else %} var(--state-icon-color)
               {% endif %}
             ;
           }
     entities:
-      - entity: binary_sensor.rain
-      - entity: binary_sensor.snow
-      - entity: sensor.precipitation_intensity
-      - entity: sensor.precipitation_intensity_text
-      - entity: sensor.nearest_storm_distance
-      - entity: sensor.nearest_storm_bearing
-      - entity: sensor.precipitation_probability
+      - entity: sensor.precipitation_start
+        format: time
+
+      - type: custom:template-entity-row
+        entity: sensor.precipitation_intensity
+        name: "Precipitation Intesity"
+        state: "{{  states('sensor.precipitation_intensity_text') }}"
+        secondary: "Rate: {{ states('sensor.precipitation_intensity', with_unit=true) }}"
+
+      - type: custom:template-entity-row
+        entity: sensor.precipitation_intensity
+        name: "Nearest Storm"
+        state: "{{ states('sensor.nearest_storm_distance', with_unit=true) }}"
+        secondary: "Direction: {{ state_attr('sensor.nearest_storm_bearing', 'full_cardinal') }}"
+
       - entity: sensor.snow_probability
       - entity: sensor.precipitation_today
       - entity: sensor.precipitation_24_hours
@@ -148,13 +165,13 @@ entities:
       - entity: sensor.precipitation_duration_yesterday
 
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       entity: binary_sensor.home_binary_sensors_is_lightning
       name: "Lightning"
       state: "{{ iif(is_state('binary_sensor.home_binary_sensors_is_lightning','on'), 'Yes', 'No') }}" #IDEA template
-      secondary: "Last Hour: {{ states('sensor.home_sensors_lightning_strikes_last_hour') }}"
+      secondary: "Current Strikes: {{ states('sensor.lightning_count') }}"
       active: "{{ is_state('binary_sensor.home_binary_sensors_is_lightning','off') }}" #ISSUE not working
       card_mod:
         style: |
@@ -185,7 +202,7 @@ entities:
         name: "Last Lightning Strike Distance"
 
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       entity: sensor.wind_speed
@@ -208,7 +225,7 @@ entities:
       - entity: sensor.wind_bearing
 
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       entity: sensor.cloud_cover
@@ -233,7 +250,7 @@ entities:
       - entity: sensor.visibility
 
   - type: custom:fold-entity-row
-    padding: 0
+    padding: 10
     head:
       type: custom:template-entity-row
       entity: sensor.air_quality_index
@@ -255,168 +272,89 @@ entities:
             ;
           }
     entities:
-      - entity: sensor.air_quality_index
       - entity: sensor.ozone
       - entity: sensor.nitrogen_dioxide
       - entity: sensor.sulphur_dioxide
       - entity: sensor.particulate_matter_2_5
 
-      - entity: alert.air_quality
-        name: "Air Quality Alert"
+  - type: custom:template-entity-row
+    entity: sensor.uv_index
+    name: "UV Risk"
+    state: "{{ states('sensor.current_uv_level') | title }}"
+    secondary: "UVI: {{ states('sensor.uv_index') }}"
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color:
+            {% set level = states('sensor.current_uv_level') %}
+            {% if level == 'very high' %} var(--entity-critical-color)
+            {% elif level == 'high' %} var(--entity-severe-color)
+            {% elif level == 'moderate high' %} var(--entity-warning-color)
+            {% elif level == 'moderate' %} var(--entity-minor-color)
+            {% elif level == 'low' %} var(--state-icon-color)
+            {% else %} var(--entity-disabled-color)
+            {% endif %}
+          ;
+        }
 
-      - type: button
-        icon: mdi:smog
-        name: "AQI Map"
-        action_name: "VIEW"
-        tap_action:
-          action: navigate
-          navigation_path: waqi
+  - type: custom:template-entity-row
+    entity: sensor.allergy_index_today
+    name: "Allergy Risk Today"
+    state: "{{ states('sensor.allergy_risk_today') | title }}"
+    secondary: "Allergy Index: {{ states('sensor.allergy_index_today') }}"
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color:
+            {% set risk = states('sensor.allergy_risk_today') %}
+            {% if risk == 'High' %} var(--entity-critical-color)
+            {% elif risk == 'Medium-High' %} var(--entity-severe-color)
+            {% elif risk == 'Medium' %} var(--entity-warning-color)
+            {% elif risk == 'Low-Medium' %} var(--entity-minor-color)
+            {% elif risk == 'Low' %} var(--state-icon-color)
+            {% else %} var(--entity-disabled-color)
+            {% endif %}
+          ;
+        }
 
-  - type: custom:fold-entity-row
-    padding: 0
-    head:
-      type: custom:template-entity-row
-      entity: sensor.uv_index
-      name: "UV Risk"
-      state: "{{ states('sensor.current_uv_level') | title }}"
-      secondary: "UVI: {{ states('sensor.uv_index') }}"
-      card_mod:
-        style: |
-          :host {
-            --paper-item-icon-color:
-              {% set level = states('sensor.current_uv_level') %}
-              {% if level == 'very high' %} var(--entity-critical-color)
-              {% elif level == 'high' %} var(--entity-severe-color)
-              {% elif level == 'moderate high' %} var(--entity-warning-color)
-              {% elif level == 'moderate' %} var(--entity-minor-color)
-              {% elif level == 'low' %} var(--state-icon-color)
-              {% else %} var(--entity-disabled-color)
-              {% endif %}
-            ;
-          }
-    entities:
-      - entity: sensor.current_uv_index
+  - type: custom:template-entity-row
+    entity: sensor.asthma_index_today
+    name: "Asthma Risk Today"
+    state: "{{ states('sensor.asthma_risk_today') | title }}"
+    secondary: "Asthma Index: {{ states('sensor.asthma_index_today') }}"
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color:
+            {% set risk = states('sensor.asthma_risk_today') %}
+            {% if risk == 'High' %} var(--entity-critical-color)
+            {% elif risk == 'Medium-High' %} var(--entity-severe-color)
+            {% elif risk == 'Medium' %} var(--entity-warning-color)
+            {% elif risk == 'Low-Medium' %} var(--entity-minor-color)
+            {% elif risk == 'Low' %} var(--state-icon-color)
+            {% else %} var(--entity-disabled-color)
+            {% endif %}
+          ;
+        }
 
-      - entity: alert.uv_risk
-        name: "UV Risk Alert"
-
-      - type: button
-        entity: sensor.current_uv_level
-        name: "UV Map"
-        action_name: "VIEW"
-        tap_action:
-          action: url
-          url_path: !secret WINDY_UV
-
-  - type: custom:fold-entity-row
-    padding: 0
-    head:
-      type: custom:template-entity-row
-      entity: sensor.allergy_index_today
-      name: "Allergy Risk Today"
-      state: "{{ states('sensor.allergy_risk_today') | title }}"
-      secondary: "Allergy Index: {{ states('sensor.allergy_index_today') }}"
-      card_mod:
-        style: |
-          :host {
-            --paper-item-icon-color:
-              {% set risk = states('sensor.allergy_risk_today') %}
-              {% if risk == 'High' %} var(--entity-critical-color)
-              {% elif risk == 'Medium-High' %} var(--entity-severe-color)
-              {% elif risk == 'Medium' %} var(--entity-warning-color)
-              {% elif risk == 'Low-Medium' %} var(--entity-minor-color)
-              {% elif risk == 'Low' %} var(--state-icon-color)
-              {% else %} var(--entity-disabled-color)
-              {% endif %}
-            ;
-          }
-    entities:
-      - entity: sensor.allergy_index_today
-        name: "Allergy Index"
-
-      - entity: alert.allergy_risk
-        name: "Allergy Risk Alert"
-
-      - type: button
-        entity: sensor.allergy_risk_today
-        name: "Allergy Index Map"
-        action_name: "VIEW"
-        tap_action:
-          action: url
-          url_path: !secret POLLEN
-
-  - type: custom:fold-entity-row
-    padding: 0
-    head:
-      type: custom:template-entity-row
-      entity: sensor.asthma_index_today
-      name: "Asthma Risk Today"
-      state: "{{ states('sensor.asthma_risk_today') | title }}"
-      secondary: "Asthma Index: {{ states('sensor.asthma_index_today') }}"
-      card_mod:
-        style: |
-          :host {
-            --paper-item-icon-color:
-              {% set risk = states('sensor.asthma_risk_today') %}
-              {% if risk == 'High' %} var(--entity-critical-color)
-              {% elif risk == 'Medium-High' %} var(--entity-severe-color)
-              {% elif risk == 'Medium' %} var(--entity-warning-color)
-              {% elif risk == 'Low-Medium' %} var(--entity-minor-color)
-              {% elif risk == 'Low' %} var(--state-icon-color)
-              {% else %} var(--entity-disabled-color)
-              {% endif %}
-            ;
-          }
-    entities:
-      - entity: sensor.asthma_index_today
-        name: "Asthma Index"
-
-      - entity: alert.asthma_risk
-        name: "Asthma Risk Alert"
-
-      - type: button
-        entity: sensor.asthma_risk_today
-        name: "Asthma Index Map"
-        action_name: "VIEW"
-        tap_action:
-          action: url
-          url_path: !secret ASTHMA
-
-  - type: custom:fold-entity-row
-    padding: 0
-    head:
-      type: custom:template-entity-row
-      entity: sensor.cold_flu_index_today
-      name: "Flu Risk Today"
-      state: "{{ states('sensor.flu_risk_today') | title }}"
-      secondary: "Flu Index: {{ states('sensor.cold_flu_index_today') }}"
-      card_mod:
-        style: |
-          :host {
-            --paper-item-icon-color:
-              {% set risk = states('sensor.flu_risk_today') %}
-              {% if risk == 'High' %} var(--entity-critical-color)
-              {% elif risk == 'Medium-High' %} var(--entity-severe-color)
-              {% elif risk == 'Medium' %} var(--entity-warning-color)
-              {% elif risk == 'Low-Medium' %} var(--entity-minor-color)
-              {% elif risk == 'Low' %} var(--state-icon-color)
-              {% else %} var(--entity-disabled-color)
-              {% endif %}
-            ;
-          }
-    entities:
-      - entity: sensor.cold_flu_index_today
-        name: "Flu Index"
-
-      - entity: alert.flu_risk
-        name: "Flu Risk Alert"
-
-      - type: button
-        entity: sensor.flu_risk_today
-        name: "Flu Index Map"
-        action_name: "VIEW"
-        tap_action:
-          action: url
-          url_path: !secret FLU
+  - type: custom:template-entity-row
+    entity: sensor.cold_flu_index_today
+    name: "Flu Risk Today"
+    state: "{{ states('sensor.flu_risk_today') | title }}"
+    secondary: "Flu Index: {{ states('sensor.cold_flu_index_today') }}"
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color:
+            {% set risk = states('sensor.flu_risk_today') %}
+            {% if risk == 'High' %} var(--entity-critical-color)
+            {% elif risk == 'Medium-High' %} var(--entity-severe-color)
+            {% elif risk == 'Medium' %} var(--entity-warning-color)
+            {% elif risk == 'Low-Medium' %} var(--entity-minor-color)
+            {% elif risk == 'Low' %} var(--state-icon-color)
+            {% else %} var(--entity-disabled-color)
+            {% endif %}
+          ;
+        }
 card_mod:
   class: basic

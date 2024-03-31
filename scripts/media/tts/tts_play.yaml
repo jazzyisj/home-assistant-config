@@ -14,20 +14,23 @@ tts_play:
     alert:
       description: "Message is an alert. (overrides tts, media player, and volume)"
       example: "false"
-    tts_provider:
+    provider:
       description: "Override service to use for TTS."
-      example: "Nabu Casa"
-    tts_voice:
-      description: "Override voice to use for TTS (Nabu Casa only)."
-      example: "English (Canada) en-CA Female"
+      example: "HASS Cloud"
+    language:
+      description: "Override language to use for TTS (HASS Cloud only)."
+      example: "English (Canada)"
+    voice:
+      description: "Override voice to use for TTS (HASS Cloud only)."
+      example: "ClaraNueral"
     media_player:
       description: "Override default media player."
       example: "media_player.broadcast_speakers"
-    min_volume:
-      description: "Percent - override volume level if less than minimum volume"
+    volume:
+      description: "Override default volume level (%)"
       example: "50"
-    tts_volume:
-      description: "Percent - override volume level"
+    min_volume:
+      description: "Override volume level if default is less than minimum volume (%)"
       example: "50"
     quiet_play:
       description: "Play announcement during quiet time."
@@ -41,92 +44,6 @@ tts_play:
     save_message:
       description: "Save message to play when home or after alarm."
       example: "true"
-  variables:
-    min_volume: "{{ min_volume | default(-1) | float }}"
-    quiet_play: "{{ quiet_play | default(false) }}"
-    always_play: "{{ always_play | default(false) }}"
-    ignore_away: "{{ ignore_away | default(false) }}"
-    save_message: "{{ save_message | default(is_state('binary_sensor.mobile_phone_in_use', 'on')) }}"
-    alert: "{{ alert | default(false) }}"
-    media_player:
-      > #TEMP shower speaker here until we figure out how to add to a group, will only play on shower speaker
-      {% if is_state('input_select.occupancy_mode', 'Night') %}
-        {% set tplayer = states('select.tts_media_player_night') %}
-      {% elif is_state('binary_sensor.quiet_time', 'on') %}
-        {% set tplayer = states('select.tts_media_player_quiet') %}
-      {% else %}
-        {% set tplayer = states('select.tts_media_player') %}
-      {% endif %}
-      {% set tplayer = expand('group.tts_media_players') | selectattr('name', 'eq', tplayer)
-          | map(attribute='entity_id') | join('') %}
-      {% if is_state('binary_sensor.wan', 'off') %} media_player.hass_media_player
-      {% elif is_state('switch.shower_scene','on') %} media_player.bathroom_speaker
-      {% elif states('select.tts_media_player_manual') != 'None Selected' %}
-        {{ expand('group.tts_media_players')
-            | selectattr('name', 'eq', states('select.tts_media_player_manual'))
-            | map(attribute='entity_id') | join('') }}
-      {% else %}
-        {% if media_player is defined %} {{ media_player }}
-        {% else %} {{ iif(alert, states('sensor.tts_alert_media_player'), tplayer) }}
-        {% endif %}
-      {% endif %}
-    tts_player: > #MASS change media player to mass player
-      {% set mass = media_player ~ '_2' %}
-      {{ iif(has_value(mass), mass, media_player) }}
-    media_players: >
-      {% set media_players = expand(state_attr('sensor.' ~ media_player.split('.')[1], 'entity_id')
-          if is_state_attr(media_player, 'type', 'group') else [media_player])
-          | map(attribute='entity_id') | list %}
-      {{ media_players }}
-    tts_service: > # force local tts service if wan disconnected
-      {% set manual = states('input_select.tts_service_manual') %}
-      {% if is_state('binary_sensor.wan', 'off') %} {% set tts_provider = 'Piper TTS' %}
-      {% elif manual != 'None Selected' %} {% set tts_provider = manual %}
-      {% elif tts_provider is not defined %}
-        {% if alert %} {% set tts_provider = 'Nabu Casa' %}
-        {% elif is_state('input_select.occupancy_mode', 'Night') %}
-          {% set tts_provider = states('input_select.tts_service_night') %}
-        {% elif is_state('binary_sensor.quiet_time', 'on') %}
-          {% set tts_provider = states('input_select.tts_service_quiet') %}
-        {% else %}
-          {% set tts_provider = states('input_select.tts_service') %}
-        {% endif %}
-      {% endif %}
-      {% if tts_provider == 'Piper TTS' %} tts.piper
-      {% elif tts_provider == 'Google Cloud' %} tts.google_cloud_say
-      {% elif tts_provider == 'Nabu Casa' %} tts.cloud_say
-      {% elif tts_provider == 'Broadcast' %} broadcast
-      {% else %} tts.cloud_say
-      {% endif %}
-    volume: >
-      {% if tts_volume is defined %}
-        {% set volume = tts_volume | int %}
-      {% elif states('input_number.tts_volume_manual') | int > 0 %}
-        {% set volume = states('input_number.tts_volume_manual') | int %}
-      {% elif alert %}
-        {% set volume = states('input_number.tts_volume_alert') | int %}
-      {% elif is_state('input_select.occupancy_mode', 'Night') %}
-        {% set volume = states('input_number.tts_volume_night') | int %}
-      {% elif is_state('binary_sensor.quiet_time', 'on') %}
-        {% set volume = states('input_number.tts_volume_quiet') | int %}
-      {% else %}
-        {% set volume = states('input_number.tts_volume') | int %}
-      {% endif %}
-      {{ min_volume / 100 if min_volume > -1 and (min_volume > volume) else volume / 100 }}
-    mute_tts: >
-      {% if media_players | count == 0 or volume == 0 %}
-        {{ true }}
-      {% elif is_state('switch.system_mute', 'on') %}
-        {{ iif(alert,false,true) }}
-      {% else %}
-        {{ false if (alert or always_play)
-            else is_state('binary_sensor.mobile_phone_in_use', 'on')
-            or is_state('input_boolean.alarm_triggered', 'on')
-            or (is_state('binary_sensor.scene_active', 'on'))
-            or (is_state('input_select.occupancy_mode', 'Night'))
-            or (is_state('binary_sensor.quiet_time', 'on') and not quiet_play)
-            or (is_state('binary_sensor.someone_home', 'off') and not ignore_away) }}
-      {% endif %}
   sequence:
     - condition: state
       entity_id: input_boolean.tts_enabled
@@ -135,6 +52,96 @@ tts_play:
     - service: script.turn_off
       target:
         entity_id: script.tts_finished
+
+    - variables:
+        min_volume: "{{ min_volume | default(-1) | float }}"
+        quiet_play: "{{ quiet_play | default(false) }}"
+        always_play: "{{ always_play | default(false) }}"
+        ignore_away: "{{ ignore_away | default(false) }}"
+        save_message: "{{ save_message | default(is_state('binary_sensor.mobile_phone_in_use', 'on')) }}"
+        alert: "{{ alert | default(false) }}"
+        media_player:
+          > #TEMP shower speaker here until we figure out how to add to a group, will only play on shower speaker
+          {% if is_state('input_select.occupancy_mode', 'Night') %}
+            {% set tplayer = states('select.tts_media_player_night') %}
+          {% elif is_state('binary_sensor.quiet_time', 'on') %}
+            {% set tplayer = states('select.tts_media_player_quiet') %}
+          {% else %}
+            {% set tplayer = states('select.tts_media_player') %}
+          {% endif %}
+          {% set tplayer = expand('group.tts_media_players') | selectattr('name', 'eq', tplayer)
+              | map(attribute='entity_id') | join('') %}
+          {% if is_state('binary_sensor.wan', 'off') %} media_player.hass_media_player
+          {% elif states('select.tts_media_player_override') != 'None Selected' %}
+            {{ expand('group.tts_media_players')
+                | selectattr('name', 'eq', states('select.tts_media_player_override'))
+                | map(attribute='entity_id') | join('') }}
+          {% elif is_state('switch.shower_scene','on') %} media_player.bathroom_speaker
+          {% else %}
+            {% if media_player is defined %} {{ media_player }}
+            {% else %} {{ iif(alert, states('sensor.tts_alert_media_player'), tplayer) }}
+            {% endif %}
+          {% endif %}
+        tts_player:
+          > #MASS change media player to mass player # mass = media_player ~ '_2'
+          {% set mass = media_player %}
+          {{ iif(has_value(mass), mass, media_player) }}
+        media_players: >
+          {% set media_players = expand(state_attr('sensor.' ~ media_player.split('.')[1], 'entity_id')
+              if is_state_attr(media_player, 'type', 'group') else [media_player])
+              | map(attribute='entity_id') | list %}
+          {{ media_players }}
+        tts_service: > # force local tts service if wan disconnected
+          {% set manual = states('input_select.tts_service_override') %}
+          {% if is_state('binary_sensor.wan', 'off') %} {% set provider = 'Piper TTS' %}
+          {% elif manual != 'None Selected' %} {% set provider = manual %}
+          {% elif provider is not defined %}
+            {% if alert %} {% set provider = 'HASS Cloud' %}
+            {% elif is_state('input_select.occupancy_mode', 'Night') %}
+              {% set provider = states('input_select.tts_service_night') %}
+            {% elif is_state('binary_sensor.quiet_time', 'on') %}
+              {% set provider = states('input_select.tts_service_quiet') %}
+            {% else %}
+              {% set provider = states('input_select.tts_service') %}
+            {% endif %}
+          {% endif %}
+          {% if provider == 'Piper TTS' %} tts.piper
+          {% elif provider == 'Google Cloud' %} tts.google_cloud_say
+          {% elif provider == 'HASS Cloud' %} tts.cloud_say
+          {% elif provider == 'Broadcast' %} broadcast
+          {% else %} tts.cloud_say
+          {% endif %}
+        tts_volume: >
+          {% if states('input_number.tts_volume_override') | int > 0 %}
+            {{ states('input_number.tts_volume_override') | int / 100 }}
+          {% else %}
+            {% if volume is defined %}
+              {% set tts_vol = volume | int(-1) %}
+            {% elif alert %}
+              {% set tts_vol = states('input_number.tts_volume_alert') | int %}
+            {% elif is_state('input_select.occupancy_mode', 'Night') %}
+              {% set tts_vol = states('input_number.tts_volume_night') | int %}
+            {% elif is_state('binary_sensor.quiet_time', 'on') %}
+              {% set tts_vol = states('input_number.tts_volume_quiet') | int %}
+            {% else %}
+              {% set tts_vol = states('input_number.tts_volume') | int %}
+            {% endif %}
+            {{ min_volume / 100 if min_volume > -1 and (min_volume > tts_vol) else tts_vol / 100 }}
+          {% endif %}
+        mute_tts: >
+          {% if media_players | count == 0 or tts_volume == 0 %}
+            {{ true }}
+          {% elif is_state('switch.system_mute', 'on') %}
+            {{ iif(alert,false,true) }}
+          {% else %}
+            {{ false if (alert or always_play)
+                else is_state('binary_sensor.mobile_phone_in_use', 'on')
+                or is_state('input_boolean.alarm_triggered', 'on')
+                or (is_state('binary_sensor.scene_active', 'on'))
+                or (is_state('input_select.occupancy_mode', 'Night'))
+                or (is_state('binary_sensor.quiet_time', 'on') and not quiet_play)
+                or (is_state('binary_sensor.someone_home', 'off') and not ignore_away) }}
+          {% endif %}
 
     - if: "{{ not message is defined }}"
       then:
@@ -206,7 +213,7 @@ tts_play:
                       | selectattr('entity_id', 'eq', media_player)
                       | map(attribute='name') | join }}
 
-            - delay: 10 # keep script running for a few seconds
+            - delay: 10 # hack - keep script running for a few seconds, 10 avg tts length
       default:
         # store tts player for tts sensor
         - service: input_text.set_value
@@ -295,7 +302,7 @@ tts_play:
             entity_id: input_boolean.tts
 
         # avoid google bloops - must be called every time in case subsequent iterations are on different media players
-        - service: script.turn_media_player_on #TEST
+        - service: script.turn_media_player_on
           data:
             entity_id: "{{ media_player }}"
           continue_on_error: true
@@ -319,7 +326,7 @@ tts_play:
           target:
             entity_id: "{{ active_players }}"
           data:
-            volume_level: "{{ volume }}"
+            volume_level: "{{ tts_volume }}"
           continue_on_error: true
 
         # volume exceptions - skip exceptions if alert (use alert volume)
@@ -343,38 +350,46 @@ tts_play:
             - conditions: "{{ tts_service == 'tts.cloud_say' }}"
               sequence:
                 - variables:
-                    voice: >
-                      {% if states('input_select.tts_service_manual') == 'Nabu Casa' %}
-                        {% set voice = states('input_select.tts_cloud_voice_manual') %}
-                      {% elif tts_voice is defined %}
-                        {% set voice = tts_voice %}
+                    language: >
+                      {% from 'tts.jinja' import hass_cloud_language %}
+                      {% if states('input_select.tts_service_override') == 'HASS Cloud' %}
+                        {% set tts_lang = states('input_select.hass_cloud_language_override') %}
+                      {% elif language is defined %}
+                        {% set tts_lang = hass_cloud_language(language) %}
                       {% elif alert %}
-                        {% set voice = 'English (United States) en-US Male' %}
+                        {% set tts_lang = states('input_select.hass_cloud_language_alert') %}
                       {% elif is_state('input_select.occupancy_mode', 'Night') %}
-                        {% set voice = states('input_select.tts_cloud_voice_night') %}
+                        {% set tts_lang = states('input_select.hass_cloud_language_night') %}
                       {% elif is_state('binary_sensor.quiet_time', 'on') %}
-                        {% set voice = states('input_select.tts_cloud_voice_quiet') %}
+                        {% set tts_lang = states('input_select.hass_cloud_language_quiet') %}
                       {% else %}
-                        {% set voice = states('input_select.tts_cloud_voice') %}
+                        {% set tts_lang = states('input_select.hass_cloud_language') %}
                       {% endif %}
-                      {{ voice }}
+                      {{ hass_cloud_language(tts_lang) }}
+                    voice: >
+                      {% if states('input_select.tts_service_override') == 'HASS Cloud' %}
+                        {% set tts_voice = states('select.hass_cloud_voice_override') %}
+                      {% elif voice is defined %}
+                        {% set tts_voice = voice %}
+                      {% elif alert %}
+                        {% set tts_voice = states('select.hass_cloud_voice_alert') %}
+                      {% elif is_state('input_select.occupancy_mode', 'Night') %}
+                        {% set tts_voice = states('select.hass_cloud_voice_night') %}
+                      {% elif is_state('binary_sensor.quiet_time', 'on') %}
+                        {% set tts_voice = states('select.hass_cloud_voice_quiet') %}
+                      {% else %}
+                        {% set tts_voice = states('select.hass_cloud_voice') %}
+                      {% endif %}
+                      {{ tts_voice ~ 'Neural' }}
 
                 - service: tts.cloud_say
                   target:
-                    entity_id: "{{ media_player }}" #MASS #TEST tts_player
+                    entity_id: "{{ tts_player }}"
                   data:
                     message: "{{ message }}"
-                    language: >
-                      {% if 'en-AU' in voice %} en-AU
-                      {% elif 'en-CA' in voice %} en-CA
-                      {% elif 'en-IN' in voice %} en-IN
-                      {% elif 'en-IE' in voice %} en-IE
-                      {% elif 'en-GB' in voice %} en-GB
-                      {% elif 'en-US' in voice %} en-US
-                      {% else %} en-CA
-                      {% endif %}
+                    language: "{{ language }}"
                     options:
-                      gender: "{{ iif('female' in voice | lower, 'female', 'male') }}"
+                      voice: "{{ voice }}"
                   continue_on_error: true
 
             - conditions: "{{ tts_service == 'tts.piper' }}"
@@ -382,20 +397,21 @@ tts_play:
                 - service: tts.speak
                   data:
                     cache: true
-                    media_player_entity_id: "{{ media_player }}" #MASS #TEST tts_player
+                    media_player_entity_id: "{{ tts_player }}"
                     message: "{{ message }}"
                   target:
                     entity_id: tts.piper
           default:
             - service: "{{ tts_service }}"
               target:
-                entity_id: "{{ media_player }}" #MASS #TEST tts_player
+                entity_id: "{{ tts_player }}"
               data:
                 message: "{{ message }}"
               continue_on_error: true
 
-        #MASS #ISSUE if tts plays on mass player tts call does not release until message done playing
-        # this prevents testing for tts failed (done playing before wait_template)
+        #MASS #ISSUE if tts plays on mass player tts service call does not release until message done playing
+        # eliminates requiement for wait_template
+        # prevents ability to test for tts failed (player done playing before wait_template)
 
         - wait_template: >
             {% set media = state_attr(media_player, 'media_content_id')
@@ -430,14 +446,3 @@ tts_play:
                   tts_player: "{{ tts_player }}"
                   message: "{{ message }}"
               continue_on_error: true
-
-    # wait for media player to stop playing tts media
-    # - wait_template: > #TEST - use when using mass tts_player
-    #     {% set media = state_attr(media_player, 'media_content_id')
-    #         if state_attr(media_player, 'media_content_id') != none else '' %}
-    #     {{ (not media | contains('/tts_proxy')
-    #         and not media | contains('/announcement'))
-    #         or not states(media_player) in ['playing']
-    #         or is_state('input_boolean.tts', 'off') }}
-    #   timeout: 120 # longest possible tts message
-    #   continue_on_error: true
