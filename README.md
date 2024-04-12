@@ -36,6 +36,7 @@
 - Alarmo
 - Asus Router
 - Balboa
+- Blitzortung
 - Browser Mod
 - Composite Device Tracker
 - Fontawesome
@@ -99,9 +100,9 @@
 
 - alarm_control_panel - 3
 - alert - 101
-- automation - 313
-- binary_sensor - 482
-- button - 107
+- automation - 311
+- binary_sensor - 481
+- button - 108
 - calendar - 16
 - camera - 30
 - climate - 5
@@ -109,14 +110,14 @@
 - device_tracker - 75
 - event - 75
 - fan - 10
-- group - 65
+- group - 64
 - image - 21
 - input_boolean - 199
 - input_button - 2
 - input_datetime - 42
-- input_number - 191
-- input_select - 20
-- input_text - 45
+- input_number - 171
+- input_select - 21
+- input_text - 52
 - light - 54
 - lock - 4
 - media_player - 38
@@ -126,8 +127,8 @@
 - remote - 1
 - scene - 8
 - script - 73
-- select - 127
-- sensor - 1194
+- select - 132
+- sensor - 1190
 - siren - 2
 - stt - 1
 - sun - 1
@@ -137,7 +138,7 @@
 - tts - 2
 - update - 126
 - valve - 12
-- weather - 6
+- weather - 5
 - zone - 10
 
 ## TAGS USED IN CODE
