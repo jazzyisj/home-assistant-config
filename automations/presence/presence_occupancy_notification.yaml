@@ -26,7 +26,6 @@
             and now() - states.alarm_control_panel.master.last_changed
               < timedelta(seconds=run_delay) }}
       {% endif %}
-    #TODO race condition?
     zone: "{{ iif(trigger.id in ['armed', 'disarmed'], trigger.entity_id.split('.')[1], 'master') }}"
   trigger:
     - platform: state
@@ -41,10 +40,7 @@
 
     - platform: state
       id: armed
-      entity_id: &alarms
-        - alarm_control_panel.master
-        - alarm_control_panel.house
-        - alarm_control_panel.garage
+      entity_id: alarm_control_panel.master
       to:
         - armed_home
         - armed_night
@@ -52,8 +48,20 @@
         - armed_vacation
 
     - platform: state
+      id: armed
+      entity_id:
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+        - armed_vacation
+      for: 1 # force master trigger first if master changed
+
+    - platform: state
       id: disarmed
-      entity_id: *alarms
+      entity_id: alarm_control_panel.master
       to: disarmed
       from:
         - armed_home
@@ -62,6 +70,21 @@
         - armed_vacation
         - pending
         - triggered
+
+    - platform: state
+      id: disarmed
+      entity_id:
+        - alarm_control_panel.house
+        - alarm_control_panel.garage
+      to: disarmed
+      from:
+        - armed_home
+        - armed_night
+        - armed_away
+        - armed_vacation
+        - pending
+        - triggered
+      for: 1 # force master trigger first if master changed
   condition:
     - condition: template
       alias: "Occupancy override is off if occupancy trigger"
@@ -75,7 +98,10 @@
 
     - not:
         - condition: state
-          entity_id: *alarms
+          entity_id: &alarms
+            - alarm_control_panel.master
+            - alarm_control_panel.house
+            - alarm_control_panel.garage
           state: &bad_states
             - triggered
             - pending
@@ -103,8 +129,13 @@
                       {%- if occupancy_changed -%}
                       The house is now in {{ states('input_select.occupancy_mode') }} mode
                       {%- endif %}
-                      {%- if occupancy_changed and alarm_changed %}, and the{% elif occupancy_changed %}.{% elif alarm_changed %} The{% endif %}
-                      {%- if alarm_changed %} {{ iif(zone != 'master', zone, '') }} alarm is {{ states('sensor.' ~ zone ~ '_alarm_status') }}.{% endif %}
+                      {%- if occupancy_changed and alarm_changed %}, and the{% elif occupancy_changed %}.{% elif alarm_changed %} The {% endif %}
+                      {%- if alarm_changed %}
+                        {%- set other_zone = iif(zone == 'house','garage','house') %}
+                        {{- iif(zone != 'master', zone, '') }} alarm is {{ states('sensor.' ~ zone ~ '_alarm_status') }}
+                        {%- if zone != 'master' %}, and the {{ other_zone }} alarm is {{ states('sensor.' ~ other_zone ~ '_alarm_status') -}}{%- endif %}
+                        .
+                      {%- endif %}
                       {{ 'Personalized occupant automations are disabled in Guest mode.' if states('input_select.occupancy_mode') == 'Guest' }}
                     ignore_away: true
                     save_message: "{{ is_state('binary_sensor.mobile_phone_in_use','on') }}"
