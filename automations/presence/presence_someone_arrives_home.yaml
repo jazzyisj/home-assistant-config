@@ -9,6 +9,7 @@
     person: >
       {% from 'presence.jinja' import trigger_person %}
       {{ trigger_person(trigger) }}
+    first_home: "{{ state_attr('binary_sensor.someone_home', 'home') | count == 1 }}"
   trigger:
     - platform: state
       entity_id:
@@ -18,119 +19,97 @@
       not_from:
         - unknown
         - unavailable
+      for: 5 # allow first_home to calculate
   action:
-    - if: "{{ person != 'guest' }}"
+    - if: "{{ first_home }}"
       then:
-        - service: input_boolean.turn_off
+        - service: input_select.select_option
           target:
-            entity_id: "input_boolean.{{ person }}_almost_home"
-
-        - service: "notify.{{ person }}"
+            entity_id: input_select.occupancy_mode
           data:
-            message: clear_notification
-            data:
-              tag: "{{ person }}_heading_home"
+            option: >
+              {% from 'presence.jinja' import occupancy_mode %}
+              {{ occupancy_mode() }}
 
-        # update traffic sensors to ensure time to home is zeroed out
-        - service: script.update_traffic_sensors
-          continue_on_error: true
-
-    # clear last_person_to_arrive so last_changed attribute gets updated if even if value didn't change
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.last_person_to_arrive
-      data:
-        option: none
-
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.last_person_to_arrive
-      data:
-        option: "{{ person | title }}"
-
-    # if already in selected mode, state won't change, occupancy automations won't trigger
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.occupancy_mode
-      data:
-        option: >
-          {% from 'presence.jinja' import occupancy_mode %}
-          {{ occupancy_mode() }}
-
-    - if:
-        - condition: state
-          entity_id: input_boolean.occupancy_announcements
-          state: "on"
-      then:
-        - service: script.turn_on
-          target:
-            entity_id: script.tts_play
-          data:
-            variables:
-              save_message: false
-              message: "{{ 'A guest has arrived.' if person == 'guest' else person | title ~ ' is home' }}"
-          continue_on_error: true
-
-    - wait_for_trigger:
-        - platform: state
-          entity_id:
-            - binary_sensor.side_entrance_motion
-            - binary_sensor.side_door
-            - binary_sensor.front_door
-            - binary_sensor.back_door
-          to: "on"
-
-        - platform: state
-          entity_id:
-            - lock.side_door_lock
-            - lock.front_door_lock
-            - lock.back_door_lock
-          to: "unlocked"
-      timeout: 90
-
-    - delay: 30 # let person get in house
-
-    # only if person still home (may have come and gone)
-    - if:
-        - condition: template
-          alias: "Person is still home"
-          value_template: "{{ is_state('binary_sensor.' ~ person ~ '_home', 'on') }}"
-
-        - condition: state
-          entity_id: input_boolean.occupancy_announcements
-          state: "on"
-      then:
-        - service: script.turn_on
-          target:
-            entity_id: script.tts_play
-          data:
-            variables:
-              save_message: false
-              message: |
-                Good {{ states('sensor.tod_greeting') }} {{ person | title if person != 'guest' }}!
-                Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
-          continue_on_error: true
-
-        - delay: 1 # ensure welcome home before media plays
-
-        - if: "{{ state_attr('binary_sensor.someone_home', 'home') | count == 1 }}"
-          then:
-            - if:
-                - condition: numeric_state
-                  entity_id: sensor.tts_saved_messages
-                  above: 0
+    - parallel:
+        - sequence:
+            - if: "{{ person != 'guest' }}"
               then:
-                - service: script.tts_play_saved_messages
+                # clear last_person_to_arrive so last_changed attribute gets updated if even if value didn't change
+                - service: input_select.select_option
+                  target:
+                    entity_id: input_select.last_person_to_arrive
+                  data:
+                    option: none
+
+                - service: input_select.select_option
+                  target:
+                    entity_id: input_select.last_person_to_arrive
+                  data:
+                    option: "{{ person | title }}"
+
+                - service: input_boolean.turn_off
+                  target:
+                    entity_id: "input_boolean.{{ person }}_almost_home"
+
+                - service: "notify.{{ person }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ person }}_heading_home"
+
+                # update traffic sensors to ensure time to home is zeroed out
+                - service: script.update_traffic_sensors
                   continue_on_error: true
 
-                - delay: 1 # let saved messages start
-
-                - wait_template: "{{ is_state('script.tts_play_saved_messages', 'off') }}"
-                  timeout:
-                    minutes: 5
-
-            - if: "{{ is_state('input_boolean.media_preset_enabled_' ~ person, 'on') }}"
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.occupancy_announcements
+                  state: "on"
               then:
-                - service: script.media_play
+                - service: script.tts_play
                   data:
-                    preset: "{{ person }}"
+                    save_message: false
+                    message: "{{ 'A guest has arrived.' if person == 'guest' else person | title ~ ' is home' }}"
+                  continue_on_error: true
+
+            - delay: 90 # let person get in house
+
+            - if: # only if person still home (may have come and gone)
+                - condition: template
+                  alias: "Person is still home"
+                  value_template: "{{ is_state('binary_sensor.' ~ person ~ '_home', 'on') }}"
+              then:
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.occupancy_announcements
+                      state: "on"
+                  then:
+                    - service: script.tts_play
+                      data:
+                        save_message: false
+                        message: |
+                          Good {{ states('sensor.tod_greeting') }} {{ person | title if person != 'guest' }}!
+                          Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
+                      continue_on_error: true
+
+                - if: "{{ first_home }}"
+                  then:
+                    - if:
+                        - condition: numeric_state
+                          entity_id: sensor.tts_saved_messages
+                          above: 0
+                      then:
+                        - service: script.tts_play_saved_messages
+                          continue_on_error: true
+
+                        - wait_template: "{{ is_state('script.tts_play_saved_messages', 'off') }}"
+                          timeout:
+                            minutes: 5
+
+                    - if: "{{ is_state('input_boolean.media_preset_enabled_' ~ person, 'on') }}"
+                      then:
+                        - service: script.media_play
+                          data:
+                            preset: "{{ person }}"

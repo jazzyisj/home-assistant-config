@@ -1,4 +1,118 @@
 ###############################################################################
+## Schedule - Work Shift Auto Select
+###############################################################################
+- id: schedule_work_shift_auto_select
+  alias: "[Schedule] Work Shift Auto Select"
+  description: "Select today shift when calendar/selection changes."
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.startup_pending
+      to: "off"
+
+    - platform: state
+      entity_id:
+        - binary_sensor.google_calendar_connected
+        - binary_sensor.work_layoff
+        - binary_sensor.work_vacation
+        - binary_sensor.work_today
+        - binary_sensor.work_tomorrow
+        - input_boolean.work_schedule
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - platform: state
+      entity_id:
+        - calendar.days1
+        - calendar.days2
+        - calendar.afternoons1
+        - calendar.afternoons2
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      #MIDNIGHT delayed for day reset time, prevent bedtimes missed sunday night aft -> days
+      for: "{{ states('input_datetime.day_reset') }}"
+
+    - platform: state
+      entity_id: input_select.current_work_shift
+      to:
+      for: 1 # req or input_select won't update in UI
+
+    - platform: state
+      entity_id: input_boolean.work_shift_override
+      to: "off"
+  condition:
+    - condition: state
+      entity_id: input_boolean.work_shift_override
+      state: "off"
+  action:
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: >
+          {% if is_state('input_boolean.work_schedule', 'on') %}
+            {% if (is_state('input_boolean.work_today_on', 'on') or is_state('input_boolean.work_tomorrow_on', 'on'))
+                or (is_state('binary_sensor.work_layoff', 'off') and is_state('binary_sensor.work_vacation', 'off')) %}
+              {% if is_state('calendar.afternoons1', 'on') or is_state('calendar.afternoons2', 'on') %} Afternoons
+              {% elif is_state('calendar.days1', 'on') or is_state('calendar.days2', 'on') %} Days
+              {% else %} {{ states('input_select.current_work_shift') }}
+              {% endif %}
+            {% else %} Off
+            {% endif %}
+          {% else %} Off
+          {% endif %}
+
+###############################################################################
+## Schedule - Set Day Shift
+###############################################################################
+- id: schedule_set_day_shift
+  alias: "[Schedule] Set Day Shift"
+  description: "Set day work shift."
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: set_day_shift
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.work_shift_override
+
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: Days
+
+###############################################################################
+## Schedule - Set Afternoon Shift
+###############################################################################
+- id: schedule_set_afternoon_shift
+  alias: "[Schedule] Set Afternoon Shift"
+  description: "Set afternoon work shift."
+  trigger:
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: set_aft_shift
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.work_shift_override
+
+    - service: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: Afternoons
+
+###############################################################################
 ## Schedule - Work Schedule Changed
 ###############################################################################
 - id: schedule_work_schedule_changed
@@ -109,7 +223,6 @@
         - input_boolean.work_tomorrow_on
         - input_boolean.work_tomorrow_off
       to: "on"
-      for: 2 # allow for toggles
 
     - platform: state
       entity_id:
@@ -193,120 +306,6 @@
             entity_id: input_boolean.work_today_off
 
 ###############################################################################
-## Schedule - Work Shift Auto Select
-###############################################################################
-- id: schedule_work_shift_auto_select
-  alias: "[Schedule] Work Shift Auto Select"
-  description: "Select today shift when calendar/selection changes."
-  max_exceeded: silent
-  trigger:
-    - platform: state
-      entity_id:
-        - binary_sensor.google_calendar_connected
-        - binary_sensor.work_layoff
-        - binary_sensor.work_vacation
-        - input_boolean.work_schedule
-        - input_select.current_work_shift
-        - binary_sensor.work_today
-        - binary_sensor.work_tomorrow
-      to:
-        - "on"
-        - "off"
-      not_from:
-        - unknown
-        - unavailable
-      for: 2 # allow for toggles
-
-    - platform: state
-      entity_id:
-        - calendar.days1
-        - calendar.days2
-        - calendar.afternoons1
-        - calendar.afternoons2
-      to: "on"
-      not_from:
-        - unknown
-        - unavailable
-      #MIDNIGHT delayed for day reset time, prevent bedtimes missed sunday night aft -> days
-      for: "{{ states('input_datetime.day_reset') }}"
-
-    - platform: time
-      at: input_datetime.day_reset
-
-    - platform: state
-      entity_id: input_select.current_work_shift
-      to:
-
-    - platform: state
-      entity_id: input_boolean.work_shift_override
-      to: "off"
-  condition:
-    - condition: state
-      entity_id: input_boolean.work_shift_override
-      state: "off"
-  action:
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.current_work_shift
-      data:
-        option: >
-          {% if is_state('input_boolean.work_schedule', 'on') %}
-            {% if (is_state('input_boolean.work_today_on', 'on') or is_state('input_boolean.work_tomorrow_on', 'on'))
-                or (is_state('binary_sensor.work_layoff', 'off') and is_state('binary_sensor.work_vacation', 'off')) %}
-              {% if is_state('calendar.afternoons1', 'on') or is_state('calendar.afternoons2', 'on') %} Afternoons
-              {% elif is_state('calendar.days1', 'on') or is_state('calendar.days2', 'on') %} Days
-              {% else %} {{ states('input_select.current_work_shift') }}
-              {% endif %}
-            {% else %} Off
-            {% endif %}
-          {% else %} Off
-          {% endif %}
-
-###############################################################################
-## Schedule - Set Day Shift
-###############################################################################
-- id: schedule_set_day_shift
-  alias: "[Schedule] Set Day Shift"
-  description: "Set day work shift."
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: set_day_shift
-  action:
-    - service: input_boolean.turn_on
-      target:
-        entity_id: input_boolean.work_shift_override
-
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.current_work_shift
-      data:
-        option: Days
-
-###############################################################################
-## Schedule - Set Afternoon Shift
-###############################################################################
-- id: schedule_set_afternoon_shift
-  alias: "[Schedule] Set Afternoon Shift"
-  description: "Set afternoon work shift."
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: set_aft_shift
-  action:
-    - service: input_boolean.turn_on
-      target:
-        entity_id: input_boolean.work_shift_override
-
-    - service: input_select.select_option
-      target:
-        entity_id: input_select.current_work_shift
-      data:
-        option: Afternoons
-
-###############################################################################
 ## Schedule - Reset Work Today Off
 ###############################################################################
 - id: schedule_reset_work_today_off
@@ -319,7 +318,6 @@
     - platform: state
       entity_id: input_boolean.work_today_on
       to: "on"
-      for: 2 # allow for toggles
   condition:
     - condition: state
       entity_id:
@@ -348,7 +346,6 @@
     - platform: state
       entity_id: input_boolean.work_tomorrow_on
       to: "on"
-      for: 2 # allow for toggles
   condition:
     - condition: state
       entity_id: input_boolean.work_tomorrow_off
@@ -381,7 +378,6 @@
     - platform: state
       entity_id: input_boolean.work_today_off
       to: "on"
-      for: 2 # allow for toggles
   condition:
     - condition: state
       entity_id: input_boolean.work_today_on
@@ -408,7 +404,6 @@
     - platform: state
       entity_id: input_boolean.work_tomorrow_off
       to: "on"
-      for: 2 # allow for toggles
   condition:
     - condition: state
       entity_id: input_boolean.work_tomorrow_on

@@ -49,6 +49,7 @@ tts_play:
       entity_id: input_boolean.tts_enabled
       state: "on"
 
+    # turn tts_finished off so input_boolean.tts doesn't get turned off
     - service: script.turn_off
       target:
         entity_id: script.tts_finished
@@ -82,15 +83,15 @@ tts_play:
             {% else %} {{ iif(alert, states('sensor.tts_alert_media_player'), tplayer) }}
             {% endif %}
           {% endif %}
-        tts_player:
-          > #MASS change media player to mass player # mass = media_player ~ '_2'
-          {% set mass = media_player %}
-          {{ iif(has_value(mass), mass, media_player) }}
         media_players: >
           {% set media_players = expand(state_attr('sensor.' ~ media_player.split('.')[1], 'entity_id')
               if is_state_attr(media_player, 'type', 'group') else [media_player])
               | map(attribute='entity_id') | list %}
           {{ media_players }}
+        mass_player: > #MASS use mass player for tts play
+          {{ expand('group.mass_media_players')
+              | selectattr('name', 'eq', state_attr(media_player,'friendly_name'))
+              | map(attribute='entity_id') | list }}
         tts_service: > # force local tts service if wan disconnected
           {% set manual = states('input_select.tts_service_override') %}
           {% if is_state('binary_sensor.wan', 'off') %} {% set provider = 'Piper TTS' %}
@@ -152,7 +153,7 @@ tts_play:
             variables:
               tts_service: "{{ tts_service }}"
               media_player: "{{ media_player }}"
-              tts_player: "{{ tts_player }}"
+              mass_player: "{{ mass_player }}"
               message: "ERROR - Message not defined"
           continue_on_error: true
 
@@ -209,11 +210,11 @@ tts_play:
               data:
                 message: "{{ message }}"
                 target: >
-                  {{ states.media_player
+                  {{ expand('group.tts_media_players')
                       | selectattr('entity_id', 'eq', media_player)
                       | map(attribute='name') | join }}
 
-            - delay: 10 # hack - keep script running for a few seconds, 10 avg tts length
+            - delay: 10 #ISSUE hack - keep script running for a few seconds, 10 avg tts length
       default:
         # store tts player for tts sensor
         - service: input_text.set_value
@@ -222,230 +223,122 @@ tts_play:
           data:
             value: "{{ media_player }}"
 
-        # if no delay mass_queues evaluates before tts_active_media_player state changes
-        - delay: 1
-
         - service: input_boolean.turn_off
           target:
             entity_id: input_boolean.tts_muted
 
         - if: "{{ is_state('input_boolean.tts','off') }}"
           then:
-            - if:
-                - condition: state
-                  entity_id: binary_sensor.mass_media
-                  state: "on"
+            - service: script.media_player_set_volumes
+              data:
+                source: tts_all # lower active media player volumes for tts
+              continue_on_error: true
 
-                #MASS #ISSUE if second + iteration on different mass speakers queue not saved
-                - condition: state
-                  entity_id: input_boolean.resume_mass
-                  state: "off"
-              then:
-                - variables:
-                    mass_queues: >
-                      {% set mass_queues = namespace(entity_id=[]) %}
-                      {% set mass_players =  expand('group.mass_media_players')
-                          | selectattr('state', 'in', ['playing', 'paused', 'buffering', 'on'])
-                          | map(attribute='entity_id') | list %}
-                      {% if mass_players | count > 0 %}
-                        {% for player in expand(mass_players) %}
-                          {% if player.attributes.mass_player_id == player.attributes.active_queue %}
-                          {% set hass_player = player.entity_id | replace('_2', '') %}
-                            {% if is_state_attr(hass_player, 'type', 'group') %}
-                              {% set tts_group = state_attr('sensor.' ~ hass_player.split('.')[1], 'entity_id') %}
-                              {% for item in tts_group %}
-                                {% if item == states('sensor.tts_active_media_player')
-                                    or item in state_attr('sensor.tts_active_media_player', 'entity_id') %}
-                                  {% set mass_queues.entity_id = mass_queues.entity_id + [player.entity_id] %}
-                                {% endif %}
-                              {% endfor %}
-                            {% else %}
-                              {% if hass_player == states('sensor.tts_active_media_player')
-                                  or hass_player in state_attr('sensor.tts_active_media_player', 'entity_id') %}
-                                {% set mass_queues.entity_id = mass_queues.entity_id + [player.entity_id] %}
+            # turn boolean on to start announcement queue
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.tts
+
+        - if: "{{ is_state('binary_sensor.mass_media','off') }}"
+          then:
+            # avoid google bloops - must be called every time in case subsequent iterations are on different media players
+            - service: script.turn_media_player_on
+              data:
+                entity_id: "{{ media_player }}"
+              continue_on_error: true
+
+        - parallel:
+            - sequence:
+                - choose:
+                    - conditions: "{{ tts_service == 'tts.cloud_say' }}"
+                      sequence:
+                        - variables:
+                            language: >
+                              {% from 'tts.jinja' import hass_cloud_language %}
+                              {% if states('input_select.tts_service_override') == 'HASS Cloud' %}
+                                {% set tts_lang = states('input_select.hass_cloud_language_override') %}
+                              {% elif language is defined %}
+                                {% set tts_lang = hass_cloud_language(language) %}
+                              {% elif alert %}
+                                {% set tts_lang = states('input_select.hass_cloud_language_alert') %}
+                              {% elif is_state('input_select.occupancy_mode', 'Night') %}
+                                {% set tts_lang = states('input_select.hass_cloud_language_night') %}
+                              {% elif is_state('binary_sensor.quiet_time', 'on') %}
+                                {% set tts_lang = states('input_select.hass_cloud_language_quiet') %}
+                              {% else %}
+                                {% set tts_lang = states('input_select.hass_cloud_language') %}
                               {% endif %}
-                            {% endif %}
-                          {% endif %}
-                        {% endfor %}
-                      {% endif %}
-                      {{ mass_queues.entity_id | unique | list }}
+                              {{ hass_cloud_language(tts_lang) }}
+                            voice: >
+                              {% if states('input_select.tts_service_override') == 'HASS Cloud' %}
+                                {% set tts_voice = states('select.hass_cloud_voice_override') %}
+                              {% elif voice is defined %}
+                                {% set tts_voice = voice %}
+                              {% elif alert %}
+                                {% set tts_voice = states('select.hass_cloud_voice_alert') %}
+                              {% elif is_state('input_select.occupancy_mode', 'Night') %}
+                                {% set tts_voice = states('select.hass_cloud_voice_night') %}
+                              {% elif is_state('binary_sensor.quiet_time', 'on') %}
+                                {% set tts_voice = states('select.hass_cloud_voice_quiet') %}
+                              {% else %}
+                                {% set tts_voice = states('select.hass_cloud_voice') %}
+                              {% endif %}
+                              {{ tts_voice ~ 'Neural' }}
 
-                #MASS media playing on tts player
-                - condition: template
-                  value_template: "{{ mass_queues | count > 0 }}"
+                        - service: tts.cloud_say
+                          target:
+                            entity_id: "{{ mass_player }}"
+                          data:
+                            message: "{{ message }}"
+                            language: "{{ language }}"
+                            options:
+                              voice: "{{ voice }}"
+                          continue_on_error: true
 
-                # store active mass players for tts queue finished
-                - service: input_text.set_value
-                  target:
-                    entity_id: input_text.tts_restore_mass
-                  data:
-                    value: "{{ mass_queues | join(', ') }}"
+                    - conditions: "{{ tts_service == 'tts.piper' }}"
+                      sequence:
+                        - service: tts.speak
+                          data:
+                            cache: true
+                            media_player_entity_id: "{{ mass_player }}"
+                            message: "{{ message }}"
+                          target:
+                            entity_id: tts.piper
+                  default:
+                    - service: "{{ tts_service }}"
+                      target:
+                        entity_id: "{{ mass_player }}"
+                      data:
+                        message: "{{ message }}"
+                      continue_on_error: true
 
-                - service: input_boolean.turn_on
-                  target:
-                    entity_id: input_boolean.resume_mass
-
-                # create queue snapshot for mass players #DISABLED until #MASS tts working
-                # - repeat:
-                #     for_each: "{{ mass_queues }}"
-                #     sequence:
-                #       - service: mass.queue_command
-                #         data:
-                #           player_id: "{{ mass_queues[repeat.index-1] }}"
-                #           command: snapshot_create
-
-                - service: script.media_player_set_volumes
-                  data:
-                    source: tts_all # lower active media player volumes for tts
-                  continue_on_error: true
-
-        # turn boolean on to start announcement queue
-        - service: input_boolean.turn_on
-          target:
-            entity_id: input_boolean.tts
-
-        # avoid google bloops - must be called every time in case subsequent iterations are on different media players
-        - service: script.turn_media_player_on
-          data:
-            entity_id: "{{ media_player }}"
-          continue_on_error: true
-
-        # avoid jump in active media volumes when tts volume set
-        - service: script.media_players_pause
-          data:
-            entity_id: "{{ media_player }}"
-          continue_on_error: true
-
-        # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
-        - variables:
-            active_players: >
-              {% set muted_players = expand(media_players) | selectattr('attributes.is_volume_muted', 'defined')
-                  | selectattr('attributes.is_volume_muted', 'eq', true) | map(attribute='entity_id') | list %}
-              {{ expand(media_players) | rejectattr('entity_id', 'in', muted_players) | map(attribute='entity_id') | list }}
-
-        # set volume before player override volumes
-        #ISSUE no way to avoid google home volume pops here
-        - service: media_player.volume_set
-          target:
-            entity_id: "{{ active_players }}"
-          data:
-            volume_level: "{{ tts_volume }}"
-          continue_on_error: true
-
-        # volume exceptions - skip exceptions if alert (use alert volume)
-        - if: "{{ not alert }}"
-          then:
-            # increase bathroom speaker volume if shower script is on
-            - if: >
-                {{ 'media_player.bathroom_speaker' in active_players
-                      and is_state('switch.shower_scene', 'on') }}
-              then:
-                - service: media_player.volume_set
-                  target:
-                    entity_id: media_player.bathroom_speaker
-                  data:
-                    volume_level: "{{ iif(is_state('binary_sensor.quiet_time', 'off'), 1, 0.8) }}"
-
-        - delay: 1 # allow volumes to adjust
-
-        # play tts message
-        - choose:
-            - conditions: "{{ tts_service == 'tts.cloud_say' }}"
-              sequence:
+            - sequence:
+                # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
                 - variables:
-                    language: >
-                      {% from 'tts.jinja' import hass_cloud_language %}
-                      {% if states('input_select.tts_service_override') == 'HASS Cloud' %}
-                        {% set tts_lang = states('input_select.hass_cloud_language_override') %}
-                      {% elif language is defined %}
-                        {% set tts_lang = hass_cloud_language(language) %}
-                      {% elif alert %}
-                        {% set tts_lang = states('input_select.hass_cloud_language_alert') %}
-                      {% elif is_state('input_select.occupancy_mode', 'Night') %}
-                        {% set tts_lang = states('input_select.hass_cloud_language_night') %}
-                      {% elif is_state('binary_sensor.quiet_time', 'on') %}
-                        {% set tts_lang = states('input_select.hass_cloud_language_quiet') %}
-                      {% else %}
-                        {% set tts_lang = states('input_select.hass_cloud_language') %}
-                      {% endif %}
-                      {{ hass_cloud_language(tts_lang) }}
-                    voice: >
-                      {% if states('input_select.tts_service_override') == 'HASS Cloud' %}
-                        {% set tts_voice = states('select.hass_cloud_voice_override') %}
-                      {% elif voice is defined %}
-                        {% set tts_voice = voice %}
-                      {% elif alert %}
-                        {% set tts_voice = states('select.hass_cloud_voice_alert') %}
-                      {% elif is_state('input_select.occupancy_mode', 'Night') %}
-                        {% set tts_voice = states('select.hass_cloud_voice_night') %}
-                      {% elif is_state('binary_sensor.quiet_time', 'on') %}
-                        {% set tts_voice = states('select.hass_cloud_voice_quiet') %}
-                      {% else %}
-                        {% set tts_voice = states('select.hass_cloud_voice') %}
-                      {% endif %}
-                      {{ tts_voice ~ 'Neural' }}
+                    active_players: >
+                      {% set muted_players = expand(media_players) | selectattr('attributes.is_volume_muted', 'defined')
+                          | selectattr('attributes.is_volume_muted', 'eq', true) | map(attribute='entity_id') | list %}
+                      {{ expand(media_players) | rejectattr('entity_id', 'in', muted_players) | map(attribute='entity_id') | list }}
 
-                - service: tts.cloud_say
-                  target:
-                    entity_id: "{{ tts_player }}"
-                  data:
-                    message: "{{ message }}"
-                    language: "{{ language }}"
-                    options:
-                      voice: "{{ voice }}"
-                  continue_on_error: true
+                # # set main volume before player volume exceptions
+                # #ISSUE no way to avoid google home volume pops here
+                # - service: media_player.volume_set
+                #   target:
+                #     entity_id: "{{ active_players }}"
+                #   data:
+                #     volume_level: "{{ tts_volume }}"
+                #   continue_on_error: true
 
-            - conditions: "{{ tts_service == 'tts.piper' }}"
-              sequence:
-                - service: tts.speak
-                  data:
-                    cache: true
-                    media_player_entity_id: "{{ tts_player }}"
-                    message: "{{ message }}"
-                  target:
-                    entity_id: tts.piper
-          default:
-            - service: "{{ tts_service }}"
-              target:
-                entity_id: "{{ tts_player }}"
-              data:
-                message: "{{ message }}"
-              continue_on_error: true
-
-        #MASS #ISSUE if tts plays on mass player tts service call does not release until message done playing
-        # eliminates requiement for wait_template
-        # prevents ability to test for tts failed (player done playing before wait_template)
-
-        - wait_template: >
-            {% set media = state_attr(media_player, 'media_content_id')
-                if state_attr(media_player, 'media_content_id') != none else '' %}
-            {{ ((media | contains('/tts_proxy')
-                or media | contains('/announcement'))
-                and states(media_player) in ['playing','buffering'])
-                or is_state('input_boolean.tts', 'off') }}
-          timeout: 60
-
-        # tts failed script if announcement is not playing after wait timeout
-        - if: "{{ wait.completed }}"
-          then:
-            # wait for media player to stop playing tts media
-            - wait_template: >
-                {% set media = state_attr(media_player, 'media_content_id')
-                    if state_attr(media_player, 'media_content_id') != none else '' %}
-                {{ (not media | contains('/tts_proxy')
-                    and not media | contains('/announcement'))
-                    or not states(media_player) in ['playing', 'buffering']
-                    or is_state('input_boolean.tts', 'off') }}
-              timeout: 120 # longest possible tts message
-              continue_on_error: true
-          else:
-            - service: script.turn_on
-              target:
-                entity_id: script.tts_failed
-              data:
-                variables:
-                  tts_service: "{{ tts_service }}"
-                  media_player: "{{ media_player }}"
-                  tts_player: "{{ tts_player }}"
-                  message: "{{ message }}"
-              continue_on_error: true
+                # # volume exceptions - skip exceptions if alert (use alert volume)
+                # - if: "{{ not alert }}"
+                #   then:
+                #     # increase bathroom speaker volume if shower script is on
+                #     - if: >
+                #         {{ 'media_player.bathroom_speaker' in active_players
+                #               and is_state('switch.shower_scene', 'on') }}
+                #       then:
+                #         - service: media_player.volume_set
+                #           target:
+                #             entity_id: media_player.bathroom_speaker
+                #           data:
+                #             volume_level: "{{ iif(is_state('binary_sensor.quiet_time', 'off'), 1, 0.8) }}"

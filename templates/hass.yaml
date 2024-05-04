@@ -8,8 +8,8 @@
     - platform: event
       event_type: event_template_reloaded
 
-    - platform: state
-      entity_id: sensor.time
+    - platform: time_pattern
+      minutes: "/1"
   binary_sensor:
     - name: "Github Connected"
       unique_id: github_connected
@@ -17,21 +17,104 @@
       device_class: connectivity
       state: "{{ integration_entities('github') | select('has_value') | list | count > 0 }}"
 
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id: sensor.time
-  binary_sensor:
     - name: "Uptime Robot Connected"
       unique_id: uptime_robot_connected
       picture: !secret UPTIME_ICON
       device_class: connectivity
       state: "{{ integration_entities('uptimerobot') | select('has_value') | list | count > 0 }}"
+
+    - name: "Disabled HASS Alerts"
+      unique_id: disabled_hass_alerts
+      icon: mdi:alert
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count > 0 and is_state('input_boolean.system_alerts', 'on')
+            if entities != none else none }}
+      attributes:
+        entity_id: >
+          {{ states.alert
+              | selectattr('attributes.category','in', ['hass','network','system','zwave','bluetooth'])
+              | selectattr('state', 'eq', 'off') | list }}
+
+    - name: "Low Battery Alert"
+      unique_id: low_battery_alert
+      icon: "{{ iif(is_state(this.entity_id, 'on'), 'mdi:battery-alert', 'mdi:battery-90') }}"
+      device_class: battery
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count > 0 and is_state('input_boolean.system_alerts', 'on')
+            if entities != none else none }}
+      attributes:
+        entity_id: >
+          {% set low_batteries = namespace(value=[]) %}
+          {% set low_batts = states.sensor
+              | selectattr('attributes.device_class', 'eq', 'battery')
+              | rejectattr('attributes.mobile', 'eq', true)
+              | map(attribute='entity_id') | list | sort %}
+          {% for item in low_batts %}
+            {% if states(item) == 'on' or (states(item) | int(-1) != -1 and states(item) | int(0)
+                < states('input_number.battery_alert_threshold') | int) %}
+              {% set low_batteries.value = low_batteries.value + [item] %}
+            {% endif %}
+          {% endfor %}
+          {{ low_batteries.value }}
+
+  sensor:
+    - name: "Offline Integrations"
+      unique_id: offline_integrations
+      icon: "{{ iif(states(this.entity_id) == '0', 'mdi:api', 'mdi:api-off') }}"
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count if entities != none else -1 }}
+      attributes:
+        entity_id: >
+          {{ expand('group.cloud_integrations') | selectattr('state', 'eq', 'off')
+              | map(attribute='entity_id') | list | sort }}
+
+    - name: "Available Updates"
+      unique_id: available_updates
+      icon: "{{ iif(states('sensor.available_updates') | int(-1) > 0, 'mdi:cloud-upload', 'mdi:cloud-check') }}"
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count if entities != none else -1 }}
+      attributes:
+        entity_id: "{{ states.update | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list | sort }}"
+
+    - name: "Unavailable Entities Filtered"
+      unique_id: unavailable_entities_filtered
+      icon: "{{ iif(states(this.entity_id) | int(-1) > 0, 'mdi:alert-circle', 'mdi:check-circle') }}"
+      state_class: measurement
+      state: >
+        {% set entities = state_attr(this.entity_id, 'entity_id') %}
+        {{ entities | count if entities != none else -1 }}
+      # attributes: #STATES
+      #   #TEMP exclude garage_inside_frigate - cam not working
+      #   #TEMP exclude disabled chromecast sensors
+      #   #TEMP exclude front_door_lock - lock not working
+      #   entity_id: >
+      #     {% set ignore_seconds = 60 %}
+      #     {% set ignored = state_attr('group.ignored_unavailable_entities', 'entity_id') %}
+      #     {% set ignore_ts = (now().timestamp() - ignore_seconds) | as_datetime %}
+      #     {% set entities = states
+      #         | selectattr('state', 'in', ['unknown', 'unavailable'])
+      #         | rejectattr('domain','in',['button', 'device_tracker', 'event', 'group', 'image', 'input_button', 'input_text', 'remote', 'tts', 'scene', 'stt'])
+      #         | rejectattr('entity_id', 'in', integration_entities('browser_mod'))
+      #         | rejectattr('entity_id', 'in', integration_entities('fully_kiosk'))
+      #         | rejectattr('entity_id', 'in', integration_entities('hassio'))
+      #         | rejectattr('entity_id', 'in', integration_entities('dlna_dmr'))
+      #         | rejectattr('entity_id', 'search', '_door_lock_intrusion|_door_lock_lock_jammed|_door_lock_keypad_temporary_disabled|_door_lock_system_hardware_failure')
+      #         | rejectattr('entity_id', 'contains', 'garage_inside_frigate')
+      #         | rejectattr('entity_id', 'contains', 'front_door_lock')
+      #         | rejectattr('entity_id', 'in', ['sensor.deck_chromecast', 'sensor.office_chromecast'])
+      #         | rejectattr('entity_id', 'contains', 'daily_energy_consumption')
+      #         | rejectattr('entity_id', 'contains', 'jason_laptop_media_player')
+      #         | rejectattr('entity_id', 'contains', 'jason_phone_media_player')
+      #         | rejectattr('entity_id', 'contains', 'jason_tablet_media_player')
+      #         | rejectattr('entity_id', 'search', 'charlie_crate_camera|charlie_crate_frigate|living_room_camera|living_room_frigate')
+      #         | rejectattr('entity_id', 'search', 'jphone_app|jtablet_app|jlaptop_chrome|jwork_chrome|_dlna|_timers|_alarms|_next_alarm')
+      #         | rejectattr('last_changed', 'ge', ignore_ts) %}
+      #     {% set entities =  entities | rejectattr('entity_id', 'in', ignored) if ignored != none else entities %}
+      #     {{ entities | map(attribute='entity_id') | list | sort }}
 
 - binary_sensor:
     - name: "Github Connected Alert"
@@ -104,42 +187,6 @@
             and is_state('input_boolean.hass_alerts', 'on')
             and is_state('input_boolean.startup_pending', 'off') }}
 
-    - name: "Low Battery Alert"
-      unique_id: low_battery_alert
-      icon: "{{ iif(is_state(this.entity_id, 'on'), 'mdi:battery-alert', 'mdi:battery-90') }}"
-      device_class: battery
-      state: >
-        {% set entities = state_attr(this.entity_id, 'entity_id') %}
-        {{ entities | count > 0 and is_state('input_boolean.system_alerts', 'on')
-            if entities != none else none }}
-      attributes:
-        entity_id: >
-          {% set low_batteries = namespace(value=[]) %}
-          {% set low_batts = states.sensor
-              | selectattr('attributes.device_class', 'eq', 'battery')
-              | rejectattr('attributes.mobile', 'eq', true)
-              | map(attribute='entity_id') | list | sort %}
-          {% for item in low_batts %}
-            {% if states(item) == 'on' or (states(item) | int(-1) != -1 and states(item) | int(0)
-                < states('input_number.battery_alert_threshold') | int) %}
-              {% set low_batteries.value = low_batteries.value + [item] %}
-            {% endif %}
-          {% endfor %}
-          {{ low_batteries.value }}
-
-    - name: "Disabled HASS Alerts"
-      unique_id: disabled_hass_alerts
-      icon: mdi:alert
-      state: >
-        {% set entities = state_attr(this.entity_id, 'entity_id') %}
-        {{ entities | count > 0 and is_state('input_boolean.system_alerts', 'on')
-            if entities != none else none }}
-      attributes:
-        entity_id: >
-          {{ states.alert
-              | selectattr('attributes.category','in', ['hass','network','system','zwave','bluetooth'])
-              | selectattr('state', 'eq', 'off') | list }}
-
     - name: "HASS LED Alert"
       unique_id: hass_led_alert
       state: >
@@ -151,62 +198,6 @@
             or is_state('binary_sensor.wan', 'off') }}
 
 - sensor:
-    - name: "Unavailable Entities Filtered"
-      unique_id: unavailable_entities_filtered
-      icon: "{{ iif(states(this.entity_id) | int(-1) > 0, 'mdi:alert-circle', 'mdi:check-circle') }}"
-      state_class: measurement
-      unit_of_measurement: entities
-      state: >
-        {% set entities = state_attr(this.entity_id, 'entity_id') %}
-        {{ entities | count if entities != none else -1 }}
-      attributes:
-        #TEMP exclude garage_inside_frigate - cam not working
-        #TEMP exclude disabled chromecast sensors
-        #TEMP exclude front_door_lock - lock not working
-        entity_id: >
-          {% set ignore_seconds = 60 %}
-          {% set ignored = state_attr('group.ignored_unavailable_entities', 'entity_id') %}
-          {% set ignore_ts = (now().timestamp() - ignore_seconds) | as_datetime %}
-          {% set entities = states
-              | rejectattr('domain','in',['button', 'device_tracker', 'event', 'group', 'image', 'input_button', 'input_text', 'remote', 'tts', 'scene', 'stt'])
-              | rejectattr('entity_id', 'in', integration_entities('browser_mod'))
-              | rejectattr('entity_id', 'in', integration_entities('fully_kiosk'))
-              | rejectattr('entity_id', 'in', integration_entities('hassio'))
-              | rejectattr('entity_id', 'in', integration_entities('dlna_dmr'))
-              | rejectattr('entity_id', 'search', '_door_lock_intrusion|_door_lock_lock_jammed|_door_lock_keypad_temporary_disabled|_door_lock_system_hardware_failure')
-              | rejectattr('entity_id', 'contains', 'garage_inside_frigate')
-              | rejectattr('entity_id', 'contains', 'front_door_lock')
-              | rejectattr('entity_id', 'in', ['sensor.deck_chromecast', 'sensor.office_chromecast'])
-              | rejectattr('entity_id', 'contains', 'daily_energy_consumption')
-              | rejectattr('entity_id', 'contains', 'jason_laptop_media_player')
-              | rejectattr('entity_id', 'contains', 'jason_phone_media_player')
-              | rejectattr('entity_id', 'contains', 'jason_tablet_media_player')
-              | rejectattr('entity_id', 'search', 'charlie_crate_camera|charlie_crate_frigate|living_room_camera|living_room_frigate')
-              | rejectattr('entity_id', 'search', 'jphone_app|jtablet_app|jlaptop_chrome|jwork_chrome|_dlna|_timers|_alarms|_next_alarm')
-              | rejectattr('last_changed', 'ge', ignore_ts) %}
-          {% set entities =  entities | rejectattr('entity_id', 'in', ignored) if ignored != none else entities %}
-          {{ entities | map(attribute='entity_id') | reject('has_value') | list | sort }}
-
-    - name: "Offline Integrations"
-      unique_id: offline_integrations
-      icon: "{{ iif(states(this.entity_id) == '0', 'mdi:api', 'mdi:api-off') }}"
-      state: >
-        {% set entities = state_attr(this.entity_id, 'entity_id') %}
-        {{ entities | count if entities != none else entities }}
-      attributes:
-        entity_id: >
-          {{ expand('group.cloud_integrations')
-              | selectattr('state', 'eq', 'off') | map(attribute='entity_id') | list | sort }}
-
-    - name: "Available Updates"
-      unique_id: available_updates
-      icon: "{{ iif(states('sensor.available_updates') | int(-1) > 0, 'mdi:cloud-upload', 'mdi:cloud-check') }}"
-      state: >
-        {% set entities = state_attr(this.entity_id, 'entity_id') %}
-        {{ entities | count if entities != none else entities }}
-      attributes:
-        entity_id: "{{ states.update | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | list | sort }}"
-
     - name: "Hass Status"
       unique_id: hass_status
       icon: mdi:home-assistant
@@ -340,28 +331,28 @@
       icon: mdi:monitor-cellphone
       state: >
         {% set entities = state_attr('sensor.connected_browsers', 'entity_id') %}
-        {{ entities | count if entities != none else entities }}
-      attributes:
-        entity_id: >
-          {{ states.sensor
-              | selectattr('entity_id', 'contains', '_browser_user')
-              | rejectattr('entity_id', 'contains', '_browser_useragent')
-              | map(attribute='entity_id')
-              | select('has_value') | list | sort }}
+        {{ entities | count if entities != none else -1 }}
+      # attributes: #STATES
+      #   entity_id: >
+      #     {{ states.sensor
+      #         | selectattr('entity_id', 'contains', '_browser_user')
+      #         | rejectattr('entity_id', 'contains', '_browser_useragent')
+      #         | map(attribute='entity_id')
+      #         | select('has_value') | list | sort }}
 
     - name: "Unknown Browsers"
       unique_id: unknown_browsers
       state: >
         {% set entities = state_attr('sensor.unknown_browsers', 'entity_id') %}
-        {{ entities | count if entities != none else entities }}
-      attributes:
-        entity_id: >
-          {{ states.sensor
-              | selectattr('entity_id', 'contains', '_browser_user')
-              | selectattr('attributes.authorized', 'defined')
-              | selectattr('attributes.authorized', 'ne', true)
-              | map(attribute='entity_id')
-              | select('has_value') | list | sort }}
+        {{ entities | count if entities != none else -1 }}
+      # attributes: #STATES
+      #   entity_id: >
+      #     {{ states.sensor
+      #         | selectattr('entity_id', 'contains', '_browser_user')
+      #         | selectattr('attributes.authorized', 'defined')
+      #         | selectattr('attributes.authorized', 'ne', true)
+      #         | map(attribute='entity_id')
+      #         | select('has_value') | list | sort }}
 
     - name: "HASS Addon Memory Percent"
       unique_id: hass_addon_memory_percent

@@ -24,6 +24,12 @@
       not_from:
         - unknown
         - unavailable
+
+    # req to update icon
+    - platform: state
+      entity_id: sensor.work_shift_today
+      to:
+      for: 1 # force icon update after sensor state change
   binary_sensor:
     - name: "Work Today"
       unique_id: work_today
@@ -69,6 +75,11 @@
         - unknown
         - unavailable
 
+    # req to update icon
+    - platform: state
+      entity_id: sensor.work_shift_tomorrow
+      to:
+      for: 1 # force icon update after sensor state change
   binary_sensor:
     - name: "Work Tomorrow"
       unique_id: work_tomorrow
@@ -76,6 +87,7 @@
         {% if states.sensor.work_shift_tomorrow.attributes is defined %}
           {{ states.sensor.work_shift_tomorrow.attributes.icon }}
         {% endif %}
+
       # holiday start within 1 day and holiday end > 1 day away
       # calendar dates not tz aware - use as_local to add tz
       state: >
@@ -145,41 +157,39 @@
     - name: "Work Shift Today"
       unique_id: work_shift_today
       icon: >
-        {% if is_state('sensor.work_shift_today', 'Days') %} mdi:alpha-d-circle
-        {% elif is_state('sensor.work_shift_today', 'Afternoons') %} mdi:alpha-a-circle
+        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
+        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
         {% else %} mdi:calendar-alert
         {% endif %}
       state: "{{ states('input_select.current_work_shift') }}"
 
+    #MIDNIGHT shift start time forward by day_reset time
     # check for next days/afternoons start to be less than 24 hours away (end not in past)
     # if today shift is off, tomorrow shift is off
     # calendar dates not tz aware - use as_local to add tz
     - name: "Work Shift Tomorrow"
       unique_id: work_shift_tomorrow
       icon: >
-        {% if is_state('sensor.work_shift_tomorrow', 'Days') %} mdi:alpha-d-circle
-        {% elif is_state('sensor.work_shift_tomorrow', 'Afternoons') %} mdi:alpha-a-circle
+        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
+        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
         {% else %} mdi:calendar-alert
         {% endif %}
       state: >
-        {% if is_state('input_boolean.work_shift_override', 'on') %}{{ states('input_select.current_work_shift') }}
+        {% if is_state('input_boolean.work_shift_override', 'on') %}
+          {{ states('input_select.current_work_shift') }}
         {% elif state_attr('calendar.days1', 'start_time') != none
-            and state_attr('calendar.days2', 'end_time') != none
-            and state_attr('calendar.afternoons1', 'start_time') != none
-            and state_attr('calendar.afternoons2', 'end_time') != none %}
-          {# calendar dates not tz aware #}
-          {% set days_start = state_attr('calendar.days1', 'start_time') | as_datetime | as_local %}
-          {% set afts_start = state_attr('calendar.afternoons1', 'start_time') | as_datetime | as_local %}
-          {% set days_end = state_attr('calendar.days2', 'end_time') | as_datetime | as_local %}
-          {% set afts_end = state_attr('calendar.afternoons2', 'end_time') | as_datetime | as_local %}
+              and state_attr('calendar.afternoons1', 'start_time') != none %}
           {% set day_reset = today_at(states('input_datetime.day_reset')) %}
-          {% if days_start - now() < timedelta(days=1, hours=day_reset.hour, minutes=day_reset.minute)
-              and days_end - now() > timedelta(days=1, hours=day_reset.hour, minutes=day_reset.minute) %} Days
-          {% elif afts_start - now() < timedelta(days=1, hours=day_reset.hour, minutes=day_reset.minute)
-              and afts_end - now() > timedelta(days=1, hours=day_reset.hour, minutes=day_reset.minute) %} Afternoons
+          {% set days_start = state_attr('calendar.days1', 'start_time') | as_datetime | as_local
+              + timedelta(hours=day_reset.hour, minutes=day_reset.minute) %}
+          {% set afts_start = state_attr('calendar.afternoons1', 'start_time') | as_datetime | as_local
+              + timedelta(hours=day_reset.hour, minutes=day_reset.minute) %}
+          {% if days_start - timedelta(days=1) < now() %} Days
+          {% elif afts_start - timedelta(days=1) < now() %} Afternoons
           {% else %}{{ states('sensor.work_shift_today') }}
           {% endif %}
-        {% else %}{{ states('sensor.work_shift_today') }}
+        {% else %}
+          {{ states('sensor.work_shift_today') }}
         {% endif %}
 
     # calendar dates not tz aware - use as_local to add tz
