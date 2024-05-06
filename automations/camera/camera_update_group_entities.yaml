@@ -32,6 +32,9 @@
         domain: group
         service: reload
 
+    - platform: time_pattern
+      minutes: "/15"
+
     - platform: state
       entity_id: &cameras
         - camera.side_drive_frigate
@@ -60,12 +63,6 @@
         - unavailable
       for: 60 # throttle
   action:
-    - if:
-        - condition: trigger
-          id: startup
-      then:
-        - delay: 60 # let devices come online
-
     - service: group.set
       data:
         object_id: indoor_cameras
@@ -87,10 +84,12 @@
     - service: group.set
       data:
         object_id: frigate_cameras
+        #TEMP exclude garage, wyze cams - not working, high cpu on wyze cams (indoor)
         entities: >
           {{ states.camera
               | selectattr('attributes.frigate', 'defined')
               | selectattr('attributes.frigate', 'eq', true)
+              | rejectattr('entity_id', 'in', ['camera.garage_inside_frigate', 'camera.charlie_crate_frigate', 'camera.living_room_frigate'])
               | map(attribute='entity_id') | list | sort }}
 
     - service: group.set
@@ -101,7 +100,7 @@
               | selectattr('domain', 'eq', 'switch')
               | selectattr('entity_id', 'contains', '_motion')
               | rejectattr('entity_id', 'search', 'charlie_crate|living_room')
-              | map(attribute="entity_id") | select('has_value') | list }}
+              | map(attribute="entity_id") | select('has_value') | list | sort }}
 
     - service: group.set
       data:
@@ -111,7 +110,7 @@
               | selectattr('domain', 'eq', 'switch')
               | selectattr('entity_id', 'contains', '_detect')
               | rejectattr('entity_id', 'search', 'charlie_crate|living_room')
-              | map(attribute="entity_id") | select('has_value') | list }}
+              | map(attribute="entity_id") | select('has_value') | list | sort }}
 
     - service: group.set
       data:
@@ -121,7 +120,7 @@
               | selectattr('domain', 'eq', 'switch')
               | selectattr('entity_id', 'contains', '_snapshots')
               | rejectattr('entity_id', 'search', 'charlie_crate|living_room')
-              | map(attribute="entity_id") | select('has_value') | list }}
+              | map(attribute="entity_id") | select('has_value') | list | sort }}
 
     - service: group.set
       data:
@@ -131,7 +130,7 @@
               | selectattr('domain', 'eq', 'switch')
               | selectattr('entity_id', 'contains', '_recordings')
               | rejectattr('entity_id', 'search', 'charlie_crate|living_room')
-              | map(attribute="entity_id") | select('has_value') | list }}
+              | map(attribute="entity_id") | select('has_value') | list | sort }}
 
     - service: group.set
       data:
@@ -141,4 +140,23 @@
               | selectattr('domain', 'eq', 'switch')
               | selectattr('entity_id', 'contains', '_improve_contrast')
               | rejectattr('entity_id', 'search', 'charlie_crate|living_room')
-              | map(attribute="entity_id") | select('has_value') | list }}
+              | map(attribute="entity_id") | select('has_value') | list | sort }}
+
+    - service: group.set
+      data:
+        object_id: frigate_all_count_sensors
+        entities: >
+          {{ expand(integration_entities('frigate'))
+              | selectattr('entity_id', 'contains', '_all_count')
+              | map(attribute="entity_id") | select('has_value') | list | sort }}
+
+    - service: group.set
+      data:
+        object_id: offline_cameras
+        entities: > # indoor cams are off when somebody home
+          {% set indoor = state_attr('group.indoor_cameras', 'entity_id') | list
+              if is_state('binary_sensor.someone_home', 'off')
+                and state_attr('group.indoor_cameras', 'entity_id') != none else [] %}
+          {% set outdoor = state_attr('group.frigate_cameras','entity_id') | list
+              if state_attr('group.frigate_cameras', 'entity_id') != none else [] %}
+          {{ expand(indoor + outdoor) | map(attribute='entity_id') | reject('has_value') | list | sort }}
