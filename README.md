@@ -80,7 +80,6 @@
 - Mushroom Cards
 - Numberbox Card
 - Pirate Weather
-- Plotly Graph Card
 - Roku Card
 - Slider Entity Row
 - Smart ThinQ Sensors
@@ -99,36 +98,37 @@
 ## ENTITY COUNTS
 
 - alarm_control_panel - 3
-- alert - 101
-- automation - 311
-- binary_sensor - 481
+- alert - 102
+- automation - 313
+- binary_sensor - 482
 - button - 108
 - calendar - 16
-- camera - 30
+- camera - 29
 - climate - 5
+- conversation - 1
 - counter - 1
 - device_tracker - 75
 - event - 75
 - fan - 10
-- group - 64
+- group - 81
 - image - 21
 - input_boolean - 199
 - input_button - 2
 - input_datetime - 42
 - input_number - 171
 - input_select - 21
-- input_text - 52
-- light - 54
+- input_text - 50
+- light - 48
 - lock - 4
-- media_player - 38
+- media_player - 39
 - number - 108
 - person - 2
 - proximity - 1
 - remote - 1
 - scene - 8
-- script - 73
+- script - 72
 - select - 132
-- sensor - 1190
+- sensor - 1493
 - siren - 2
 - stt - 1
 - sun - 1
@@ -138,7 +138,7 @@
 - tts - 2
 - update - 126
 - valve - 12
-- weather - 5
+- weather - 4
 - zone - 10
 
 ## TAGS USED IN CODE
