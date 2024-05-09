@@ -1,6 +1,7 @@
 ###############################################################################
 ## Templates - Weather
 ###############################################################################
+
 - trigger:
     - platform: homeassistant
       event: start
@@ -85,6 +86,7 @@
             {% endif %}
           {% endif %}
 
+    # use pirateweather, weatherflow first, no precipitation in envcan
     - name: "Hourly Weather"
       unique_id: hourly_weather
       state: "{{ states('sensor.current_condition') }}"
@@ -104,7 +106,6 @@
         visibility_unit: "{{ state_attr('sensor.visibility', 'unit_of_measurement') }}"
         precipitation: "{{ states('sensor.precipitation_accumulated_today') }}"
         precipitation_unit: "{{ state_attr('sensor.precipitation_accumulated_today', 'unit_of_measurement') }}"
-        # use pirateweather, weatherflow first, no precipitation in envcan
         forecast: >
           {% if hourly is defined %}
             {% if hourly['weather.pirateweather'] is defined
@@ -119,7 +120,43 @@
             {% endif %}
           {% endif %}
 
+###############################################################################
+## Integrations
+###############################################################################
+
+- trigger:
+    - platform: homeassistant
+      event: start
+
+    - platform: event
+      event_type: event_template_reloaded
+
+    - platform: time_pattern
+      minutes: "/1"
+  binary_sensor:
+    - name: "WAQI Connected"
+      unique_id: waqi_connected
+      picture: !secret WAQI_ICON
+      device_class: connectivity
+      state: "{{ integration_entities('waqi') | select('has_value') | list | count > 0 }}"
+
 - binary_sensor:
+    ###############################################################################
+    ## Integrations
+    ###############################################################################
+
+    - name: "WAQI Connected Alert"
+      unique_id: waqi_connected_alert
+      device_class: problem
+      delay_on: 300
+      state: >
+        {{ is_state('binary_sensor.waqi_connected', 'off')
+            and is_state('input_boolean.weather_alerts', 'on') }}
+
+    ###############################################################################
+    ## Temperature
+    ###############################################################################
+
     - name: "Outdoor High Temperature Alert"
       unique_id: outdoor_high_temperature_alert
       # prevent multiple alerts when temp hovering around threshold
@@ -163,6 +200,10 @@
       state: "{{ states('sensor.outdoor_temperature') | int <= 0 }}"
       availability: "{{ is_number(states('sensor.outdoor_temperature')) }}"
 
+    ###############################################################################
+    ## Precipitaiton
+    ###############################################################################
+
     - name: "Precipitation Active"
       unique_id: precipitation_active
       icon: mdi:weather-pouring
@@ -200,6 +241,10 @@
               or is_state('binary_sensor.precipitation_likely_soon', 'on'))
             and is_state('input_boolean.weather_alerts','on') }}
 
+    ###############################################################################
+    ## Storm & Lightning
+    ###############################################################################
+
     - name: "Lightning"
       unique_id: lightning
       icon: mdi:weather-lightning
@@ -219,6 +264,10 @@
             and is_number(states('sensor.lightning_count'))
             and states('sensor.lightning_distance') | int < 5
             and states('sensor.lightning_count') | int > 0 }}
+
+    ###############################################################################
+    ## Wind
+    ###############################################################################
 
     - name: "Wind Alert"
       unique_id: wind_alert
@@ -246,7 +295,25 @@
             or is_state('binary_sensor.outdoor_low_temperature_alert', 'on')
             or is_state('binary_sensor.outdoor_high_temperature_alert', 'on')
             or is_state('alert.precipitation', 'on') }}
+
+    ###############################################################################
+    ## Air Quality
+    ###############################################################################
+
+    - name: "Air Quality Alert"
+      unique_id: air_quality_alert
+      icon: mdi:smog
+      state: >
+        {{ (is_state('sensor.aqi_risk_level', ['Very Unhealthy', 'Unhealthy', 'Unhealthy Sensitive Groups'])
+              or is_state('sensor.smoke_risk', ['Extreme', 'Very High', 'High',' Moderate'])
+              or is_state('sensor.smoke_risk_today', ['critical', 'severe', 'warning']))
+            and is_state('input_boolean.weather_alerts', 'on') }}
+
 - sensor:
+    ###############################################################################
+    ## Condition
+    ###############################################################################
+
     #IDEA add icons for envcan extra values - req custom weather card
     - name: "Current Condition"
       unique_id: current_condition
@@ -304,6 +371,10 @@
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[1] is defined
             and state_attr('sensor.daily_weather', 'forecast')[1].condition is defined }}
+
+    ###############################################################################
+    ## Temperature
+    ###############################################################################
 
     - name: "Outdoor Temperature"
       unique_id: outdoor_temperature
@@ -504,6 +575,10 @@
             and is_number(states('sensor.windsor_normal_low_temperature'))
             and is_number(states('sensor.outdoor_low_temperature')) }}
 
+    ###############################################################################
+    ## Humidity
+    ###############################################################################
+
     - name: "Outdoor Humidity"
       unique_id: outdoor_humidity
       device_class: humidity
@@ -559,6 +634,10 @@
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
             and state_attr('sensor.daily_weather', 'forecast')[0].humidity is defined
             and is_number(state_attr('sensor.daily_weather', 'forecast')[0].humidity) }}
+
+    ###############################################################################
+    ## Dew Point
+    ###############################################################################
 
     - name: "Dew Point"
       unique_id: dew_point
@@ -622,6 +701,10 @@
         {% else %} Very Dry
         {% endif %}
       availability: "{{ is_number(states('sensor.dew_point')) }}"
+
+    ###############################################################################
+    ## Precipitation
+    ###############################################################################
 
     - name: "Precipitation Probability"
       unique_id: precipitation_probability
@@ -964,6 +1047,35 @@
             or state_attr('sensor.weather_forecasts', 'weatherflow_hourly') != none
             or state_attr('sensor.weather_forecasts', 'pirate_hourly') != none }}
 
+    ###############################################################################
+    ## Storm & Lightning
+    ###############################################################################
+
+    - name: "Nearest Storm Bearing"
+      unique_id: nearest_storm_bearing
+      state: "{{ states('sensor.pirateweather_nearest_storm_bearing') }}"
+      state_class: measurement
+      unit_of_measurement: "°"
+
+    - name: "Nearest Storm Direction"
+      unique_id: nearest_storm_direction
+      icon: mdi:compass
+      state: >
+        {% from 'speech.jinja' import full_cardinal_direction %}
+        {{ full_cardinal_direction(states('sensor.nearest_storm_bearing') | int(-1)) }}
+
+    - name: "Nearest Storm Distance"
+      unique_id: nearest_storm_distance
+      device_class: distance
+      state_class: measurement
+      unit_of_measurement: km
+      state: "{{ states('sensor.pirateweather_nearest_storm_distance') | int }}"
+      attributes:
+        provider: Pirate Weather
+      availability: >
+        {{ is_state('binary_sensor.pirateweather_connected', 'on')
+            and is_number(states('sensor.pirateweather_nearest_storm_distance')) }}
+
     - name: "Lightning Count"
       unique_id: lightning_count
       icon: mdi:lightning-bolt
@@ -1043,45 +1155,9 @@
       state: "{{ states('sensor.home_sensors_time_of_last_lightning_strike') }}"
       availability: "{{ has_value('sensor.home_sensors_time_of_last_lightning_strike') }}"
 
-    - name: "Nearest Storm Bearing"
-      unique_id: nearest_storm_bearing
-      state: "{{ states('sensor.pirateweather_nearest_storm_bearing') }}"
-      state_class: measurement
-      unit_of_measurement: "°"
-
-    - name: "Nearest Storm Direction"
-      unique_id: nearest_storm_direction
-      icon: mdi:compass
-      state: >
-        {% from 'speech.jinja' import full_cardinal_direction %}
-        {{ full_cardinal_direction(states('sensor.nearest_storm_bearing') | int(-1)) }}
-
-    - name: "Nearest Storm Distance"
-      unique_id: nearest_storm_distance
-      device_class: distance
-      state_class: measurement
-      unit_of_measurement: km
-      state: "{{ states('sensor.pirateweather_nearest_storm_distance') | int }}"
-      attributes:
-        provider: Pirate Weather
-      availability: >
-        {{ is_state('binary_sensor.pirateweather_connected', 'on')
-            and is_number(states('sensor.pirateweather_nearest_storm_distance')) }}
-
-    - name: "Pressure Trend"
-      unique_id: pressure_trend
-      icon: >
-        {% if is_state(this.entity_id, 'Rising') %} mdi:trending-up
-        {% elif is_state(this.entity_id, 'Falling') %} mdi:trending-down
-        {% else %} mdi:thermometer-lines
-        {% endif %}
-      state: >
-        {% set change = states('sensor.pressure_change') | float %}
-        {% if change >= 1 %} Rising
-        {% elif change < -1 %} Falling
-        {% else %} Steady
-        {% endif %}
-      availability: "{{ is_number(states('sensor.pressure_change')) }}"
+    ###############################################################################
+    ## Barometric Pressure
+    ###############################################################################
 
     - name: "Barometric Pressure"
       unique_id: barometric_pressure
@@ -1139,6 +1215,25 @@
         {% else %} Stormy
         {% endif %}
       availability: "{{ is_number(states('sensor.barometric_pressure')) }}"
+
+    - name: "Pressure Trend"
+      unique_id: pressure_trend
+      icon: >
+        {% if is_state(this.entity_id, 'Rising') %} mdi:trending-up
+        {% elif is_state(this.entity_id, 'Falling') %} mdi:trending-down
+        {% else %} mdi:thermometer-lines
+        {% endif %}
+      state: >
+        {% set change = states('sensor.pressure_change') | float %}
+        {% if change >= 1 %} Rising
+        {% elif change < -1 %} Falling
+        {% else %} Steady
+        {% endif %}
+      availability: "{{ is_number(states('sensor.pressure_change')) }}"
+
+    ###############################################################################
+    ## Wind Conditions
+    ###############################################################################
 
     # pirate, envcan priority - more accurate
     - name: "Wind Speed"
@@ -1368,6 +1463,10 @@
         {% else %} Hurricane
         {% endif %}
 
+    ###############################################################################
+    ## Cloud Coverage
+    ###############################################################################
+
     - name: "Cloud Coverage"
       unique_id: cloud_coverage
       icon: mdi:cloud
@@ -1403,6 +1502,10 @@
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
             and state_attr('sensor.daily_weather', 'forecast')[0].cloud_coverage is defined
             and is_number(state_attr('sensor.daily_weather', 'forecast')[0].cloud_coverage) }}
+
+    ###############################################################################
+    ## Visibility
+    ###############################################################################
 
     - name: "Visibility"
       unique_id: visibility
@@ -1449,12 +1552,9 @@
             or (is_state('binary_sensor.pirateweather_connected', 'on')
               and is_number(states('sensor.pirateweather_visibility'))) }}
 
-    - name: "Atmospheric Smoke"
-      unique_id: atmospheric_smoke
-      icon: mdi:smoke
-      state_class: measurement
-      state: "{{ states('sensor.pirateweather_smoke') | int }}"
-      availability: "{{ is_number(states('sensor.pirateweather_smoke')) }}"
+    ###############################################################################
+    ## Fire Index
+    ###############################################################################
 
     - name: "Fire Index"
       unique_id: fire_index
@@ -1487,6 +1587,10 @@
         {{ fire_risk(states('sensor.pirateweather_fire_index_max_1d') | int ) }}
       availability: "{{ is_number(states('sensor.pirateweather_fire_index_max_1d')) }}"
 
+    ###############################################################################
+    ## UV Risk
+    ###############################################################################
+
     - name: "UV Index"
       unique_id: uv_index
       icon: mdi:weather-sunny
@@ -1516,6 +1620,10 @@
         {% from 'weather.jinja' import uv_risk %}
         {{ uv_risk(states('sensor.max_uv_index') | int) }}
       availability: "{{ is_number(states('sensor.max_uv_index')) }}"
+
+    ###############################################################################
+    ## Air Quality
+    ###############################################################################
 
     - name: "Air Quality Index"
       unique_id: air_quality_index
@@ -1560,3 +1668,39 @@
       state_class: measurement
       state: "{{ state_attr('sensor.waqi_windsor', 'pm_2_5') }}"
       availability: "{{ is_number(state_attr('sensor.waqi_windsor', 'pm_2_5')) }}"
+
+    - name: "Atmospheric Smoke"
+      unique_id: atmospheric_smoke
+      icon: mdi:smoke
+      state_class: measurement
+      unit_of_measurement: "µg/m³"
+      state: "{{ states('sensor.pirateweather_smoke') | int }}"
+      availability: "{{ is_number(states('sensor.pirateweather_smoke')) }}"
+
+    ###############################################################################
+    ## Smoke Risk
+    ###############################################################################
+
+    - name: "Smoke Risk"
+      unique_id: smoke_risk
+      icon: mdi:smoke
+      state: >
+        {% from 'weather.jinja' import smoke_risk %}
+        {{ smoke_risk(states('sensor.atmospheric_smoke') | int ) }}
+      availability: "{{ is_number(states('sensor.atmospheric_smoke')) }}"
+
+    - name: "Smoke Risk Today"
+      unique_id: smoke_risk_today
+      icon: mdi:smoke
+      state: >
+        {% from 'weather.jinja' import smoke_risk %}
+        {{ smoke_risk(states('sensor.pirateweather_smoke_max_0d') | int ) }}
+      availability: "{{ is_number(states('sensor.pirateweather_smoke_max_0d')) }}"
+
+    - name: "Smoke Risk Tomorrow"
+      unique_id: smoke_risk_tomorrow
+      icon: mdi:smoke
+      state: >
+        {% from 'weather.jinja' import smoke_risk %}
+        {{ smoke_risk(states('sensor.pirateweather_smoke_max_1d') | int ) }}
+      availability: "{{ is_number(states('sensor.pirateweather_smoke_max_1d')) }}"
