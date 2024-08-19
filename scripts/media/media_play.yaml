@@ -65,7 +65,7 @@ media_play:
           entity_id: switch.system_mute
           state: "on"
       then:
-        - service: browser_mod.notification
+        - action: browser_mod.notification
           data:
             duration: 30000
             message: "System mute is on - media preset cannot not be played."
@@ -74,12 +74,12 @@ media_play:
 
     - if: "{{ preset_players == none }}"
       then:
-        - service: browser_mod.notification
+        - action: browser_mod.notification
           data:
             duration: 30000
             message: "No valid media players - media preset cannot not be played."
 
-        - service: system_log.write
+        - action: system_log.write
           data:
             logger: "{{ this.entity_id }}"
             level: info
@@ -96,42 +96,33 @@ media_play:
     #MASS media playing group player -> new preset single player in group -> preset plays on group
     - if: "{{ stop_player != none }}"
       then:
-        - service: script.turn_media_player_off
+        - action: script.turn_media_player_off
           data:
             entity_id: "{{ stop_player }}"
             reset_volume: false
           continue_on_error: true
 
     # avoid google bloops
-    - service: script.turn_media_player_on
+    - action: script.turn_media_player_on
       data:
         entity_id: "{{ media_player }}"
       continue_on_error: true
 
-    - service: script.media_player_set_volumes
-      target:
-        entity_id: "{{ preset_players }}"
-      data:
-        volume: "{{ states('input_number.media_preset_volume_' ~ preset) | int }}"
-        quiet_override: "{{ preset == 'shower' }}"
-        source: media
-      continue_on_error: true
-
-    - service: media_player.shuffle_set
+    - action: media_player.shuffle_set
       target:
         entity_id: "{{ mass_player }}"
       data:
         shuffle: "{{ is_state('input_boolean.shuffle_' ~ preset, 'on') }}"
       continue_on_error: true
 
-    - service: media_player.repeat_set
+    - action: media_player.repeat_set
       target:
         entity_id: "{{ mass_player }}"
       data:
         repeat: "{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'all', 'off') }}"
       continue_on_error: true
 
-    - service: mass.play_media
+    - action: mass.play_media
       target:
         entity_id: "{{ mass_player }}"
       data:
@@ -146,7 +137,7 @@ media_play:
     # media didn't play - turn off media player and reset volumes
     - if: "{{ not wait.completed }}"
       then:
-        - service: system_log.write
+        - action: system_log.write
           data:
             logger: "{{ this.entity_id }}"
             level: critical
@@ -161,20 +152,30 @@ media_play:
               media_type: "{{ iif(is_state('input_boolean.radio_' ~ preset, 'on'), 'radio', 'playlist') }}"
               enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
 
-        - service: script.turn_media_player_off
+        - action: script.turn_media_player_off
           data:
             entity_id: "{{ media_player }}"
             reset_volume: false
           continue_on_error: true
 
-        - service: script.media_player_reset_volumes
+        - action: script.media_player_reset_volumes
           data:
             force_reset: true
           continue_on_error: true
       else:
+        # run after media starts to prevent volume jump
+        - action: script.media_player_set_volumes
+          target:
+            entity_id: "{{ preset_players }}"
+          data:
+            volume: "{{ states('input_number.media_preset_volume_' ~ preset) | int }}"
+            quiet_override: "{{ preset == 'shower' }}"
+            source: media
+          continue_on_error: true
+
         - if: "{{ has_value('timer.media_preset_' ~ preset) }}"
           then:
-            - service: timer.start
+            - action: timer.start
               target:
                 entity_id: "timer.media_preset_{{ preset }}"
               data:
@@ -184,42 +185,42 @@ media_play:
         # set media preset play values for resume/restart last media
         - if: "{{ preset != 'play' }}"
           then:
-            - service: select.select_option
+            - action: select.select_option
               target:
                 entity_id: select.media_preset_play
               data:
                 option: "{{ states('select.media_preset_' ~ preset) }}"
 
-            - service: input_select.select_option
+            - action: input_select.select_option
               target:
                 entity_id: input_select.enqueue_mode_play
               data:
                 option: replace
 
-            - service: select.select_option
+            - action: select.select_option
               target:
                 entity_id: select.media_preset_speaker_play
               data:
                 option: "{{ states('select.media_preset_speaker_' ~ preset) }}"
 
-            - service: input_number.set_value
+            - action: input_number.set_value
               target:
                 entity_id: input_number.media_preset_volume_play
               data:
                 value: "{{ states('input_number.media_preset_volume_' ~ preset) }}"
 
-            - service: "input_boolean.turn_{{ iif(is_state('input_boolean.shuffle_' ~ preset, 'on'), 'on', 'off') }}"
+            - action: "input_boolean.turn_{{ iif(is_state('input_boolean.shuffle_' ~ preset, 'on'), 'on', 'off') }}"
               target:
                 entity_id: input_boolean.shuffle_play
 
-            - service: "input_boolean.turn_{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'on', 'off') }}"
+            - action: "input_boolean.turn_{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'on', 'off') }}"
               target:
                 entity_id: input_boolean.repeat_play
 
-            - service: "input_boolean.turn_{{ iif(is_state('input_boolean.radio_' ~ preset, 'on'), 'on', 'off') }}"
+            - action: "input_boolean.turn_{{ iif(is_state('input_boolean.radio_' ~ preset, 'on'), 'on', 'off') }}"
               target:
                 entity_id: input_boolean.radio_play
 
-    - service: input_boolean.turn_off
+    - action: input_boolean.turn_off
       target:
         entity_id: group.media_launchers

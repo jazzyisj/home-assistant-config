@@ -26,14 +26,14 @@
         - unknown
         - unavailable
   action:
-    - service: weather.get_forecasts
+    - action: weather.get_forecasts
       data:
         type: hourly
       target:
         entity_id: *forecasts
       response_variable: hourly
 
-    - service: weather.get_forecasts
+    - action: weather.get_forecasts
       data:
         type: daily
       target:
@@ -120,10 +120,6 @@
             {% endif %}
           {% endif %}
 
-###############################################################################
-## Integrations
-###############################################################################
-
 - trigger:
     - platform: homeassistant
       event: start
@@ -134,6 +130,15 @@
     - platform: time_pattern
       minutes: "/1"
   binary_sensor:
+    ###############################################################################
+    ## Integrations
+    ###############################################################################
+    - name: "OpenUV Connected"
+      unique_id: openuv_connected
+      picture: !secret OPENUV_ICON
+      device_class: connectivity
+      state: "{{ integration_entities('openuv') | select('has_value') | list | count > 0 }}"
+
     - name: "WAQI Connected"
       unique_id: waqi_connected
       picture: !secret WAQI_ICON
@@ -144,6 +149,14 @@
     ###############################################################################
     ## Integrations
     ###############################################################################
+
+    - name: "OpenUV Connected Alert"
+      unique_id: openuv_connected_alert
+      device_class: problem
+      delay_on: 60
+      state: >
+        {{ is_state('binary_sensor.openuv_connected', 'off')
+            and is_state('input_boolean.weather_alerts', 'on') }}
 
     - name: "WAQI Connected Alert"
       unique_id: waqi_connected_alert
@@ -308,6 +321,18 @@
               or is_state('sensor.smoke_risk', ['Extreme', 'Very High', 'High',' Moderate'])
               or is_state('sensor.smoke_risk_today', ['critical', 'severe', 'warning']))
             and is_state('input_boolean.weather_alerts', 'on') }}
+
+    ###############################################################################
+    ## UV Risk
+    ###############################################################################
+
+    - name: "UV Risk Alert"
+      unique_id: uv_risk_alert
+      icon: mdi:weather-sunny-alert
+      state: >
+        {{ states('sensor.uv_risk_today') == 'Extreme'
+            and is_state('input_boolean.weather_alerts', 'on') }}
+      availability: "{{ has_value('sensor.uv_risk_today') }}"
 
 - sensor:
     ###############################################################################
@@ -510,6 +535,12 @@
             and state_attr('sensor.daily_weather', 'forecast')[0].temperature is defined
             and is_number(state_attr('sensor.daily_weather', 'forecast')[0].temperature) }}
 
+    - name: "Outdoor High Temperature Time"
+      unique_id: outdoor_high_temperature_time
+      device_class: timestamp
+      state: "{{ states('sensor.pirateweather_daytime_high_apparent_temperature_0d') | as_datetime }}" #TODO not apparent, conversion
+      availability: "{{ has_value('sensor.pirateweather_daytime_high_temperature_time_0d') }}"
+
     - name: "Outdoor High Temperature Tomorrow"
       unique_id: outdoor_high_temperature_tomorrow
       icon: mdi:sun-thermometer
@@ -548,6 +579,12 @@
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
             and state_attr('sensor.daily_weather', 'forecast')[0].templow is defined
             and is_number(state_attr('sensor.daily_weather', 'forecast')[0].templow) }}
+
+    - name: "Outdoor Low Temperature Time"
+      unique_id: outdoor_low_temperature_time
+      device_class: timestamp
+      state: "{{ states('sensor.pirateweather_daily_low_temperature_time_0d') | as_datetime }}" #TODO conversion
+      availability: "{{ has_value('sensor.pirateweather_daily_low_temperature_time_0d') }}"
 
     - name: "Outdoor Low Temperature Tomorrow"
       unique_id: outdoor_low_temperature_tomorrow
@@ -959,6 +996,7 @@
 
     - name: "Precipitation Type"
       unique_id: precipitation_type
+      #NOTE tempest weather station doesn't measure snow intensity
       icon: >
         {% set type = states(this.entity_id) %}
         {% if type == 'Rain' %} mdi:weather-pouring
@@ -968,8 +1006,13 @@
       state: >
         {% set condition = states('sensor.current_condition') %}
         {% if condition | contains('snow') %} Snow
-        {% elif condition | contains('rain')
-            or condition | contains('pouring') %} Rain
+        {% elif states('sensor.precipitation_intensity') | float(0) > 0
+            and (condition | contains('rain')
+              or condition | contains('pouring')) %} Rain
+        {% elif states('sensor.precipitation_intensity') | float(0) > 0 %}
+          {% if states('sensor.outdoor_temperature') | int(0) >= 0 %} Rain
+          {% else %} Snow
+          {% endif %}
         {% else %} none
         {% endif %}
       availability: "{{ has_value('sensor.current_condition') }}"
@@ -1588,7 +1631,7 @@
       availability: "{{ is_number(states('sensor.pirateweather_fire_index_max_1d')) }}"
 
     ###############################################################################
-    ## UV Risk
+    ## UV Risk - OpenUV # https://www.openuv.io/uvindex
     ###############################################################################
 
     - name: "UV Index"
@@ -1645,29 +1688,36 @@
       unique_id: ozone
       device_class: aqi
       state_class: measurement
-      state: "{{ state_attr('sensor.waqi_windsor', 'ozone') }}"
-      availability: "{{ is_number(state_attr('sensor.waqi_windsor', 'ozone')) }}"
+      state: "{{ states('sensor.windsor_ozone') }}"
+      availability: "{{ is_number(states('sensor.windsor_ozone')) }}"
+
+    - name: "Carbon Monoxide"
+      unique_id: carbon_monoxide
+      device_class: aqi
+      state_class: measurement
+      state: "{{ states('sensor.windsor_carbon_monoxide') }}"
+      availability: "{{ is_number(states('sensor.windsor_carbon_monoxide')) }}"
 
     - name: "Nitrogen Dioxide"
       unique_id: nitrogen_dioxide
       device_class: aqi
       state_class: measurement
-      state: "{{ state_attr('sensor.waqi_windsor', 'nitrogen_dioxide') }}"
-      availability: "{{ is_number(state_attr('sensor.waqi_windsor', 'nitrogen_dioxide')) }}"
+      state: "{{ states('sensor.windsor_nitrogen_dioxide') }}"
+      availability: "{{ is_number(states('sensor.windsor_nitrogen_dioxide')) }}"
 
     - name: "Sulphur Dioxide"
       unique_id: sulphur_dioxide
       device_class: aqi
       state_class: measurement
-      state: "{{ state_attr('sensor.waqi_windsor', 'sulfur_dioxide') }}"
-      availability: "{{ is_number(state_attr('sensor.waqi_windsor', 'sulfur_dioxide')) }}"
+      state: "{{ states('sensor.windsor_sulphur_dioxide') }}"
+      availability: "{{ is_number(states('sensor.windsor_sulphur_dioxide')) }}"
 
     - name: "Particulate Matter 2.5"
       unique_id: particulate_matter_2_5
       device_class: aqi
       state_class: measurement
-      state: "{{ state_attr('sensor.waqi_windsor', 'pm_2_5') }}"
-      availability: "{{ is_number(state_attr('sensor.waqi_windsor', 'pm_2_5')) }}"
+      state: "{{ states('sensor.windsor_pm2_5') }}"
+      availability: "{{ is_number(states('sensor.windsor_pm2_5')) }}"
 
     - name: "Atmospheric Smoke"
       unique_id: atmospheric_smoke
