@@ -11,14 +11,17 @@ media_play:
       example: "sleep"
   variables:
     preset: "{{ preset | default('play') }}"
+    media_type: "{{ states('input_select.media_preset_type_' ~ preset) | lower }}"
     media_player: >
       {{ expand('group.media_players')
-          | selectattr('name', 'eq', states('select.media_preset_speaker_' ~ preset))
-          | map(attribute='entity_id') | join('') }}
+          | selectattr('name', 'eq', iif(media_type == 'video',
+              states('select.media_preset_video_display_' ~ preset),
+              states('select.media_preset_speaker_' ~ preset)))
+          | map(attribute='entity_id') | join }}
     mass_player: > #MASS use mass player for media play
       {% set player = expand('group.mass_media_players')
           | selectattr('name', 'eq', state_attr(media_player,'friendly_name'))
-          | map(attribute='entity_id') | join('') %}
+          | map(attribute='entity_id') | join %}
       {{ iif(has_value(player), player, none) }}
     preset_players: >
       {% if media_player != '' %}
@@ -108,32 +111,50 @@ media_play:
         entity_id: "{{ media_player }}"
       continue_on_error: true
 
-    - action: media_player.shuffle_set
-      target:
-        entity_id: "{{ mass_player }}"
-      data:
-        shuffle: "{{ is_state('input_boolean.shuffle_' ~ preset, 'on') }}"
-      continue_on_error: true
+    - if: "{{ media_type == 'video' }}"
+      then:
+        - action: media_player.play_media
+          target:
+            entity_id: "{{ media_player }}"
+          data:
+            media_content_type: cast
+            #ISSUE can't template media_content_id?
+            #IDEA add video to other presets, do in script.media_play
+            media_content_id: '
+              {
+              "app_name": "youtube",
+              "media_id": "nYcHi9EgUHs"
+              }'
+            enqueue: replace
+            extra:
+              autoplay: true
+      else:
+        - action: media_player.shuffle_set
+          target:
+            entity_id: "{{ mass_player }}"
+          data:
+            shuffle: "{{ is_state('input_boolean.shuffle_' ~ preset, 'on') }}"
+          continue_on_error: true
 
-    - action: media_player.repeat_set
-      target:
-        entity_id: "{{ mass_player }}"
-      data:
-        repeat: "{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'all', 'off') }}"
-      continue_on_error: true
+        - action: media_player.repeat_set
+          target:
+            entity_id: "{{ mass_player }}"
+          data:
+            repeat: "{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'all', 'off') }}"
+          continue_on_error: true
 
-    - action: mass.play_media
-      target:
-        entity_id: "{{ mass_player }}"
-      data:
-        media_id: >
-          {{ iif(is_state('input_select.media_preset_type_' ~ preset, 'Radio'),
-              states('select.media_preset_radio_' ~ preset), states('select.media_preset_playlist_' ~ preset)) }}
-        media_type: "{{ iif(is_state('input_select.media_preset_type_' ~ preset, 'Radio'), 'radio', 'playlist') }}"
-        enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
-      continue_on_error: true #MASS script does not continue if mass fails
+        - action: mass.play_media
+          target:
+            entity_id: "{{ mass_player }}"
+          data:
+            media_id: >
+              {{ iif(media_type == 'radio',
+                  states('select.media_preset_radio_' ~ preset),
+                  states('select.media_preset_playlist_' ~ preset)) }}
+            enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
+          continue_on_error: true #MASS script does not continue if mass fails
 
-    - wait_template: "{{ is_state(media_player, 'playing') }}"
+    - wait_template: "{{ is_state(media_player,'playing') }}"
       timeout: 60
 
     # media didn't play - turn off media player and reset volumes
@@ -146,12 +167,12 @@ media_play:
             message: |
               ** MEDIA PLAY FAILED **
               preset: {{ preset }}
+              media_type: {{ media_type }}
               media_player: {{ media_player }}
               mass_player: {{ mass_player }}
               preset_players: {{ preset_players }}
               stop_player: {{ stop_player }}
               media_id: "{{ states('select.media_preset_' ~ preset) }}"
-              media_type: "{{ iif(is_state('input_select.media_preset_type_' ~ preset, 'Radio'), 'radio', 'playlist') }}"
               enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
 
         - action: script.turn_media_player_off
@@ -185,13 +206,13 @@ media_play:
                   minutes: "{{ states('input_number.media_preset_' ~ preset ~ '_time') | int }}"
 
         # set media preset play values for resume/restart last media
-        - if: "{{ preset != 'play' }}"
+        - if: "{{ preset != 'play' and media_type != 'video' }}"
           then:
             - action: input_select.select_option
               target:
                 entity_id: input_select.media_preset_type_play
               data:
-                option: "{{ states('input_select.media_preset_type_' ~ preset) }}"
+                option: "{{ media_type | title }}"
 
             - action: select.select_option
               target:

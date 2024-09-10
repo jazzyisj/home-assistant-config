@@ -15,10 +15,6 @@
           | rejectattr('attributes.location', 'eq', 'indoor') | map(attribute='object_id') | list }}
   trigger:
     - platform: state
-      entity_id: input_boolean.startup_pending
-      to: "off"
-
-    - platform: state
       entity_id: input_boolean.camera_object_detection
       to: "on"
 
@@ -26,9 +22,6 @@
     - platform: state
       entity_id: binary_sensor.frigate_connected
       to: "on"
-      not_from:
-        - unknown
-        - unavailable
 
     - platform: state
       entity_id: alarm_control_panel.master
@@ -52,18 +45,22 @@
               find='(.*)_frigate', replace='switch.\\1_frigate_detect', ignorecase=False) | list %}
           {% set motion = on_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_motion', ignorecase=False) | list %}
+          {% set recordings = on_cams | map('regex_replace',
+              find='(.*)_frigate', replace='switch.\\1_frigate_recordings', ignorecase=False) | list %}
           {% set snapshots = on_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_snapshots', ignorecase=False) | list %}
-          {{ detect + motion + snapshots }}
+          {{ detect + motion + recordings + snapshots }}
 
     - action: switch.turn_off
       target:
         entity_id: >
           {% set detect = off_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_detect', ignorecase=False) | list %}
+          {% set recordings = off_cams | map('regex_replace',
+              find='(.*)_frigate', replace='switch.\\1_frigate_recordings', ignorecase=False) | list %}
           {% set snapshots = off_cams | map('regex_replace',
               find='(.*)_frigate', replace='switch.\\1_frigate_snapshots', ignorecase=False) | list %}
-          {{ detect + snapshots }}
+          {{ detect + recordings + snapshots }}
 
     # detect switches must bet turned off first or motion switches won't turn off
     - action: switch.turn_off
@@ -78,10 +75,12 @@
 - id: camera_turn_off_object_detection
   alias: "[Camera] Turn Off Object Detection"
   description: "Turn off camera object detection."
+  variables:
+    cams: "{{ expand('group.frigate_cameras') | map(attribute='object_id') | list }}"
   trigger:
     - platform: state
       entity_id: input_boolean.camera_object_detection
-      to:
+      to: "off"
   action:
     - wait_template: "{{ is_state('binary_sensor.frigate_connected', 'on') }}"
       timeout:
@@ -91,11 +90,20 @@
     - action: switch.turn_off
       target:
         entity_id: >
-          {{ expand('group.frigate_cameras') | rejectattr('attributes.location', 'eq', 'indoor')
-              | map(attribute='object_id') | list | map('regex_replace',
-              find='(.*)_frigate', replace='switch.\\1_frigate_detect', ignorecase=False) | list }}
+          {% set detect = cams | map('regex_replace',
+              find='(.*)_frigate', replace='switch.\\1_frigate_detect', ignorecase=False) | list %}
+          {% set recordings = cams | map('regex_replace',
+              find='(.*)_frigate', replace='switch.\\1_frigate_recordings', ignorecase=False) | list %}
+          {% set snapshots = cams | map('regex_replace',
+              find='(.*)_frigate', replace='switch.\\1_frigate_snapshots', ignorecase=False) | list %}
+          {{ detect + recordings + snapshots }}
 
-#TODO add motion, recording etc
+    # detect switches must bet turned off first or motion switches won't turn off
+    - action: switch.turn_off
+      target:
+        entity_id: >
+          {{ cams | map('regex_replace', find='(.*)_frigate',
+                replace='switch.\\1_frigate_motion', ignorecase=False) | list }}
 
 ###############################################################################
 ## Camera - Pause Object Detection
@@ -105,7 +113,7 @@
   description: "Pause camera object detection."
   mode: queued
   variables:
-    state: "{{ states('alarm_control_panel.master') }}"
+    cam: "{{ trigger.event.data['action'][:-14] }}"
   trigger:
     - platform: event
       event_type: mobile_app_notification_action
@@ -130,6 +138,11 @@
     - platform: event
       event_type: mobile_app_notification_action
       event_data:
+        action: front_yard_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
         action: back_door_detection_off
 
     - platform: event
@@ -141,7 +154,44 @@
       event_type: mobile_app_notification_action
       event_data:
         action: back_house_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: garage_side_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: garage_side_back_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: side_gate_front_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: side_gate_back_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: charlie_crate_detection_off
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: living_room_detection_off
   action:
     - action: switch.turn_off
       target:
-        entity_id: "switch.{{ trigger.event.data['action'][:-14] }}_frigate_detect"
+        entity_id: >
+          ["switch.{{ cam }}_frigate_detect",
+            "switch.{{ cam }}_frigate_snapshots",
+            "switch.{{ cam }}_frigate_recordings"]
+
+    - action: switch.turn_off
+      target:
+        entity_id: "switch.{{ cam }}_frigate_motion"

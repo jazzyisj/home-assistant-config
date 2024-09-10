@@ -27,7 +27,9 @@
       state: >
         {{ (states('alarm_control_panel.house') != states('alarm_control_panel.master')
             or states('alarm_control_panel.garage') != states('alarm_control_panel.master'))
-            and is_state('input_boolean.garage_alarm_override', 'off') }}
+            and is_state('input_boolean.garage_alarm_override', 'off')
+            and is_state('input_boolean.alarm_pending', 'off')
+            and is_state('input_boolean.alarm_triggered', 'off') }}
 
     - name: "Alarm Zone Sync Alert"
       unique_id: alarm_zone_sync_alert
@@ -45,29 +47,32 @@
       delay_on: 2 # allow input_text.current_alarm to populate
       state: >
         {{ is_state('alarm_control_panel.master', 'pending')
-            and is_state('input_boolean.alarm_enabled', 'on')
-            and is_state('input_boolean.alarm_alerts', 'on') }}
+            and is_state('input_boolean.alarm_enabled', 'on') }}
 
     - name: "Alarm Open Sensor Alert"
       unique_id: alarm_open_sensor_alert
       icon: mdi:shield-alert
       device_class: problem
       state: >
-        {{ is_state('alarm_control_panel.master', 'disarmed')
-            and state_attr('alarm_control_panel.master', 'open_sensors') != none
-            and is_state('binary_sensor.alarm_bypassed_sensor_alert', 'off')
-            and is_state('input_boolean.alarm_enabled', 'on')
-            and is_state('input_boolean.alarm_alerts', 'on') }}
+        {% set still_open = namespace(value=0) %}
+        {% if state_attr('alarm_control_panel.master', 'open_sensors') != none %}
+          {% for item in state_attr('alarm_control_panel.master', 'open_sensors') %}
+            {% if is_state(item | replace ('_open_alert','') , 'on') %}
+              {% set still_open.value = 1 %}
+              {% break %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {{ still_open.value == 1
+            and is_state('input_boolean.alarm_enabled', 'on') }}
 
     - name: "Alarm Bypassed Sensor Alert"
       unique_id: alarm_bypassed_sensor_alert
       icon: mdi:shield-alert
       device_class: problem
       state: >
-        {{ not is_state('alarm_control_panel.master', 'disarmed')
-            and state_attr('alarm_control_panel.master', 'bypassed_sensors') != none
-            and is_state('input_boolean.alarm_enabled', 'on')
-            and is_state('input_boolean.alarm_alerts', 'on') }}
+        {{ state_attr('alarm_control_panel.master', 'bypassed_sensors') != none
+            and is_state('input_boolean.alarm_enabled', 'on') }}
 
     # alarm is disconnected, arming, pending or triggered
     # alarm state changed within last minute, forces priority over presence led etc. for 1 minute

@@ -1,37 +1,127 @@
-# ###############################################################################
-# ## Garage Climate Furnace On
-# ###############################################################################
-- id: garage_climate_furnace_on
-  alias: "[Garage Climate] Furnace On"
-  description: "Turn garage heat switch on."
+###############################################################################
+## Garage Climate Auto On
+###############################################################################
+- id: garage_climate_auto_on
+  alias: "[Garage Climate] Auto On"
+  description: "Turn garage furnace on."
   trigger:
     - platform: state
-      entity_id: switch.garage_furnace
+      id: freeze
+      entity_id: input_boolean.garage_freeze_protection
       to: "on"
+
+    - platform: state
+      id: thermostat
+      entity_id: climate.garage_thermostat
+      to: "off"
   condition:
     - condition: state
       entity_id: climate.garage_thermostat
       state: "off"
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id == 'thermostat',
+            is_state('input_boolean.garage_freeze_protection','on'),false) }}"
   action:
-    - action: switch.turn_on
+    - action: climate.turn_on
       target:
-        entity_id: switch.garage_heat
+        entity_id: climate.garage_thermostat
+
+    - action: climate.set_preset_mode
+      target:
+        entity_id: climate.garage_thermostat
+      data:
+        # eco is freeze protection
+        preset_mode: "{{ iif(trigger.id in ['freeze','thermostat'],'eco','home') }}"
 
 ###############################################################################
-## Garage Climate Furnace Off
+## Garage Climate - Auto Off
 ###############################################################################
-- id: garage_climate_furnace_off
-  alias: "[Garage Climate] Furnace Off"
-  description: "Turn garage heat switch off."
+- id: garage_climate_auto_off
+  alias: "[Garage Climate] Auto Off"
+  description: "Turn garage furnace off."
   trigger:
+    - platform: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Night
+        - Away
+        - Vacation
+
+    - platform: state
+      id: high_temp
+      entity_id: alert.garage_high_temperature
+      to: "on"
+      for:
+        minutes: 5
+
+    - platform: state
+      id: door
+      entity_id: binary_sensor.garage_door_open
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      for:
+        minutes: 2
+
     - platform: state
       entity_id: switch.garage_furnace
       to: "off"
+
+    - platform: state
+      id: freeze
+      entity_id: input_boolean.garage_freeze_protection #VERIFY
+      to: "off"
+
+    # - platform: state
+    #   entity_id: switch.garage_furnace #VERIFY
+    #   to: "off"
+
+    - platform: state
+      id: thermostat
+      entity_id: climate.garage_thermostat
+      to: heat
   condition:
     - condition: state
-      entity_id: switch.garage_heat
-      state: "on"
+      entity_id: climate.garage_thermostat
+      state: heat
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id == 'thermostat',
+            is_state('binary_sensor.garage_door_open','on'),false) }}
   action:
-    - action: switch.turn_off
+    - action: climate.turn_off
       target:
-        entity_id: switch.garage_heat
+        entity_id: climate.garage_thermostat
+
+    - if: "{{ trigger.id in ['door', 'thermostat'] }}"
+      then:
+        - action: script.turn_on
+          target:
+            entity_id: script.tts_play
+          data:
+            variables:
+              message: "The garage heat has been turned off because the garage door has been opened."
+          continue_on_error: true
+
+        - wait_template: "{{ is_state('binary_sensor.garage_door_open', 'off') }}"
+          timeout:
+            minutes: 15
+          continue_on_timeout: false
+
+        - action: climate.turn_on
+          target:
+            entity_id: climate.garage_thermostat
+
+        - action: script.tts_play
+          data:
+            media_player: media_player.office_speaker
+            min_volume: 80
+            message: |
+              The garage heat has been turned back on.
+              The thermostat is set to {{ state_attr('climate.garage_thermostat', 'temperature') }} degrees.
+              The current garage temperature is {{ states('sensor.garage_sensor_air_temperature') }} degrees.
