@@ -26,135 +26,89 @@
   action:
     - action: group.set
       data:
-        object_id: lights
+        object_id: hass_alerts
         entities: >
-          {{ states.light
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'in', ['dimmer', 'switch', 'bulb', 'group'])
-              | rejectattr('attributes.rgb_light', 'in', ['control', 'slave'])
+          {{ states.alert
+              | selectattr('attributes.category','in',
+                  ['hass','network','system','zwave','bluetooth'])
+                  | map(attribute='entity_id') | list | sort }}
+
+    - action: group.set
+      data:
+        object_id: low_batteries
+        entities: >
+          {% set low_batteries = namespace(value=[]) %}
+          {% set batteries = states.sensor
+              | selectattr('attributes.device_class', 'eq', 'battery')
+              | rejectattr('attributes.mobile', 'eq', true)
+              | map(attribute='entity_id') | list | sort %}
+          {% for item in batteries %}
+            {% if states(item) == 'on' or (states(item) | int(-1) != -1 and states(item) | int(0)
+                < states('input_number.battery_alert_threshold') | int) %}
+              {% set low_batteries.value = low_batteries.value + [item] %}
+            {% endif %}
+          {% endfor %}
+          {{ low_batteries.value }}
+
+    - action: group.set
+      data:
+        object_id: available_updates
+        entities: >
+          {{ states.update
+              | selectattr('state', 'eq', 'on')
               | map(attribute='entity_id') | list | sort }}
 
     - action: group.set
       data:
-        object_id: light_timers
+        object_id: offline_integrations
         entities: >
-          {{ states.timer
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'light')
+          {{ expand('group.integration_connected_sensors') | selectattr('state', 'eq', 'off')
               | map(attribute='entity_id') | list | sort }}
 
     - action: group.set
       data:
-        object_id: fans
+        object_id: connected_browsers
         entities: >
-          {{ states.fan
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'in', ['ceiling', 'vent', 'hvac_fan'])
-              | map(attribute='entity_id') | list | sort }}
+          {{ states.sensor
+              | selectattr('entity_id', 'contains', '_browser_user')
+              | rejectattr('entity_id', 'contains', '_browser_useragent')
+              | map(attribute='entity_id') | select('has_value') | list | sort }}
 
     - action: group.set
       data:
-        object_id: ceiling_fans
+        object_id: unknown_browsers
         entities: >
-          {{ states.fan
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'ceiling')
-              | map(attribute='entity_id') | list | sort }}
+          {{ expand('group.connected_browsers')
+              | selectattr('attributes.authorized', 'ne', true)
+              | map(attribute='entity_id')
+              | select('has_value') | list | sort }}
 
     - action: group.set
       data:
-        object_id: vent_fans
-        entities: >
-          {{ states.fan
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'vent')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: fan_timers
-        entities: >
-          {{ states.timer
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'fan')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: entry_doors
+        object_id: integration_connected_sensors
         entities: >
           {{ states.binary_sensor
-              | selectattr('attributes.device_class', 'defined')
-              | selectattr('attributes.device_class', 'eq', 'door')
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'entry')
-              | rejectattr('entity_id', 'contains', 'open_alert')
-              | map(attribute='entity_id') | list | sort }}
+              | selectattr('entity_id', 'contains', '_integration_connected')
+              | map(attribute='entity_id')
+              | select('has_value') | list | sort }}
 
     - action: group.set
       data:
-        object_id: door_alert_sensors
+        object_id: add_on_memory_sensors
         entities: >
-          {{ states.binary_sensor
-              | selectattr('entity_id', 'contains', 'door_open_alert')
-              | map(attribute='entity_id') | list | sort }}
+          {{ expand(integration_entities('hassio'))
+              | selectattr('entity_id', 'contains', '_memory_percent')
+              | map(attribute='entity_id')
+              | select('has_value') | list | sort }}
 
     - action: group.set
       data:
-        object_id: windows
+        object_id: add_on_cpu_sensors
         entities: >
-          {{ states.binary_sensor
-              | selectattr('attributes.device_class', 'defined')
-              | selectattr('attributes.device_class', 'eq', 'window')
-              | rejectattr('entity_id', 'contains', 'open_alert')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: window_alert_sensors
-        entities: >
-          {{ states.binary_sensor
-              | selectattr('entity_id', 'contains', 'window_open_alert')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: motion_sensors
-        entities: >
-          {{ states.binary_sensor
-              | selectattr('attributes.device_class', 'defined')
-              | selectattr('attributes.device_class', 'eq', 'motion')
-              | rejectattr('entity_id', 'search', '(jphone|jlaptop|jtablet|jwork)')
-              | rejectattr('entity_id', 'contains', 'object_detected')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: entry_locks
-        entities: >
-          {{ states.lock
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'entry')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: house_locks
-        entities: >
-          {{ states.lock
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'entry')
-              | selectattr('attributes.area', 'eq', 'house')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: leak_sensors
-        entities: >
-          {{ states.binary_sensor
-              | selectattr('attributes.type', 'defined')
-              | selectattr('attributes.type', 'eq', 'leak')
-              | map(attribute='entity_id') | list | sort }}
+          {{ expand(integration_entities('hassio'))
+              | selectattr('entity_id', 'contains', '_cpu_percent')
+              | map(attribute='entity_id')
+              | select('has_value') | list | sort }}
 
 ###############################################################################
 ## Hass - Update Monitored Entities Group
@@ -210,62 +164,3 @@
               | rejectattr('entity_id', 'search', 'charlie_crate_camera|charlie_crate_frigate|living_room_camera|living_room_frigate')
               | rejectattr('entity_id', 'search', 'jphone_app|jtablet_app|jlaptop_chrome|jwork_chrome|_dlna|_timers|_alarms|_next_alarm')
               | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: hass_alerts
-        entities: >
-          {{ states.alert
-              | selectattr('attributes.category','in',
-                  ['hass','network','system','zwave','bluetooth'])
-                  | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: low_batteries
-        entities: >
-          {% set low_batteries = namespace(value=[]) %}
-          {% set batteries = states.sensor
-              | selectattr('attributes.device_class', 'eq', 'battery')
-              | rejectattr('attributes.mobile', 'eq', true)
-              | map(attribute='entity_id') | list | sort %}
-          {% for item in batteries %}
-            {% if states(item) == 'on' or (states(item) | int(-1) != -1 and states(item) | int(0)
-                < states('input_number.battery_alert_threshold') | int) %}
-              {% set low_batteries.value = low_batteries.value + [item] %}
-            {% endif %}
-          {% endfor %}
-          {{ low_batteries.value }}
-
-    - action: group.set
-      data:
-        object_id: available_updates
-        entities: >
-          {{ states.update
-              | selectattr('state', 'eq', 'on')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: offline_integrations
-        entities: >
-          {{ expand('group.cloud_integrations') | selectattr('state', 'eq', 'off')
-              | map(attribute='entity_id') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: connected_browsers
-        entities: >
-          {{ states.sensor
-              | selectattr('entity_id', 'contains', '_browser_user')
-              | rejectattr('entity_id', 'contains', '_browser_useragent')
-              | map(attribute='entity_id') | select('has_value') | list | sort }}
-
-    - action: group.set
-      data:
-        object_id: unknown_browsers
-        entities: >
-          {{ expand('group.connected_browsers')
-              | selectattr('attributes.authorized', 'ne', true)
-              | map(attribute='entity_id')
-              | select('has_value') | list | sort }}

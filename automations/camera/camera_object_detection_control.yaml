@@ -14,14 +14,18 @@
       {{ expand('group.frigate_cameras') | rejectattr('attributes.' ~ state, 'eq', true)
           | rejectattr('attributes.location', 'eq', 'indoor') | map(attribute='object_id') | list }}
   trigger:
-    - platform: state
-      entity_id: input_boolean.camera_object_detection
-      to: "on"
-
     #BUGFIX reset detect/motion after frigate restart
     - platform: state
-      entity_id: binary_sensor.frigate_connected
+      entity_id:
+        - binary_sensor.frigate_integration_connected
+        - input_boolean.camera_object_detection
       to: "on"
+
+    - platform: state
+      entity_id: input_boolean.camera_object_detection
+      to: "off"
+      for:
+        hours: 8
 
     - platform: state
       entity_id: alarm_control_panel.master
@@ -32,9 +36,9 @@
         - armed_away
         - armed_vacation
   action:
-    - wait_template: "{{ is_state('binary_sensor.frigate_connected', 'on') }}"
+    - wait_template: "{{ is_state('binary_sensor.frigate_integration_connected', 'on') }}"
       timeout:
-        minutes: 10
+        minutes: 10 # frigate takes a while on restart
       continue_on_timeout: false
 
     - action: switch.turn_on
@@ -81,11 +85,21 @@
     - platform: state
       entity_id: input_boolean.camera_object_detection
       to: "off"
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: disable_object_detection
+
   action:
-    - wait_template: "{{ is_state('binary_sensor.frigate_connected', 'on') }}"
+    - wait_template: "{{ is_state('binary_sensor.frigate_integration_connected', 'on') }}"
       timeout:
         minutes: 10
       continue_on_timeout: false
+
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.camera_object_detection
 
     - action: switch.turn_off
       target:
@@ -104,94 +118,3 @@
         entity_id: >
           {{ cams | map('regex_replace', find='(.*)_frigate',
                 replace='switch.\\1_frigate_motion', ignorecase=False) | list }}
-
-###############################################################################
-## Camera - Pause Object Detection
-###############################################################################
-- id: camera_pause_object_detection
-  alias: "[Camera] Pause Object Detection"
-  description: "Pause camera object detection."
-  mode: queued
-  variables:
-    cam: "{{ trigger.event.data['action'][:-14] }}"
-  trigger:
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: side_drive_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: side_door_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: front_drive_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: front_door_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: front_yard_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: back_door_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: patio_door_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: back_house_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: garage_side_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: garage_side_back_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: side_gate_front_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: side_gate_back_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: charlie_crate_detection_off
-
-    - platform: event
-      event_type: mobile_app_notification_action
-      event_data:
-        action: living_room_detection_off
-  action:
-    - action: switch.turn_off
-      target:
-        entity_id: >
-          ["switch.{{ cam }}_frigate_detect",
-            "switch.{{ cam }}_frigate_snapshots",
-            "switch.{{ cam }}_frigate_recordings"]
-
-    - action: switch.turn_off
-      target:
-        entity_id: "switch.{{ cam }}_frigate_motion"

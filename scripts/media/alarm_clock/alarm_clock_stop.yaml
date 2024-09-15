@@ -5,92 +5,50 @@ alarm_clock_stop:
   alias: "Alarm Clock Stop"
   description: "Turn off alarm clock."
   icon: mdi:alarm-note-off
-  mode: restart
+  mode: single
   max_exceeded: silent
-  fields:
-    alarm_type:
-      description: "Alam clock type."
-      example: "nap"
   variables:
-    alarm_type: "{{ alarm_type | default(state_attr('binary_sensor.alarm_clock', 'alarm_type')) }}"
-    alarm_types: "{{ ['auto', 'manual', 'nap'] }}"
-    alarm_player: "{{ states('sensor.alarm_clock_active_media_player') }}"
-    mass_player: > #MASS use mass player for clear playlist
-      {{ expand('group.mass_media_players')
-          | selectattr('name', 'eq', state_attr(alarm_player,'friendly_name'))
-          | map(attribute='entity_id') | join }}
-    media_players: "{{ state_attr('sensor.alarm_clock_active_media_player', 'entity_id') }}"
+    alarm_type: "{{ states('input_select.alarm_clock_type') }}"
+    media_player: "{{ states('sensor.alarm_clock_active_media_player') }}"
+    #MASS use mass player for clear playlist, default to hass player
+    mass_player: >
+      {% set mass = expand('group.mass_media_players')
+          | selectattr('name', 'eq', states('select.alarm_clock_media_player_' ~ alarm_type))
+          | map(attribute='entity_id') | join %}
+      {{ media_player if mass == '' else mass }}
   sequence:
-    - if:
-        - condition: template
-          alias: "Alarm type is valid"
-          value_template: "{{ alarm_type in alarm_types }}"
+    - if: "{{ media_player != 'unknown' and alarm_type != 'off' }}"
       then:
-        - if:
-            - condition: template
-              alias: "Alarm type is not active alarm"
-              value_template: "{{ alarm_type != state_attr('binary_sensor.alarm_clock', 'alarm_type') }}"
+        - action: input_select.select_option
+          target:
+            entity_id: input_select.alarm_clock_type
+          data:
+            option: "off"
+
+        - delay: 1 # allow binary_sensor.alarm_clock to calculate
+
+        - action: script.turn_media_player_off
+          data:
+            entity_id: "{{ media_player }}"
+            reset_volume: false
+
+        - action: switch.turn_off
+          target:
+            entity_id: "switch.alarm_clock_{{ alarm_type }}"
+
+        #MASS remove alarm clock playlist from queue
+        - if: "{{ mass_player in state_attr('group.mass_media_players', 'entity_id') }}"
           then:
-            - action: switch.turn_off
-              alias: "Turn off not active alarm clock switch"
-              target:
-                entity_id: "switch.alarm_clock_{{ alarm_type }}"
-          else:
-            - if: "{{ alarm_type == 'nap' }}"
-              then:
-                - action: timer.cancel
-                  target:
-                    entity_id: timer.alarm_clock_nap
-
-                - action: input_boolean.turn_off
-                  target:
-                    entity_id: input_boolean.alarm_clock_nap
-
-            - action: script.turn_media_player_off
-              data:
-                entity_id: "{{ media_players }}"
-                reset_volume: false
-
-            #MASS remove alarm clock playlist from queue
             - action: media_player.clear_playlist
               target:
                 entity_id: "{{ mass_player }}"
 
-            - action: timer.cancel
-              target:
-                entity_id: timer.alarm_clock_snooze
+    - action: input_boolean.turn_off
+      target:
+        entity_id:
+          - input_boolean.alarm_clock_test_play
+          - input_boolean.alarm_clock_failed
 
-            - action: input_boolean.turn_off
-              target:
-                entity_id: input_boolean.alarm_clock_test_play
-
-            - action: switch.turn_off
-              target:
-                entity_id: switch.alarm_clock_snooze
-
-            - action: input_text.set_value
-              target:
-                entity_id: input_text.active_alarm_clock_media_player
-              data:
-                value: ""
-
-            - action: script.media_player_set_volumes
-              data:
-                source: alarm_clock_off
-
-            # turn off at end so binary_sensor.alarm_clock doesn't turn off and resume media before we're done
-            - action: switch.turn_off
-              target:
-                entity_id: "switch.alarm_clock_{{ alarm_type }}"
-
-            - if: "{{ alarm_type == 'manual' and is_state('input_boolean.alarm_clock_manual_repeat', 'off') }}"
-              then:
-                - action: input_boolean.turn_off
-                  target:
-                    entity_id: input_boolean.alarm_clock_manual
-      else:
-        - action: system_log.write
-          data:
-            logger: "{{ this.entity_id }}"
-            level: warning
-            message: "No active alarm or invalid alarm type."
+    - action: script.media_player_set_volumes
+      data:
+        source: alarm_clock_off

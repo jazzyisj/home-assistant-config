@@ -1,12 +1,12 @@
 ###############################################################################
-## Alarm Clock - Snoozed
-## alarm clock will snooze/fail if active and external source plays
-## eg. launching another media source using google assistant
+## Alarm Clock Snooze Turn On
 ###############################################################################
-- id: alarm_clock_snooze_on
-  alias: "[Alarm Clock] Snooze On"
+- id: alarm_clock_snooze_turn_on
+  alias: "[Alarm Clock] Snooze Turn On"
   description: "Turn on alarm clock snooze."
   max_exceeded: silent
+  variables:
+    media_player: "{{ states('sensor.alarm_clock_active_media_player') }}"
   trigger:
     # use media player pause as a snooze button
     - platform: state
@@ -29,21 +29,11 @@
       entity_id: binary_sensor.alarm_clock
       state: "on"
 
-    - condition: state
-      entity_id:
-        - script.alarm_clock_play
-        - script.alarm_clock_stop
-      state: "off"
-
     - condition: template
       alias: "Trigger is an active alarm_clock media player"
-      value_template: > #MASS change trigger to mass player
-        {% if trigger.id == 'player' %}
-          {% set player = expand('group.mass_media_players')
-              | selectattr('name', 'eq', state_attr(trigger.entity_id,'friendly_name'))
-              | map(attribute='entity_id') | join %}
-          {{ iif(is_state('binary_sensor.alarm_clock', 'on'),
-              player in state_attr('sensor.alarm_clock_active_media_player', 'entity_id'), false) }}
+      value_template: >
+        {% if trigger.id == 'player' and has_value(media_player) %}
+          {{ trigger.entity_id in state_attr('sensor.alarm_clock_active_media_player', 'entity_id') }}
         {% else %} {{ true }}
         {% endif %}
   action:
@@ -52,35 +42,56 @@
         entity_id: switch.alarm_clock_snooze
 
 ###############################################################################
-## Alarm Clock - Snooze Off
+## Alarm Clock Snooze Turn Off"
 ###############################################################################
-- id: alarm_clock_snooze_off
-  alias: "[Alarm Clock] Snooze Off"
+- id: alarm_clock_snooze_turn_off
+  alias: "[Alarm Clock] Snooze Turn Off"
   description: "Turn off alarm clock snooze."
+  mode: single
+  max_exceeded: silent
   trigger:
     - platform: state
-      id: player
-      entity_id: !include /config/include/media_player_entities_single.yaml
-      to: playing
-      from: paused
+      entity_id: binary_sensor.alarm_clock
+      to: "off"
+
+    - platform: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.alarm_clock_snooze
+
+    - platform: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.alarm_clock_snooze
+
+    - platform: event
+      event_type: timer.paused
+      event_data:
+        entity_id: timer.alarm_clock_snooze
   condition:
     - condition: state
-      entity_id:
-        - binary_sensor.alarm_clock
-        - switch.alarm_clock_snooze
+      entity_id: switch.alarm_clock_snooze
       state: "on"
+  action:
+    - action: switch.turn_off
+      target:
+        entity_id: switch.alarm_clock_snooze
 
-    - condition: template
-      alias: "Trigger is an active alarm_clock media player"
-      value_template: > #MASS change trigger to mass player
-        {% if trigger.id == 'player' %}
-          {% set player = expand('group.mass_media_players')
-              | selectattr('name', 'eq', state_attr(trigger.entity_id,'friendly_name'))
-              | map(attribute='entity_id') | join %}
-          {{ iif(is_state('binary_sensor.alarm_clock', 'on'),
-              player in state_attr('sensor.alarm_clock_active_media_player', 'entity_id'), false) }}
-        {% else %} {{ true }}
-        {% endif %}
+###############################################################################
+## Alarm Clock Reset Snooze Switch"
+###############################################################################
+- id: alarm_clock_reset_snooze_switch
+  alias: "[Alarm Clock] Reset Snooze Switch"
+  description: "Turn off snooze switch if alarm clock is not on."
+  mode: parallel
+  trigger:
+    - platform: state
+      entity_id: switch.alarm_clock_snooze
+      to: "on"
+  condition:
+    - condition: state
+      entity_id: binary_sensor.alarm_clock
+      state: "off"
   action:
     - action: switch.turn_off
       target:

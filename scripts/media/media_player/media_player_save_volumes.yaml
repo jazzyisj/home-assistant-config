@@ -18,18 +18,25 @@ media_player_save_volumes:
       description: "Volume to save"
       example: "0.5"
   variables:
-    volume: "{{ volume | default(-1) }}"
     media_players: >
       {% set entities = entity_id | default(expand('group.single_media_players')
           | selectattr('state', 'in', ['playing', 'paused', 'buffering'])
           | map(attribute='entity_id') | list) %}
       {% if entities is iterable and (entities is string and entities is not mapping) %}
-        {% set entities = [entities] %}
+        {% if is_state_attr(entity_id, 'type', 'group') %}
+          {% set entities = state_attr('sensor.' ~ entity_id.split('.')[1], 'entity_id') %}
+        {% else %}
+          {% set entities = [entities] %}
+        {% endif %}
       {% endif %}
       {{ entities }}
+    phone_on: "{{ is_state('binary_sensor.mobile_phone_in_use', 'on') }}"
   sequence:
     - condition: template
       value_template: "{{ media_players | count > 0 }}"
+
+    - variables:
+        volume: "{{ volume | default(-1) | float(-1) }}" # won't set in script parameters
 
     - repeat:
         while: "{{ repeat.index <= media_players | count }}"
@@ -42,8 +49,8 @@ media_player_save_volumes:
                     | map(attribute='entity_id') | join)].object_id }}
               # if tts and phone one, use phone vols for tts restore in case phone off before tts
               volume_entity: >
-                {% if source == 'reset' %}
-                  {% if is_state('binary_sensor.mobile_phone_in_use', 'on') %} input_number.{{ player_id ~ '_phone' }}
+                {% if source in ['reset', 'media'] %}
+                  {% if phone_on %} input_number.{{ player_id ~ '_phone' }}
                   {% else %} input_number.{{ player_id ~ '_current_volume' }}
                   {% endif %}
                 {% else %} input_number.{{ player_id ~ '_' ~ source }}
@@ -61,13 +68,13 @@ media_player_save_volumes:
               current_volume: >
                 {% if volume > -1 %}
                   {{ volume }}
-                {% elif source == 'tts' and is_state('binary_sensor.mobile_phone_in_use', 'on') %}
+                {% elif source == 'tts' and phone_on %}
                   {{ states('input_number.' ~ player_id ~ '_phone') | float(-1) }}
                 {% else %}
                   {{ states('input_number.' ~ player_id ~ '_current_volume') | float(-1) }}
                 {% endif %}
               quiet_volume: >
-                {% set qv = (states('input_number.speaker_quiet_volume') | int/100) | float(-1) %}
+                {% set qv = (states('input_number.media_quiet_volume') | int/100) | float(-1) %}
                 {{ qv * volume_factor }}
               save_volume: >
                 {% if source == 'reset' %}

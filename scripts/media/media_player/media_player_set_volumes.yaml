@@ -33,16 +33,22 @@ media_player_set_volumes:
     #TV roku doesn't support volume set
     #TV exclude TV's (no volume attribute, error if off)
     media_players: >
-      {% set entities = entity_id | default(state_attr('group.single_media_players','entity_id')) %}
+      {% set entities = entity_id | default(state_attr('group.single_media_players', 'entity_id')) %}
       {% if entities is iterable and (entities is string and entities is not mapping) %}
-        {% set entities = [entities] %}
+        {% if is_state_attr(entity_id, 'type', 'group') %}
+          {% set entities = state_attr('sensor.' ~ entity_id.split('.')[1], 'entity_id') %}
+        {% else %}
+          {% set entities = [entities] %}
+        {% endif %}
       {% endif %}
       {{ expand(entities) | rejectattr('attributes.device_class', 'eq', 'tv') | map(attribute='entity_id') | list }}
     source: "{{ source | default('reset') }}"
     force_reset: "{{ force_reset | default(false) }}"
-    source_off: "{{ source[0:-4] == '_off' }}"
+    source_off: "{{ source | contains('_off') }}"
     volume: "{{ volume | default(-1) }}"
     quiet_override: "{{ quiet_override | default(false) }}"
+    phone_on: "{{ is_state('binary_sensor.mobile_phone_in_use', 'on') }}"
+    speaker_on: "{{ is_state_attr('binary_sensor.mobile_phone_in_use', 'speaker_on', true) }}"
   sequence:
     # do not run if system is muted (kills mute)
     - condition: state
@@ -60,20 +66,20 @@ media_player_set_volumes:
             media_players: >
               {{ expand(media_players) | rejectattr('entity_id', 'in', muted_players) | map(attribute='entity_id') | list }}
 
-    # if source is phone/tts save current volumes to restore
-    - if: "{{ source in ['tts_all', 'phone_all'] }}"
+    # if source is phone or media when phone is on save current volumes to restore
+    - if: "{{ source in ['tts_all', 'phone_all'] or (source == 'media' and phone_on) }}"
       then:
         - action: script.media_player_save_volumes
           data:
-            source: "{{ source[0:-4] }}" # strip '_all'
+            source: "{{ source | replace('_all','') }}"
             entity_id: "{{ media_players }}"
+            volume: "{{ volume | float(-1) / 100 if source == 'media' else none }}" # save preset volume
 
-    # don't save restore volumes if lowered volumes, tts, alarm_clock, or phone in use
+    # don't save tts, alarm_clock, or phone in use volume changes
     - if: >
-        {{ source_off or source in ['phone_all', 'tts_all']
+        {{ source_off or source in ['phone_all', 'tts_all'] or phone_on
             or is_state('input_boolean.tts', 'on')
-            or is_state('binary_sensor.alarm_clock', 'on')
-            or is_state('binary_sensor.mobile_phone_in_use', 'on') }}
+            or is_state('binary_sensor.alarm_clock', 'on') }}
       then:
         - action: automation.turn_off
           target:
@@ -90,7 +96,7 @@ media_player_set_volumes:
               player: "{{ media_players[repeat.index-1] }}"
               player_id: "{{ states[player].object_id }}"
               source_volume: >
-                {% if source_off %} {{ states('input_number.' ~ player_id ~ '_' ~ source[0:-4]) | float(-1) }}
+                {% if source_off %} {{ states('input_number.' ~ player_id ~ '_' ~ source | replace('_off','')) | float(-1) }}
                 {% else %} -1
                 {% endif %}
           - if:
@@ -115,36 +121,38 @@ media_player_set_volumes:
                       if is_state_attr(player, 'device_class', 'tv') else true }}
             then:
               - variables:
-                  current_volume: "{{ states('input_number.' ~ player_id ~ '_current_volume') | float(-1) }}"
+                  current_volume: >
+                    {{ volume if source == 'media'
+                        else states('input_number.' ~ player_id ~ '_current_volume') | float(-1) }}
                   default_volume: "{{ states('input_number.' ~ player_id ~ '_default_volume') | float(-1) }}"
                   volume_factor: >
                     {% if default_volume > 0 and is_state('input_boolean.volume_balancing', 'on') %}
                       {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor') | float }}
                     {% endif %}
-                  quiet_volume: "{{ iif(quiet_override,volume,states('input_number.speaker_quiet_volume') | int/100) }}"
+                  quiet_volume: "{{ states('input_number.media_quiet_volume') | int / 100 }}"
                   alarm_clock_volume: >
-                    {{ states('input_number.alarm_clock_volume_' ~ state_attr('binary_sensor.alarm_clock', 'alarm_type'))
+                    {{ states('input_number.alarm_clock_volume_' ~ states('input_select.alarm_clock_type'))
                         | float(-1)/100 if source == 'alarm_clock' }}
                   reset_volume: >
                     {% if is_state('binary_sensor.quiet_time', 'on') %}
-                      {% set volume = quiet_volume if current_volume > quiet_volume else current_volume
+                      {% set reset_volume = quiet_volume if current_volume > quiet_volume else current_volume
                           if current_volume > 0 and is_state(player, ['playing', 'paused', 'buffering', 'on']) else quiet_volume %}
                     {% else %}
-                      {% set volume = iif(is_state(player, ['playing', 'paused', 'buffering', 'on'])
+                      {% set reset_volume = iif(is_state(player, ['playing', 'paused', 'buffering', 'on'])
                           and not force_reset, current_volume, default_volume) %}
                     {% endif %}
-                    {{ volume }}
+                    {{ reset_volume }}
                   new_volume: >
-                    {% if volume | float > 0 %} {% set new_volume = volume | float/100 %}
-                    {% elif source in ['phone_all', 'tts_all'] %}
-                      {% set lvol = 0.25 %}
-                      {% set new_volume = current_volume if current_volume < lvol else lvol %}
+                    {% if source in ['phone_all', 'tts_all'] %}
+                      {% set new_volume = current_volume if current_volume < 0.2 else 0.2 %}
+                    {% elif source == 'media' and phone_on %} {% set new_volume = 0 if speaker_on else 0.2 %}
                     {% elif source_off %} {% set new_volume = source_volume %}
                     {% elif source == 'alarm_clock' %} {% set new_volume = alarm_clock_volume %}
                     {% elif source == 'reset' %} {% set new_volume = reset_volume %}
+                    {% elif volume | float > 0 %} {% set new_volume = volume | float/100 %}
                     {% else %} {% set new_volume = current_volume %}
                     {% endif %}
-                    {% if is_state('binary_sensor.quiet_time', 'on') and not source in ['alarm_clock', 'tts'] %}
+                    {% if not quiet_override and is_state('binary_sensor.quiet_time', 'on') and not source in ['alarm_clock', 'tts'] %}
                       {% set new_volume = new_volume if new_volume < quiet_volume else quiet_volume %}
                     {% endif %}
                     {% set new_volume = new_volume * volume_factor | float(1) %} {# volume factor 1 == no adjustment #}
