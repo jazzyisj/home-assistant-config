@@ -4,9 +4,81 @@
 
 [More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-##### <font color='cyan'>Updated 24-08-22</font>
+##### <font color='cyan'>Updated 24-09-20</font>
 
-## INSTALLED ADDONS (21)
+## HARDWARE
+
+### Server
+
+- Home Assistant Blue (ODROID-N2+)
+- Google Coral USB Video Accelerator
+- Aeon Labs Gen5 ZWave Controller (ZW090)
+- Braoadcom USB Bluetooth Dongle (BCM20702A0)
+- Amazon Fire10 Tablet (Wall Mount)
+- ASUS RT-AX58U Router
+- Pi-Hole - RPi 3 (Model B r1.2)
+
+### Lighting, Fans, Appliance
+
+- Inovelli Z-Wave Switch (LZW30-SN)
+- Inovelli Z-Wave Dimmers (LZW31-SN)
+- Inovelli Z-Wave Smart Bulbs (LZW42)
+- Shelly 1 (SHSW-1)
+- Shelly RGBW2 (SHRGBW2)
+- Remotec Low Voltage Relay (ZFM-80)
+- Shelly 1PM (SHSW-PM)
+- Embrighten / GE Fan Controller (ZW4002)
+- Jasco / GE Fan Controller (ZW4002)
+- Google Nest Thermostat
+- LG ThinQ (Dishwasher, Oven, Fridge)
+
+### Energy Monitoring
+
+- Shelly 3EM (SHEM-3)
+- Shelly EM (SHEM)
+
+### Smoke Detectors
+
+- Google Nest Protect (Topaz-2.7)
+
+### Door Locks
+
+- Schlage (Allegion) BE469ZP (Z-Wave)
+
+### Cameras
+
+- Wyze (WYZE_CAKP2JFUS)
+- Lorex
+
+### Controllers
+
+- Spa Controller - Balboa (MS501X)
+- Irrigation - Hydrawise (HC 12 Zones)
+- Weather Station - Weatherflow Tempest
+
+### Leak Sensors
+
+- Shelly Flood (SHWT-1)
+
+### Temperature - Humity Sensors
+
+- Shelly H&T (SHHT-1)
+
+### Motion Sensors
+
+- Shelly Motion (SHMOS-01)
+- AEON Multisensor (ZW100)
+
+### Media Players
+
+- Google Chromecast
+- Google Nest Hub
+- Google Nest Mini
+- Google Home Mini
+- LG WebOS TV
+- HiSense Roku TV
+
+## INSTALLED ADDONS (20)
 
 - Advanced SSH & Web Terminal
 - Chrony
@@ -23,7 +95,6 @@
 - Samba Share
 - SQite Web
 - Studio Code Server
-- UniFi Network Application
 - VLC
 - VNC Viewer
 - WeatherFlow to MQTT
@@ -64,7 +135,7 @@
 - Card Tools
 - Digital Clock
 - Fold Entity Row
-- Frigate Hass Card
+- Frigate Card
 - Github Flexi Card
 - Horizon Card
 - Hourly Weather
@@ -88,12 +159,12 @@
 - Weather Chart Card
 - Windrose Card
 
-## ENTITY COUNTS (44 Domains, 4253 Entities)
+## ENTITY COUNTS (43 Domains, 4240 Entities)
 
 - alarm_control_panel: 3
 - alert: 102
-- automation: 313
-- binary_sensor: 483
+- automation: 308
+- binary_sensor: 487
 - button: 133
 - calendar: 17
 - camera: 32
@@ -102,32 +173,31 @@
 - counter: 1
 - device_tracker: 75
 - event: 75
-- fan: 10
-- group: 78
+- fan: 9
+- group: 77
 - image: 21
-- input_boolean: 190
+- input_boolean: 194
 - input_button: 2
 - input_datetime: 42
 - input_number: 171
 - input_select: 30
-- input_text: 61
+- input_text: 62
 - light: 54
 - lock: 4
 - media_player: 39
 - notify: 3
-- number: 112
+- number: 110
 - person: 2
-- proximity: 1
 - remote: 1
 - scene: 8
-- script: 72
-- select: 142
-- sensor: 1556
+- script: 69
+- select: 143
+- sensor: 1560
 - siren: 2
 - stt: 1
 - sun: 1
-- switch: 200
-- timer: 53
+- switch: 197
+- timer: 42
 - todo: 4
 - tts: 2
 - update: 125
@@ -144,7 +214,7 @@
 - #IDEA - idea for feature/option/function
 - #ISSUE - unresolved issue
 - #TEMP - temporary option/code
-- #STYLE - css styling needs work
+- #STYLE - css styling note/needs work
 - #IMAGE - new image required
 - #QUESTION - question I need to answer
 - #DELETE - code tagged for deletion
