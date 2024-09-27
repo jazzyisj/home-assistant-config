@@ -7,7 +7,9 @@
   mode: parallel
   variables:
     message: |
-      {%- from 'speech.jinja' import plural_qty %}
+      {%- from 'speech.jinja' import array_to_clist %}
+      {% from 'speech.jinja' import clist_suffix %}
+      {%- from 'speech.jinja' import plural_word %}
       {%- set t = trigger.entity_id %}
       {%- if t == 'alert.open_windows' %}
       Looks like a beautiful {{ states('sensor.tod_greeting') }} out there!
@@ -46,18 +48,11 @@
       {%- elif t == 'alert.spa_low_temperature' %}
       The hot tub temperature alert is on!  The hot tub temperature is only {{ states('sensor.spa_temperature') | int('unknown') }} degrees.
       {%- elif t == 'alert.leak_detected' %}
-      {%- set entities = expand(state_attr('binary_sensor.leak_detected_alert', 'entity_id')) %}
-      {%- set names = entities | map(attribute='name') | join(', ') %}
-      {%- set clist = ', and ' if names.split(', ') | count > 2 else ' and ' %}
-      {%- set qty = entities | count %}
-      Attention! Moisture has been detected by the {{ clist.join(names.rsplit(', ', 1)) }} leak {{ plural_qty('sensor', qty, false) }}!
+      {%- set entities = expand(state_attr('binary_sensor.leak_detected_alert', 'entity_id')) | map(attribute='name') | list %}
+      Attention! Moisture has been detected by the {{ clist_suffix(entities, false, false, 'leak sensor') }}!
       {%- elif t == 'alert.unavailable_leak_sensor' %}
       {%- set entities = expand(state_attr('binary_sensor.unavailable_leak_sensor', 'entity_id')) %}
-      {%- set names = entities | map(attribute='name') | join(', ') %}
-      {%- set clist = ', and ' if names.split(', ') | count > 2 else ' and ' %}
-      {%- set qty = entities | count %}
-      {%- set plural = 's are' if qty > 1 else ' is' -%}
-      Attention! The {{ clist.join(names.rsplit(', ', 1)) }} leak {{ pluralize('sensor', qty, true) }} offline!
+      Attention! The {{ clist_suffix(entities, false, false, 'leak sensor') }} offline!
       {%- elif t == 'alert.indoor_sump' %}
       Attention! There is a critical issue with the indoor sump pump!
       {%- elif t == 'alert.outdoor_sump' %}
@@ -114,52 +109,44 @@
         {%- endfor %}
       {%- endif %}
       {%- elif t == 'alert.hvac_window_door_open' %}
-      {%- set msg = namespace(value='') %}
-      {%- set entities = expand(state_attr('binary_sensor.hvac_window_door_open_alert', 'entity_id')) %}
-      {%- set qty = entities | count %}
-      {%- for item in entities %}
-        {%- if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
-        {%- set msg.value = msg.value ~ item.name | replace(' Open Alert', '') %}
-      {%- endfor %}
-      {%- set clist = ', and ' if msg.value.split(', ') | count > 2 else ' and ' %}
-      {%- set plural = ' are' if qty | int(0) > 1 else ' is' %}
+      {%- set entities = expand(state_attr('binary_sensor.hvac_window_door_open_alert', 'entity_id'))
+        | map(attribute='name') | list | replace(' Open Alert', '') %}
+      {%- set open_names = array_to_clist(entities, true) | replace(' Open Alert', '') %}
       Attention! The thermostat has been turned off.
-      The {{ clist.join(msg.value.rsplit(', ', 1)) ~ plural }} open!
+      The {{ open_names }}{{ plural_word('', entities | count, true) }} open!
       {%- elif t == 'alert.bathroom_mold_risk' %}
       Attention! The bathroom mold risk alert is active.
       {%- elif t == 'alert.door_lock_jammed' %}
-      {% from 'lock.jinja' import clist_locks %}
-      {%- set locks = states.binary_sensor
+      {% from 'lock.jinja' import list_locks %}
+      {%- set entities = states.binary_sensor
             | selectattr('entity_id', 'contains', '_door_lock_lock_jammed')
             | selectattr('state', 'eq', 'on')
             | map(attribute='object_id')
             | map('regex_replace', find='(.*)_door_lock_lock_jammed',
                 replace='lock.\\1_door_lock', ignorecase=False)
             | list | sort %}
-      {%- set plural = 's are' if locks | count > 1 else ' is' -%}
-      Attention! The {{ clist_locks(locks) }} door lock{{ plural }} jammed!
+      Attention! The {{ list_locks(entities, 'locks') }} jammed!
       {%- elif t == 'alert.door_lock_failed' %}
-      {%- from 'lock.jinja' import clist_locks %}
-      {%- set locks = states.binary_sensor
+      {%- from 'lock.jinja' import list_locks %}
+      {%- set entities = states.binary_sensor
             | selectattr('entity_id', 'contains', '_door_lock_system_hardware_failure')
             | selectattr('state', 'eq', 'on')
             | map(attribute='object_id')
             | map('regex_replace', find='(.*)_door_lock_system_hardware_failure',
                 replace='lock.\\1_door_lock', ignorecase=False)
             | list | sort %}
-      {%- set plural = 's have' if locks | count > 1 else ' has' -%}
-      Attention! The {{ clist_locks(locks) }} door lock{{ plural }} failed!
+      {%- set plural = 's have' if entities | count > 1 else ' has' -%}
+      Attention! The {{ list_locks(entities, 'lock failed alert') }} on!
       {%- elif t == 'alert.door_lock_keypad_disabled' %}
-      {%- from 'lock.jinja' import clist_locks %}
-      {%- set locks = states.binary_sensor
+      {%- from 'lock.jinja' import list_locks %}
+      {%- set entities = states.binary_sensor
             | selectattr('entity_id', 'contains', '_door_lock_keypad_temporary_disabled')
             | selectattr('state', 'eq', 'on')
             | map(attribute='object_id')
             | map('regex_replace', find='(.*)_door_lock_keypad_temporary_disabled',
                 replace='lock.\\1_door_lock', ignorecase=False)
             | list | sort %}
-      {%- set plural = 's are' if locks | count > 1 else ' has been' -%}
-      Attention! The {{ clist_locks(locks) }} door keypad{{ plural }} disabled!
+      Attention! The {{ list_locks(entities, 'lock keypad') }} disabled!
       {%- elif t == 'alert.unknown_browsers' %}
       Attention! There is an unknown browser accessing Home Assistant!
       {%- elif t == 'alert.unknown_devices' %}

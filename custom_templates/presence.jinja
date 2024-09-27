@@ -30,57 +30,27 @@ or person | lower | contains('keypad') %} hassio
 {%- endif -%}
 {%- endmacro -%}
 
-{%- macro list_people(people, suffix) -%}
-{%- set people = people | default([]) %}
-{%- set msg = namespace(value='') %}
-{%- set qty = namespace(value=0) %}
-{%- if is_state('input_boolean.home_override_jason','on')
-      and is_state('binary_sensor.jason_home','on')
-      and 'jason' not in people %}
-  {%- set msg.value = msg.value ~ 'Jason (OR)' %}
-  {%- set qty.value = qty.value + 1 %}
-{%- endif %}
-{%- for item in people %}
-  {%- set qty.value = qty.value | int + 1 %}
-  {%- if not loop.first %}{% set msg.value = msg.value ~ ', ' %}{% endif %}
-  {%- set msg.value = msg.value ~ item | title %}
-  {%- if is_state('input_boolean.home_override_jason','on') and item == 'jason' %}
-    {%- set msg.value = msg.value ~ ' (OR)' %}
-  {%- endif %}
-{%- endfor %}
-{%- set clist = ', and ' if msg.value.split(', ') | count > 2 else ' and ' %}
-{{- clist.join(msg.value.rsplit(', ', 1)) -}}
-{%- if qty.value | int == 0 %} Nobody
-  {%- if is_state('input_boolean.home_override_jason','on')
-        and is_state('binary_sensor.jason_home','off') %}
-    {{- ' - Jason (OR)' }}
-  {%- endif %}
-{%- endif %}
-{%- if suffix %}
-  {%- set plural = ' are' if qty.value | int > 1 else ' is' %}
-  {{- plural -}}
-{%- endif -%}
-{%- endmacro -%}
-
 {%- macro occupancy_alert() -%}
+{%- from 'speech.jinja' import array_to_clist %}
+{%- from 'speech.jinja' import plural_word %}
+{%- set home = state_attr('binary_sensor.someone_home', 'home') %}
 {%- set someone_home = is_state('binary_sensor.someone_home', 'on') %}
 {%- set owner_home = state_attr('binary_sensor.owner_home', 'on') %}
-{%- set people = state_attr('binary_sensor.someone_home', 'home') %}
 {%- set alarm = states('alarm_control_panel.master') %}
 {%- set mode = states('input_select.occupancy_mode') %}
 {%- set status = states('sensor.master_alarm_status') %}
-{%- from 'presence.jinja' import list_people %}
 {%- if (someone_home and alarm in ['armed_away', 'armed_vacation'])
 or (not someone_home and alarm in ['disarmed', 'armed_home']) %}
-{{- list_people(people, true) }} home but the house alarm is {{ status }}.
+{{- array_to_clist(home, true) }}{{ plural_word('', home | count, true) }} home, but the house alarm is {{ status }}.
 {%- elif (alarm == 'armed_night' and mode != 'Night')
 or (alarm in ['armed_home', 'disarmed'] and mode not in ['Home', 'Guest']) %}
 The house is in {{ mode }} mode but the alarm is {{ status }}.
 {%- elif mode == 'Guest' and owner_home %}
-The house is in guest mode, but {{ list_people(people | replace('guest', '')) }} home.
+The house is in guest mode, but {{ array_to_clist(home, true) | replace('guest', '') }}
+{{- plural_word('', home | count - 1, true) }} home.
 {%- elif (someone_home and mode in ['Away', 'Vacation'])
 or (not someone_home and mode in ['Home', 'Guest', 'Night']) %}
-{{ list_people(people, true) }} home but house is in {{ mode }} mode.
+{{ array_to_clist(home, true) }}{{ plural_word('', home | count, true) }} home, but house is in {{ mode }} mode.
 {%- endif %}
 {%- if someone_home %}
 {%- if mode == ['Away', 'Vacation'] %}
@@ -90,10 +60,10 @@ Have you forgotten to disarm the alarm?
 {%- endif %}
 {%- else %}
 Has your phone not connected to the network
-{%- if mode == ['Home', 'Night', 'Guest'] %}
+{%- if mode == ['Home', 'Night', 'Guest'] -%}
 , or have you just forgotten to activate away mode
-{%- elif alarm in ['disarmed', 'armed_home', 'armed_night', 'armed_vacation'] %}
-, have you just forgotten to arm the alarm again
-{%- endif %} ?
+{%- elif alarm in ['disarmed', 'armed_home', 'armed_night', 'armed_vacation'] -%}
+, or have you just forgotten to arm the alarm again
+{%- endif %}?
 {%- endif -%}
 {%- endmacro -%}

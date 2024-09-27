@@ -12,46 +12,53 @@ reset_failed_locks:
           | selectattr('state', 'eq', 'on') | map(attribute='object_id')
           | map('regex_replace', find='(.*)_door_lock_system_hardware_failure',
             replace='button.\\1_door_lock_idle_system_hardware_status', ignorecase=False) | list }}
-    locks: >
+    entities: >
       {{ expand(buttons) | map(attribute='object_id')
           | map('regex_replace', find='(.*)_door_lock_idle_system_hardware_status',
               replace='lock.\\1_door_lock', ignorecase=False) | list }}
   sequence:
-    - if: "{{ locks == none or locks | count == 0 }}"
+    - if: "{{ entities == none or entities | count == 0 }}"
       then:
-        - action: system_log.write
-          data:
-            logger: "{{ this.entity_id }}"
-            level: error
-            message: "Stop: No valid entities."
-
         - stop: "No valid entities."
           error: true
 
     # toggle lock to reset state from unknown
     - action: lock.unlock
       data:
-        entity_id: "{{ locks }}"
+        entity_id: "{{ entities }}"
 
     - delay: 5 # allow locks to unlock
 
     - action: lock.lock
       data:
-        entity_id: "{{ locks }}"
+        entity_id: "{{ entities }}"
 
-    - wait_template: "{{ expand(locks) | selectattr('state', 'eq', 'locked') | list | count == locks | count }}"
+    - wait_template: "{{ expand(entities) | selectattr('state', 'eq', 'unlocked') | list | count == 0 }}"
       timeout: 60
 
-    - if: "{{ wait.completed }}"
+    - variables: # recheck alert may have reset automatically when locked
+        buttons: >
+          {{ states.binary_sensor
+              | selectattr('entity_id', 'contains', '_door_lock_system_hardware_failure')
+              | selectattr('state', 'eq', 'on') | map(attribute='object_id')
+              | map('regex_replace', find='(.*)_door_lock_system_hardware_failure',
+                replace='button.\\1_door_lock_idle_system_hardware_status', ignorecase=False) | list }}
+        entities: >
+          {{ expand(buttons) | map(attribute='object_id')
+              | map('regex_replace', find='(.*)_door_lock_idle_system_hardware_status',
+                  replace='lock.\\1_door_lock', ignorecase=False) | list }}
+
+    - if: "{{ buttons | count > 0 }}"
       then:
         - action: button.press
           target:
             entity_id: "{{ buttons }}"
-      else:
+
+    - if: "{{ entities | count > 0 }}"
+      then:
         - action: script.tts_play
           data:
             message: |
-              {%- from 'lock.jinja' import clist_locks -%}
-              {%- set plural = 's have' if locks | count > 1 else ' has' -%}
-              The {{ clist_locks(locks) }} door lock hardware failure{{ plural }} not been cleared!
+              {%- from 'lock.jinja' import list_locks -%}
+              The {{ list_locks(entities, 'failure') }} not cleared!
             quiet_play: true
