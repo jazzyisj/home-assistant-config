@@ -1,0 +1,80 @@
+###############################################################################
+## Reset Locks
+###############################################################################
+reset_locks:
+  alias: "Reset Locks"
+  description: "Reset entry locks."
+  icon: mdi:lock
+  fields:
+    type:
+      description: "Lock failure type"
+      example: "jammed"
+  variables:
+    sensor_name: >
+      {% if type == 'jammed' %} _door_lock_lock_jammed
+      {% elif type == 'failed' %} _door_lock_system_hardware_failure
+      {% elif type == 'intrusion' %} _door_lock_intrusion
+      {% elif type == 'keypad' %} _door_lock_keypad_temporary_disabled
+      {% endif %}
+    button_name: >
+      {% if type == 'jammed' %} _door_lock_idle_access_control_lock_state
+      {% elif type == 'failed' %} _door_lock_idle_system_hardware_status
+      {% elif type == 'intrusion' %} _door_lock_idle_home_security_sensor_status
+      {% elif type == 'keypad' %} _door_lock_idle_access_control_keypad_state
+      {% endif %}
+    locks: >
+      {{ states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
+          | selectattr('state', 'eq', 'on') | map(attribute='object_id')
+          | map('regex_replace', find='(.*)' ~ sensor_name,
+              replace='lock.\\1_door_lock', ignorecase=False) | list }}
+  sequence:
+    - if: "{{ locks == none or locks | count == 0 }}"
+      then:
+        - stop: "No valid entities."
+          error: true
+
+    # toggle lock to reset state from unknown
+    - action: lock.unlock
+      data:
+        entity_id: "{{ locks }}"
+
+    - delay: 5 # allow locks to unlock
+
+    - action: lock.lock
+      data:
+        entity_id: "{{ locks }}"
+
+    - wait_template: "{{ expand(locks) | selectattr('state', 'eq', 'unlocked') | list | count == 0 }}"
+      timeout: 60
+
+    - variables:
+        buttons: >
+          {{ expand(states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
+              | selectattr('state', 'eq', 'on')) | map(attribute='object_id') | list
+              | map('regex_replace', find='(.*)' ~ sensor_name,
+                replace='button.\\1' ~ button_name, ignorecase=False) | list }}
+
+    # if any sensors have not turned off press reset buttons
+    - if: "{{ buttons | count > 0 }}"
+      then:
+        - action: button.press
+          target:
+            entity_id: "{{ buttons }}"
+
+    - delay: 5 # let sensors reset
+
+    - variables:
+        locks: >
+          {{ states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
+              | selectattr('state', 'eq', 'on') | map(attribute='object_id')
+              | map('regex_replace', find='(.*)' ~ sensor_name,
+                  replace='lock.\\1_door_lock', ignorecase=False) | list }}
+
+    - if: "{{ locks | count > 0 }}"
+      then:
+        - action: script.tts_play
+          data:
+            message: |
+              {%- from 'lock.jinja' import list_locks -%}
+              The {{ list_locks(locks, 'failure') }} not cleared!
+            quiet_play: true
