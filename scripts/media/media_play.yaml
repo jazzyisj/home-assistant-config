@@ -11,24 +11,23 @@ media_play:
       example: "sleep"
   variables:
     preset: "{{ preset | default('play') }}"
-    media_type: "{{ states('input_select.media_preset_type_' ~ preset) | lower }}"
-    media_id: >
-      {{ iif(media_type == 'radio',
-          states('select.media_preset_radio_' ~ preset),
-          states('select.media_preset_playlist_' ~ preset)) }}
-    enqueue: "{{ iif(preset == 'play', states('input_select.enqueue_mode_play'), 'replace') }}"
+    media_type: "{{ states('input_select.media_type_' ~ preset) | lower }}"  
+    media_id: "{{ states('select.media_' ~ media_type ~ '_' ~ preset) }}"
+    enqueue: "{{ states('input_select.enqueue_mode_' ~ preset) | lower }}"
+    shuffle: "{{ is_state('input_boolean.shuffle_' ~ preset, 'on') }}"
+    radio_mode: "{{ is_state('input_boolean.radio_' ~ preset, 'on') }}"
+    repeat: "{{ states('input_select.repeat_' ~ preset) | lower }}"
+    volume: "{{ states('input_number.media_volume_' ~ preset) | int }}"
     media_player: >
       {{ expand('group.media_players')
           | selectattr('name', 'eq', iif(media_type == 'video',
-              states('select.media_preset_video_display_' ~ preset),
-              states('select.media_preset_speaker_' ~ preset)))
+              states('select.media_video_display_' ~ preset),
+              states('select.media_speaker_' ~ preset)))
           | map(attribute='entity_id') | join }}
-    #MASS use mass player for media play, default to hass player
     mass_player: >
-      {% set mass = expand('group.mass_media_players')
+      {{ expand('group.mass_media_players')
           | selectattr('name', 'eq', state_attr(media_player, 'friendly_name'))
-          | map(attribute='entity_id') | join %}
-      {{ media_player if mass == '' else mass }}
+          | map(attribute='entity_id') | join }}
     media_players: >
       {% if media_player != '' %}
         {% if is_state_attr(media_player, 'type', 'group') %}
@@ -67,7 +66,7 @@ media_play:
           {% endfor %}
         {% endif %}
       {% endif %}
-      {{ stop_player.entity_id }}
+      {{ stop_player.entity_id }}   
   sequence:
     - if:
         - condition: state
@@ -111,27 +110,31 @@ media_play:
             reset_volume: false
           continue_on_error: true
 
-    # avoid google bloops
-    - action: script.turn_media_player_on
+    - action: media_player.volume_set
+      target:
+        entity_id: "{{ media_players }}"
       data:
-        entity_id: "{{ media_player }}"
+        volume_level: 0
       continue_on_error: true
 
     - if: "{{ media_type == 'video' }}"
       then:
+        - variables: #TEMP until video presets figured out
+            link: >
+              {% set title = states('select.media_video_' ~ preset) %}
+              {% if title == 'TV For Dogs' %} 9QCKe-lQQOo
+              {% elif title == 'Anatoly' %} Jh8bd81Vclk
+              {% elif title == 'Legal Eagle' %} LtPM7zkXlW8
+              {% elif title == 'Andrew' %} OLLHI2rswd8
+              {% endif %}
+
         - action: media_player.play_media
           target:
             entity_id: "{{ media_player }}"
           data:
             media_content_type: cast
-            #ISSUE can't template media_content_id?
-            #TODO add video to other presets, do in script.media_play
-            media_content_id: '
-              {
-              "app_name": "youtube",
-              "media_id": "nYcHi9EgUHs"
-              }'
-            enqueue: replace
+            media_content_id: '{{ ''{"app_name": "youtube","media_id": "'' ~ link ~ ''"}'' }}'
+            enqueue: "{{ enqueue }}"
             extra:
               autoplay: true
       else:
@@ -143,20 +146,20 @@ media_play:
                 level: critical
                 message: "Media cannot play.  Music Assistant media player is not available."
 
-            - stop: "Media cannot play.  No Music Assistant media players available."
+            - stop: "Media cannot play.  Music Assistant media player is not available."
 
         - action: media_player.shuffle_set
           target:
             entity_id: "{{ mass_player }}"
           data:
-            shuffle: "{{ is_state('input_boolean.shuffle_' ~ preset, 'on') }}"
+            shuffle: "{{ shuffle }}"
           continue_on_error: true
 
         - action: media_player.repeat_set
           target:
             entity_id: "{{ mass_player }}"
           data:
-            repeat: "{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'all', 'off') }}"
+            repeat: "{{ repeat }}"
           continue_on_error: true
 
         - action: mass.play_media
@@ -164,7 +167,9 @@ media_play:
             entity_id: "{{ mass_player }}"
           data:
             media_id: "{{ media_id }}"
+            media_type: "{{ media_type }}"
             enqueue: "{{ enqueue }}"
+            radio_mode: "{{ radio_mode }}"
           continue_on_error: true
 
     - wait_template: "{{ is_state(media_player, 'playing') }}"
@@ -178,14 +183,17 @@ media_play:
             logger: "{{ this.entity_id }}"
             level: critical
             message: |
+              -
               ** MEDIA PLAY FAILED **
               preset: {{ preset }}
               media_type: {{ media_type }}
               media_id: "{{ media_id }}"
-              enqueue: "{{ enqueue }}"
               media_player: {{ media_player }}
               mass_player: {{ mass_player }}
-              media_players: {{ media_players }}
+              media_players: {{ media_players }}              
+              enqueue: "{{ enqueue }}"
+              repeat: "{{ repeat }}"
+              volume: "{{ repeat }}"
               stop_player: {{ stop_player }}
 
         - action: script.tts_play
@@ -211,68 +219,102 @@ media_play:
           target:
             entity_id: "{{ media_players }}"
           data:
-            volume: "{{ states('input_number.media_preset_volume_' ~ preset) | int }}"
+            volume: "{{ volume }}"
             quiet_override: "{{ preset == 'shower' }}"
             source: media
           continue_on_error: true
 
-        #IDEA set garage volume if garage occupied
+        #IDEA set garage volume override if garage occupied
 
-        - if: "{{ has_value('timer.media_preset_' ~ preset) }}"
+        - if: "{{ has_value('timer.media_' ~ preset) }}"
           then:
             - action: timer.start
               target:
-                entity_id: "timer.media_preset_{{ preset }}"
+                entity_id: "timer.media_{{ preset }}"
               data:
                 duration:
-                  minutes: "{{ states('input_number.media_preset_' ~ preset ~ '_time') | int }}"
+                  minutes: "{{ states('input_number.media_' ~ preset ~ '_time') | int }}"
 
     # set media preset play values for resume/restart last media
-    - if: "{{ preset != 'play' and media_type != 'video' }}"
+    - if: "{{ preset != 'play' }}"
       then:
         - action: input_select.select_option
           target:
-            entity_id: input_select.media_preset_type_play
+            entity_id: input_select.media_type_play
           data:
-            option: "{{ media_type | title }}"
+            option: "{{ states('input_select.media_type_' ~ preset) }}"
 
-        - action: select.select_option
-          target:
-            entity_id: select.media_preset_playlist_play
-          data:
-            option: "{{ states('select.media_preset_playlist_' ~ preset) }}"
+        - if: "{{ media_type != video }}"
+          then:
+            - action: select.select_option
+              target:
+                entity_id: select.media_speaker_play
+              data:
+                option: "{{ states('select.media_speaker_' ~ preset) }}"
 
-        - action: select.select_option
-          target:
-            entity_id: select.media_preset_radio_play
-          data:
-            option: "{{ states('select.media_preset_radio_' ~ preset) }}"
+            - action: select.select_option
+              target:
+                entity_id: select.media_artist_play
+              data:
+                option: "{{ states('select.media_artist_' ~ preset) }}"
+
+            - action: select.select_option
+              target:
+                entity_id: select.media_album_play
+              data:
+                option: "{{ states('select.media_album_' ~ preset) }}"
+
+            - action: select.select_option
+              target:
+                entity_id: select.media_track_play
+              data:
+                option: "{{ states('select.media_track_' ~ preset) }}"
+
+            - action: select.select_option
+              target:
+                entity_id: select.media_playlist_play
+              data:
+                option: "{{ states('select.media_playlist_' ~ preset) }}"
+
+            - action: select.select_option
+              target:
+                entity_id: select.media_radio_play
+              data:
+                option: "{{ states('select.media_radio_' ~ preset) }}"
+
+            - action: "input_boolean.turn_{{ states('input_boolean.shuffle_' ~ preset) }}"
+              target:
+                entity_id: input_boolean.shuffle_play  
+
+            - action: input_select.select_option
+              target:
+                entity_id: input_select.repeat_play
+              data:
+                option: "{{ states('input_select.repeat_' ~ preset) }}"
+          else:
+            - action: select.select_option
+              target:
+                entity_id: select.media_video_display_play
+              data:
+                option: "{{ states('select.media_video_display_' ~ preset) }}"
+
+            - action: select.select_option
+              target:
+                entity_id: select.media_video_play
+              data:
+                option: "{{ states('select.media_video_' ~ preset) }}"
 
         - action: input_select.select_option
           target:
             entity_id: input_select.enqueue_mode_play
           data:
-            option: replace
-
-        - action: select.select_option
-          target:
-            entity_id: select.media_preset_speaker_play
-          data:
-            option: "{{ states('select.media_preset_speaker_' ~ preset) }}"
+            option: "{{ states('input_select.enqueue_mode_' ~ preset) }}"
 
         - action: input_number.set_value
           target:
-            entity_id: input_number.media_preset_volume_play
+            entity_id: input_number.media_volume_play
           data:
-            value: "{{ states('input_number.media_preset_volume_' ~ preset) }}"
-
-        - action: "input_boolean.turn_{{ iif(is_state('input_boolean.shuffle_' ~ preset, 'on'), 'on', 'off') }}"
-          target:
-            entity_id: input_boolean.shuffle_play
-
-        - action: "input_boolean.turn_{{ iif(is_state('input_boolean.repeat_' ~ preset, 'on'), 'on', 'off') }}"
-          target:
-            entity_id: input_boolean.repeat_play
+            value: "{{ states('input_number.media_volume_' ~ preset) }}"
 
     - action: input_boolean.turn_off
       target:

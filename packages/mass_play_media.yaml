@@ -16,7 +16,7 @@ input_boolean:
     icon: mdi:repeat
 
   mass_radio:
-    name: "Radio"
+    name: "Radio Mode"
     icon: mdi:radio
 
 input_select:
@@ -69,6 +69,7 @@ template:
                     | selectattr('name', 'eq', states('select.mass_media_player'))
                     | map(attribute='entity_id') | join }}
 
+          # shuffle / repeat / enqueue not available in radio mode so don't set them
           - if: "{{ is_state('input_boolean.mass_radio','off') }}"
             then:
               # set shuffle parameter using boolean value
@@ -88,6 +89,7 @@ template:
                 continue_on_error: true
 
           # set media player volume to zero to try and avoid google bloop with power on
+          # you can delete this service call if you are not using Google media players
           - action: media_player.volume_set
             target:
               entity_id: "{{ media_player }}"
@@ -101,10 +103,18 @@ template:
               entity_id: "{{ media_player }}"
             data:
               media_id: "{{ states('select.mass_' ~ states('input_select.mass_media_type') | lower) }}"
+              media_type: >
+                {{ iif(is_state('input_boolean.mass_radio', 'on'), 'radio',
+                    states('input_select.mass_media_type') | lower) }}
               enqueue: "{{ states('input_select.mass_enqueue_mode') | lower }}"
             continue_on_error: true
 
-          # set media player to selected volume
+          # wait for media player to start playing
+          - wait_template: "{{ is_state(media_player, 'playing') }}"
+            timeout: 60
+
+          # set media player to selected volume, done after mass.play_media
+          # to avoid google bloops when media players turn on
           - action: media_player.volume_set
             target:
               entity_id: "{{ media_player }}"
