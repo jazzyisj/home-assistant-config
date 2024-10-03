@@ -211,6 +211,7 @@
 - #TEST - test code
 - #TODO - to be completed
 - #NEXT - next feature/fix to complete
+- #NOTE - important note / significant detail
 - #IDEA - idea for feature/option/function
 - #ISSUE - unresolved issue
 - #TEMP - temporary option/code
