@@ -1,8 +1,8 @@
 # Home Assistant Configuration
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png)
+## [More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-[More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
+![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png)
 
 ##### <font color='cyan'>Updated 24-09-20</font>
 
@@ -15,8 +15,14 @@
 - Aeon Labs Gen5 ZWave Controller (ZW090)
 - Braoadcom USB Bluetooth Dongle (BCM20702A0)
 - Amazon Fire10 Tablet (Wall Mount)
+
+### Network
 - ASUS RT-AX58U Router
 - Pi-Hole - RPi 3 (Model B r1.2)
+- TP Link Switch (TP-SG1024DE)
+- Unify AC-PRO AP
+- Unify UAP-AC-M
+- Google WIFI (Bridge)
 
 ### Lighting, Fans, Appliance
 
@@ -159,51 +165,51 @@
 - Weather Chart Card
 - Windrose Card
 
-## ENTITY COUNTS (43 Domains, 4240 Entities)
+## ENTITY COUNTS (43 Domains, 4340 Entities)
 
 - alarm_control_panel: 3
 - alert: 102
-- automation: 308
-- binary_sensor: 487
-- button: 133
+- automation: 312
+- binary_sensor: 488
+- button: 135
 - calendar: 17
-- camera: 32
+- camera: 31
 - climate: 5
 - conversation: 1
 - counter: 1
 - device_tracker: 75
 - event: 75
 - fan: 9
-- group: 77
+- group: 79
 - image: 21
-- input_boolean: 194
+- input_boolean: 199
 - input_button: 2
 - input_datetime: 42
-- input_number: 171
-- input_select: 30
-- input_text: 62
+- input_number: 175
+- input_select: 51
+- input_text: 116
 - light: 54
 - lock: 4
-- media_player: 39
+- media_player: 41
 - notify: 3
-- number: 110
+- number: 83
 - person: 2
 - remote: 1
 - scene: 8
-- script: 69
-- select: 143
-- sensor: 1560
+- script: 65
+- select: 198
+- sensor: 1559
 - siren: 2
-- stt: 1
+- stt: 2
 - sun: 1
-- switch: 197
+- switch: 184
 - timer: 42
 - todo: 4
-- tts: 2
+- tts: 3
 - update: 125
 - valve: 12
 - weather: 4
-- zone: 10
+- zone: 4
 
 ## TAGS USED IN CODE
 
