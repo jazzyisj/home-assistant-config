@@ -70,23 +70,27 @@ tts_play:
               | selectattr('name', 'eq', states('select.media_speaker_shower'))
               | map(attribute='entity_id') | join }}
         media_player: >
-          {% if is_state('input_select.occupancy_mode', 'Night') %}
-            {% set tplayer_name = states('select.tts_media_player_night') %}
-          {% elif is_state('binary_sensor.quiet_time', 'on') %}
-            {% set tplayer_name = states('select.tts_media_player_quiet') %}
-          {% else %}
-            {% set tplayer_name = states('select.tts_media_player') %}
-          {% endif %}
-          {% set tplayer = expand('group.tts_media_players') | selectattr('name', 'eq', tplayer_name)
-              | map(attribute='entity_id') | join %}
-          {% if is_state('binary_sensor.wan', 'off') %} media_player.hass_media_player
-          {% elif alert %} {{ states('sensor.tts_alert_media_player') }}
-          {% elif shower_tts %} {{ shower_player }}
-          {% elif states('select.tts_media_player_override') != 'None Selected' %}
+          {% if is_state('binary_sensor.wan', 'off') %}
+            media_player.hass_media_player
+          {% elif is_state('input_boolean.tts_override', 'on') %}
             {{ expand('group.tts_media_players')
-                | selectattr('name', 'eq', states('select.tts_media_player_override'))
-                | map(attribute='entity_id') | join }}
-          {% else %} {{ media_player if media_player is defined else tplayer }}
+              | selectattr('name', 'eq', states('select.tts_media_player_override'))
+              | map(attribute='entity_id') | join }}
+          {% elif shower_tts %} {{ shower_player }}
+          {% elif media_player is defined %} {{ media_player }}
+          {% else %}
+            {% if alert %}
+              {% set tplayer_name = states('sensor.tts_alert_media_player') %}
+            {% elif is_state('input_select.occupancy_mode', 'Night') %}
+              {% set tplayer_name = states('select.tts_media_player_night') %}
+            {% elif is_state('binary_sensor.quiet_time', 'on') %}
+              {% set tplayer_name = states('select.tts_media_player_quiet') %}
+            {% else %}
+              {% set tplayer_name = states('select.tts_media_player') %}
+            {% endif %}
+            {{ expand('group.tts_media_players')
+              | selectattr('name', 'eq', tplayer_name)
+              | map(attribute='entity_id') | join }}
           {% endif %}
         media_players: >
           {% set media_players = expand(state_attr('sensor.' ~ states[media_player].object_id, 'entity_id')
@@ -100,11 +104,12 @@ tts_play:
               | map(attribute='entity_id') | join %}
           {{ media_player if mass == '' else mass }}
         tts_service: > # force local tts service if wan disconnected
-          {% set manual = states('input_select.tts_service_override') %}
-          {% if is_state('binary_sensor.wan', 'off') %} {% set provider = 'Piper TTS' %}
-          {% elif manual != 'None Selected' %} {% set provider = manual %}
+          {% if is_state('binary_sensor.wan', 'off') %}
+            {% set provider = 'Piper' %}
+          {% elif is_state('input_boolean.tts_override', 'on') %}
+            {% set provider = states('input_select.tts_service_override') %}
           {% elif provider is not defined %}
-            {% if alert %} {% set provider = 'HASS' %}
+            {% if alert %} {% set provider = states('input_select.tts_service_alert') %}
             {% elif is_state('input_select.occupancy_mode', 'Night') %}
               {% set provider = states('input_select.tts_service_night') %}
             {% elif is_state('binary_sensor.quiet_time', 'on') %}
@@ -120,54 +125,66 @@ tts_play:
           {% else %} tts.home_assistant_cloud
           {% endif %}
         tts_volume: >
-          {% if shower_tts %} {{ states('input_number.media_volume_shower') | int / 100 }}
-          {% elif states('input_number.tts_volume_override') | int > 0 %}
-            {{ states('input_number.tts_volume_override') | int / 100 }}
+          {% if shower_tts %}
+            {% set tts_vol = states('input_number.media_volume_shower') | int %}
+          {% elif is_state('input_boolean.tts_override', 'on') %}
+            {% set tts_vol = states('input_number.tts_volume_override') | int %}
+          {% elif volume is defined %}
+            {% set tts_vol = volume | int(-1) %}
+          {% elif alert %}
+            {% set tts_vol = states('input_number.tts_volume_alert') | int %}
+          {% elif is_state('input_select.occupancy_mode', 'Night') %}
+            {% set tts_vol = states('input_number.tts_volume_night') | int %}
+          {% elif is_state('binary_sensor.quiet_time', 'on') %}
+            {% set tts_vol = states('input_number.tts_volume_quiet') | int %}
           {% else %}
-            {% if volume is defined %}
-              {% set tts_vol = volume | int(-1) %}
+            {% set tts_vol = states('input_number.tts_volume') | int %}
+          {% endif %}
+          {{ min_volume / 100 if min_volume > -1 and (min_volume > tts_vol) else tts_vol / 100 }}
+        language: > # HASS only
+          {% if tts_service == 'tts.home_assistant_cloud' %}
+            {% from 'tts.jinja' import hass_cloud_language %}
+            {% if is_state('input_boolean.tts_override', 'on') %}
+              {% set tts_lang = states('input_select.hass_cloud_language_override') %}
+            {% elif language is defined %}
+              {% set tts_lang = hass_cloud_language(language) %}
             {% elif alert %}
-              {% set tts_vol = states('input_number.tts_volume_alert') | int %}
+              {% set tts_lang = states('input_select.hass_cloud_language_alert') %}
             {% elif is_state('input_select.occupancy_mode', 'Night') %}
-              {% set tts_vol = states('input_number.tts_volume_night') | int %}
+              {% set tts_lang = states('input_select.hass_cloud_language_night') %}
             {% elif is_state('binary_sensor.quiet_time', 'on') %}
-              {% set tts_vol = states('input_number.tts_volume_quiet') | int %}
+              {% set tts_lang = states('input_select.hass_cloud_language_quiet') %}
             {% else %}
-              {% set tts_vol = states('input_number.tts_volume') | int %}
+              {% set tts_lang = states('input_select.hass_cloud_language') %}
             {% endif %}
-            {{ min_volume / 100 if min_volume > -1 and (min_volume > tts_vol) else tts_vol / 100 }}
+            {{ hass_cloud_language(tts_lang) }}
           {% endif %}
-        language: >
-          {% from 'tts.jinja' import hass_cloud_language %}
-          {% if states('input_select.tts_service_override') == 'HASS' %}
-            {% set tts_lang = states('input_select.hass_cloud_language_override') %}
-          {% elif language is defined %}
-            {% set tts_lang = hass_cloud_language(language) %}
-          {% elif alert %}
-            {% set tts_lang = states('input_select.hass_cloud_language_alert') %}
-          {% elif is_state('input_select.occupancy_mode', 'Night') %}
-            {% set tts_lang = states('input_select.hass_cloud_language_night') %}
-          {% elif is_state('binary_sensor.quiet_time', 'on') %}
-            {% set tts_lang = states('input_select.hass_cloud_language_quiet') %}
-          {% else %}
-            {% set tts_lang = states('input_select.hass_cloud_language') %}
-          {% endif %}
-          {{ hass_cloud_language(tts_lang) }}
         voice: >
-          {% if states('input_select.tts_service_override') == 'HASS' %}
-            {% set tts_voice = states('select.hass_cloud_voice_override') %}
-          {% elif voice is defined %}
-            {% set tts_voice = voice %}
-          {% elif alert %}
-            {% set tts_voice = states('select.hass_cloud_voice_alert') %}
-          {% elif is_state('input_select.occupancy_mode', 'Night') %}
-            {% set tts_voice = states('select.hass_cloud_voice_night') %}
-          {% elif is_state('binary_sensor.quiet_time', 'on') %}
-            {% set tts_voice = states('select.hass_cloud_voice_quiet') %}
-          {% else %}
-            {% set tts_voice = states('select.hass_cloud_voice') %}
+          {% if tts_service == 'tts.home_assistant_cloud' %} {% set tts = 'hass' %}
+          {% elif tts_service == 'tts.google_cloud' %} {% set tts = 'google' %}
+          {% elif tts_service == 'tts.piper' %} {% set tts = 'piper' %}
+          {% elif tts_service == 'broadcast' %} {% set tts = 'broadcast' %}
+          {% else %} {% set tts = 'hass' %}
           {% endif %}
-          {{ tts_voice ~ 'Neural' }}
+          {% if tts in ['hass', 'google'] %}
+            {% set domain = iif(tts == 'hass', 'select.', 'input_select.') %}
+            {% if is_state('input_boolean.tts_override', 'on') %}
+              {% set tts_voice = states(domain ~ tts ~ '_cloud_voice_override') %}
+            {% elif voice is defined %}
+              {% set tts_voice = voice %}
+            {% elif alert %}
+              {% set tts_voice = states(domain ~ tts ~ '_cloud_voice_alert') %}
+            {% elif is_state('input_select.occupancy_mode', 'Night') %}
+              {% set tts_voice = states(domain ~ tts ~ '_cloud_voice_night') %}
+            {% elif is_state('binary_sensor.quiet_time', 'on') %}
+              {% set tts_voice = states(domain ~ tts ~ '_cloud_voice_quiet') %}
+            {% else %}
+              {% set tts_voice = states(domain ~ tts ~ '_cloud_voice') %}
+            {% endif %}
+          {% else %} {% set tts_voice = '' %}
+          {% endif %}
+          {% if tts == 'hass' %} {% set tts_voice = tts_voice ~ 'Neural' %} {% endif %}
+          {{ tts_voice }}
         mute_tts: >
           {% if media_players | count == 0 or tts_volume == 0 %}
             {{ true }}
@@ -272,28 +289,41 @@ tts_play:
 
         - parallel:
             - sequence:
-                - if: "{{ tts_service == 'tts.home_assistant_cloud' }}"
-                  then:
+                - choose:
+                    - conditions: "{{ tts_service == 'tts.home_assistant_cloud' }}"
+                      sequence:
+                        - action: tts.speak
+                          data:
+                            cache: true
+                            media_player_entity_id: "{{ mass_player }}"
+                            message: "{{ message }}"
+                            language: "{{ language }}"
+                            options:
+                              voice: "{{ voice }}"
+                          target:
+                            entity_id: "{{ tts_service }}"
+                          continue_on_error: true
+                    - conditions: "{{ tts_service == 'tts.google_cloud' }}"
+                      sequence:
+                        - action: tts.speak
+                          data:
+                            cache: true
+                            media_player_entity_id: "{{ mass_player }}"
+                            message: "{{ message }}"
+                            options:
+                              voice: "{{ voice }}"
+                          target:
+                            entity_id: "{{ tts_service }}"
+                          continue_on_error: true
+                  default:
                     - action: tts.speak
                       data:
                         cache: true
                         media_player_entity_id: "{{ mass_player }}"
                         message: "{{ message }}"
-                        language: "{{ language }}"
-                        options:
-                          voice: "{{ voice }}"
                       target:
                         entity_id: "{{ tts_service }}"
                       continue_on_error: true
-                  else:
-                    - action: tts.speak
-                      data:
-                        cache: true
-                        media_player_entity_id: "{{ mass_player }}"
-                        message: "{{ message }}"
-                      target:
-                        entity_id: "{{ tts_service }}"
-                      continue_on_error: true                  
 
             - sequence:
                 # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
