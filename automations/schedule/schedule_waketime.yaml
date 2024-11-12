@@ -19,32 +19,48 @@
       state: "on"
 
     - condition: state
-      entity_id: input_boolean.alarm_clock_skip_next
-      state: "off"
-
-    - condition: state
       entity_id: input_select.occupancy_mode
       state: Night
-
-    - condition: template
-      alias: "Wake up enabled."
-      value_template: >
-        {% if is_state('binary_sensor.owner_home', 'off') %}
-          {{ is_state('input_boolean.guest_morning', 'on') }}
-        {% else %}
-          {{ is_state('input_boolean.workday_morning', 'on') if is_state('binary_sensor.work_today', 'on')
-              else is_state('input_boolean.weekend_morning', 'on') }}
-        {% endif %}
   actions:
-    - delay: 60 # compensate for early trigger
+    - if:
+        - condition: template
+          alias: "Wake up enabled."
+          value_template: >
+            {% if is_state('binary_sensor.owner_home', 'off') %}
+              {{ is_state('input_boolean.guest_morning', 'on') }}
+            {% else %}
+              {{ is_state('input_boolean.workday_morning', 'on') if is_state('binary_sensor.work_today', 'on')
+                  else is_state('input_boolean.weekend_morning', 'on') }}
+            {% endif %}
 
-    # wait for alarm clock to turn on (auto, manual, nap)
-    - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'on') }}"
-      timeout: 15
+        - condition: state
+          entity_id: input_boolean.alarm_clock_skip_next
+          state: "off"
+      then:
+        - delay: 60 # compensate for early trigger
 
-    - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
+        # wait for alarm clock to turn on (auto, manual, nap)
+        - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'on') }}"
+          timeout: 15
 
-    - action: script.waketime
+        - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
+
+        - action: script.waketime
+      else:
+        - action: input_select.select_option
+          target:
+            entity_id: input_select.occupancy_mode
+          data:
+            option: >
+              {% from 'presence.jinja' import occupancy_mode %}
+              {{ occupancy_mode() }}
+          continue_on_error: true
+
+        - action: script.arm_alarm
+          data:
+            mode: home
+            override: true
+          continue_on_error: true
 
 ###############################################################################
 ## Schedule - Manual Wake Up

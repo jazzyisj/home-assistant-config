@@ -1,20 +1,56 @@
 ###############################################################################
-## Media Charlie Video Display
+## Media Speaker Charlie
 ###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
+    - trigger: state
+      entity_id: group.media_preset_media_players
+      attribute: entity_id
+      to:
+      for: 30
+
+    - trigger: state
+      entity_id: input_text.media_speaker_charlie
+      to:
+  select:
+    - name: "Media Speaker Charlie"
+      unique_id: media_speaker_charlie
+      state: "{{ states('input_text.media_speaker_charlie') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option != none }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.media_speaker_charlie
+          data:
+            value: "{{ option }}"
+      options: >
+        {{ expand('group.media_preset_media_players')
+            | map(attribute='name') | list | sort }}
+
+###############################################################################
+## Media Video Display Charlie
+###############################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
       entity_id: group.cast_media_players
       attribute: entity_id
       to:
       for: 30
 
-    - platform: state
+    - trigger: state
       entity_id: input_text.media_video_display_charlie
       to:
   select:
@@ -35,55 +71,35 @@
             | map(attribute='name') | list | sort }}
 
 ###############################################################################
-## Media Charlie Speaker
+## Media Artist Charlie
 ###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
-      entity_id: group.media_preset_media_players
-      attribute: entity_id
+    - trigger: state
+      entity_id:
+        - input_text.media_artist_charlie
+        - button.update_mass_media
       to:
-      for: 30
+  action:
+    - action: mass.get_library
+      data:
+        favorite: true
+        limit: 50
+        media_type: artist
+      response_variable: mass_artists
 
-    - platform: state
-      entity_id: input_text.media_speaker_charlie
-      to:
-  select:
-    - name: "Media Speaker Charlie"
-      unique_id: media_speaker_charlie
-      state: "{{ states('input_text.media_speaker_charlie') }}"
-      select_option:
-        - condition: template
-          value_template: "{{ option != none }}"
-
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.media_speaker_charlie
-          data:
-            value: "{{ option }}"
-      options: >
-        {{ expand('group.media_preset_media_players')
-            | map(attribute='name') | list | sort }}
-
-  ###############################################################################
-  ## Media Charlie Artist
-  ###############################################################################
-
-- trigger:
-    - platform: homeassistant
-      event: start
-
-    - platform: event
-      event_type: event_template_reloaded
-
-    - platform: state
-      entity_id: input_text.media_artist_charlie
-      to:
+    - variables:
+        artists: >
+          {% set artist_list = namespace(names=[]) %}
+          {% for artist in mass_artists['artists'] %}
+            {% set artist_list.names = artist_list.names + [artist.name] %}
+          {% endfor %}
+          {{ artist_list.names | unique | list }}
   select:
     - name: "Media Artist Charlie"
       unique_id: media_artist_charlie
@@ -97,22 +113,103 @@
             entity_id: input_text.media_artist_charlie
           data:
             value: "{{ option }}"
-      options: !include /config/include/mass_artist_list.yaml
+      options: "{{ artists }}"
 
-  ###############################################################################
-  ## Media Charlie Album
-  ###############################################################################
-
+###############################################################################
+## Media Artist Filter Charlie
+###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
-      entity_id: input_text.media_album_charlie
+    - trigger: state
+      entity_id:
+        - input_select.media_type_charlie
+        - input_text.media_artist_filter_charlie
+        - select.media_track_charlie
+        - select.media_album_charlie
+        - select.media_album_filter_charlie
+        - button.update_mass_media
       to:
+      not_from:
+        - unknown
+        - unavailable
+  action:
+    - action: mass.get_library
+      data:
+        media_type: track
+      response_variable: mass_tracks
+
+    - action: mass.get_library
+      data:
+        media_type: album
+      response_variable: mass_albums
+
+    - variables:
+        artists: >
+          {% set artist_list = namespace(names=['']) %}
+          {% if states('input_select.media_type_charlie') == 'Track' %}
+            {% for track in mass_tracks['tracks'] %}
+              {% if track.name == states('select.media_track_charlie')
+                  and states('select.media_album_filter_charlie')
+                    in ['', 'unknown', track.album.name] %}
+                {% set artist_list.names = artist_list.names + [track.artists[0].name] %}
+              {% endif %}
+            {% endfor %}
+          {% elif states('input_select.media_type_charlie') == 'Album' %}
+            {% for album in mass_albums['albums'] %}
+              {% if album.name == states('select.media_album_charlie') %}
+                {% set artist_list.names = artist_list.names + [album.artists[0].name] %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          {{ artist_list.names | unique | list }}
+  select:
+    - name: "Media Artist Filter Charlie"
+      unique_id: media_artist_filter_charlie
+      state: "{{ states('input_text.media_artist_filter_charlie') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option != none }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.media_artist_filter_charlie
+          data:
+            value: "{{ option }}"
+      options: "{{ artists }}"
+
+###############################################################################
+## Media Album Charlie
+###############################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id:
+        - input_text.media_album_charlie
+        - button.update_mass_media
+      to:
+  action:
+    - action: mass.get_library
+      data:
+        media_type: album
+      response_variable: mass_albums
+
+    - variables:
+        albums: >
+          {% set album_list = namespace(names=[]) %}
+          {% for album in mass_albums['albums'] %}
+            {% set album_list.names = album_list.names + [album.name] %}
+          {% endfor %}
+          {{ album_list.names | unique | list }}
   select:
     - name: "Media Album Charlie"
       unique_id: media_album_charlie
@@ -126,22 +223,93 @@
             entity_id: input_text.media_album_charlie
           data:
             value: "{{ option }}"
-      options: !include /config/include/mass_album_list.yaml
+      options: "{{ albums }}"
 
-  ###############################################################################
-  ## Media Charlie Track
-  ###############################################################################
-
+###############################################################################
+## Media Album Filter Charlie
+###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
+    - trigger: state
+      entity_id:
+        - input_select.media_type_charlie
+        - input_text.media_album_filter_charlie
+        - select.media_track_charlie
+        - select.media_artist_filter_charlie
+        - button.update_mass_media
+      to:
+      not_from:
+        - unknown
+        - unavailable
+  action:
+    - action: mass.get_library
+      data:
+        media_type: track
+      response_variable: mass_tracks
+
+    - variables:
+        albums: >
+          {% set album_list = namespace(names=['']) %}
+          {% if states('input_select.media_type_charlie') == 'Track' %}
+            {% for track in mass_tracks['tracks'] %}
+              {% if track.name == states('select.media_track_charlie')
+                  and states('select.media_artist_filter_charlie')
+                    in ['', 'unknown', track.artists[0].name] %}
+                {% set album_list.names = album_list.names + [track.album.name] %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
+          {{ album_list.names | unique | list }}
+  select:
+    - name: "Media Album Filter Charlie"
+      unique_id: media_album_filter_charlie
+      state: "{{ states('input_text.media_album_filter_charlie') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option != none }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.media_album_filter_charlie
+          data:
+            value: "{{ option }}"
+      options: "{{ albums }}"
+
+###############################################################################
+## Media Track Charlie
+###############################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
       entity_id: input_text.media_track_charlie
       to:
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+  action:
+    - action: mass.get_library
+      data:
+        media_type: track
+      response_variable: mass_tracks
+
+    - variables:
+        tracks: >
+          {% set track_list = namespace(names=[]) %}
+          {% for track in mass_tracks['tracks'] %}
+            {% set track_list.names = track_list.names + [track.name] %}
+          {% endfor %}
+          {{ track_list.names | unique | list }}
   select:
     - name: "Media Track Charlie"
       unique_id: media_track_charlie
@@ -155,21 +323,38 @@
             entity_id: input_text.media_track_charlie
           data:
             value: "{{ option }}"
-      options: !include /config/include/mass_track_list.yaml
+      options: "{{ tracks }}"
 
 ###############################################################################
-## Media Charlie Playlist
+## Media Playlist Charlie
 ###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
+    - trigger: state
       entity_id: input_text.media_playlist_charlie
       to:
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+  action:
+    - action: mass.get_library
+      data:
+        media_type: playlist
+      response_variable: mass_playlists
+
+    - variables:
+        playlists: >
+          {% set playlist_list = namespace(names=[]) %}
+          {% for playlist in mass_playlists['playlists'] %}
+            {% set playlist_list.names = playlist_list.names + [playlist.name] %}
+          {% endfor %}
+          {{ playlist_list.names | unique | list }}
   select:
     - name: "Media Playlist Charlie"
       unique_id: media_playlist_charlie
@@ -183,22 +368,38 @@
             entity_id: input_text.media_playlist_charlie
           data:
             value: "{{ option }}"
-      options: !include /config/include/mass_playlist_list.yaml
+      options: "{{ playlists }}"
 
-  ###############################################################################
-  ## Media Charlie Radio
-  ###############################################################################
-
+###############################################################################
+## Media Radio Charlie
+###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
+    - trigger: state
       entity_id: input_text.media_radio_charlie
       to:
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+  action:
+    - action: mass.get_library
+      data:
+        media_type: radio
+      response_variable: mass_radios
+
+    - variables:
+        radios: >
+          {% set radio_list = namespace(names=[]) %}
+          {% for radio in mass_radios['radios'] %}
+            {% set radio_list.names = radio_list.names + [radio.name] %}
+          {% endfor %}
+          {{ radio_list.names | unique | list }}
   select:
     - name: "Media Radio Charlie"
       unique_id: media_radio_charlie
@@ -212,21 +413,24 @@
             entity_id: input_text.media_radio_charlie
           data:
             value: "{{ option }}"
-      options: !include /config/include/mass_radio_list.yaml
+      options: "{{ radios }}"
 
-  ###############################################################################
-  ## Media Charlie Video
-  ###############################################################################
-
+###############################################################################
+## Media Video Charlie
+###############################################################################
 - trigger:
-    - platform: homeassistant
+    - trigger: homeassistant
       event: start
 
-    - platform: event
+    - trigger: event
       event_type: event_template_reloaded
 
-    - platform: state
+    - trigger: state
       entity_id: input_text.media_video_charlie
+      to:
+
+    - trigger: state
+      entity_id: button.update_mass_media
       to:
   select:
     - name: "Media Video Charlie"

@@ -1,10 +1,11 @@
 ##################################################################################################################
 # MASS Play Media Package
+# Launch Music Assistant Library Media from HASS dashboard & automations
 #
 # Download this package file to your packages folder (https://www.home-assistant.io/docs/configuration/packages/)
 # or copy and paste in appropriate the areas in your configuration.yaml file.
 #
-# NOTE: You must change all items marked with the #TODO tag!
+# #TODO: List all your MASS media players
 ##################################################################################################################
 input_boolean:
   mass_shuffle:
@@ -45,6 +46,8 @@ input_text:
   mass_track:
   mass_playlist:
   mass_radio:
+  mass_artist_filter:
+  mass_album_filter:
 
 input_number:
   mass_volume:
@@ -57,9 +60,21 @@ input_number:
     step: 5
 
 template:
+  ###############################################################################
+  ## Update Media Button
+  ###############################################################################
   - button:
-      - name: "Play Mass Media"
-        unique_id: play_mass_media
+      - name: "MASS Update Media"
+        unique_id: mass_udpate_media
+        icon: mdi:multimedia
+        press: []
+
+  ###############################################################################
+  ## Play Media Button
+  ###############################################################################
+  - button:
+      - name: "MASS Play Media"
+        unique_id: mass_play_media
         icon: mdi:play-box
         press:
           # get the entity id for the selected media player
@@ -88,8 +103,8 @@ template:
                   repeat: "{{ iif(is_state('input_boolean.mass_repeat', 'on'), 'all', 'off') }}"
                 continue_on_error: true
 
-          # set media player volume to zero to try and avoid google bloop with power on
-          # you can delete this service call if you are not using Google media players
+          # set media player volume to zero to try and avoid google power on bloop
+          # you can delete this service call if you are not using Google Cast media players
           - action: media_player.volume_set
             target:
               entity_id: "{{ media_player }}"
@@ -104,6 +119,8 @@ template:
             data:
               media_id: "{{ states('select.mass_' ~ states('input_select.mass_media_type') | lower) }}"
               media_type: "{{ states('input_select.mass_media_type') | lower }}"
+              artist: "{{  states('select.select.mass_artist_filter') }}"
+              album: "{{  states('select.mass_album_filter') }}"
               enqueue: "{{ states('input_select.mass_enqueue_mode') | lower }}"
               radio_mode: "{{ is_state('input_boolean.mass_radio', 'on') }}"
             continue_on_error: true
@@ -122,7 +139,7 @@ template:
             continue_on_error: true
 
   ###############################################################################
-  ## Album
+  ## Player
   ###############################################################################
   - trigger:
       - trigger: homeassistant
@@ -157,43 +174,8 @@ template:
               | map(attribute='name') | list | sort }}
 
   ###############################################################################
-  ## Album
-  ###############################################################################
-
-  - trigger:
-      - trigger: homeassistant
-        event: start
-
-      - trigger: event
-        event_type: event_template_reloaded
-
-      - trigger: state
-        entity_id: input_text.mass_album
-        to:
-    select:
-      - name: "MASS Album"
-        unique_id: mass_album
-        state: "{{ states('input_text.mass_album') }}"
-        select_option:
-          - condition: template
-            value_template: "{{ option != none }}"
-
-          - action: input_text.set_value
-            target:
-              entity_id: input_text.mass_album
-            data:
-              value: "{{ option }}"
-        #TODO list all albums you want to be able to select
-        options: >
-          {{ [
-            "Electric Ladyland",
-            "Fleetwood Mac"
-          ] }}
-
-  ###############################################################################
   ## Artist
   ###############################################################################
-
   - trigger:
       - trigger: homeassistant
         event: start
@@ -202,8 +184,27 @@ template:
         event_type: event_template_reloaded
 
       - trigger: state
-        entity_id: input_text.mass_artist
+        entity_id:
+          - input_text.mass_artist
+          - button.mass_update_media
         to:
+    action:
+      - action: mass.get_library
+        data:
+          favorite: false
+          limit: 500
+          album_artists_only: true
+          media_type: artist
+          order_by: sort_name
+        response_variable: mass_artists
+
+      - variables:
+          artists: >
+            {% set artist_list = namespace(names=[]) %}
+            {% for artist in mass_artists['artists'] %}
+              {% set artist_list.names = artist_list.names + [artist.name] %}
+            {% endfor %}
+            {{ artist_list.names | unique | list }}
     select:
       - name: "MASS Artist"
         unique_id: mass_artist
@@ -217,17 +218,11 @@ template:
               entity_id: input_text.mass_artist
             data:
               value: "{{ option }}"
-        #TODO list all artists you want to be able to select
-        options: >
-          {{ [
-            "Black Eyed Peas",
-            "Beastie Boys"
-          ] }}
+        options: "{{ artists }}"
 
   ###############################################################################
-  ## Playlist
+  ## Album
   ###############################################################################
-
   - trigger:
       - trigger: homeassistant
         event: start
@@ -236,37 +231,50 @@ template:
         event_type: event_template_reloaded
 
       - trigger: state
-        entity_id: input_text.mass_playlist
+        entity_id:
+          - input_text.mass_album
+          - button.mass_update_media
         to:
+    action:
+      - action: mass.get_library
+        data:
+          favorite: false
+          limit: 500
+          media_type: album
+          order_by: sort_name
+          album_type:
+            - album
+            - single
+            - compilation
+            - ep
+            - unknown
+        response_variable: mass_albums
+
+      - variables:
+          albums: >
+            {% set album_list = namespace(names=[]) %}
+            {% for album in mass_albums['albums'] %}
+              {% set album_list.names = album_list.names + [album.name] %}
+            {% endfor %}
+            {{ album_list.names | unique | list }}
     select:
-      - name: "MASS Playlist"
-        unique_id: mass_playlist
-        state: "{{ states('input_text.mass_playlist') }}"
+      - name: "MASS Album"
+        unique_id: mass_album
+        state: "{{ states('input_text.mass_album') }}"
         select_option:
           - condition: template
             value_template: "{{ option != none }}"
 
           - action: input_text.set_value
             target:
-              entity_id: input_text.mass_playlist
+              entity_id: input_text.mass_album
             data:
               value: "{{ option }}"
-        #TODO list all playlists you want to be able to select
-        options: >
-          {{ [
-            "All Out 60s",
-            "All Out 70s",
-            "All Out 80s",
-            "All Out 90s",
-            "All Out 2000s",
-            "All Out 2010s",
-            "All-Time Hip Hop Hits"
-          ] }}
+        options: "{{ albums }}"
 
   ###############################################################################
   ## Track
   ###############################################################################
-
   - trigger:
       - trigger: homeassistant
         event: start
@@ -275,8 +283,25 @@ template:
         event_type: event_template_reloaded
 
       - trigger: state
-        entity_id: input_text.mass_track
+        entity_id:
+          - input_text.mass_track
+          - button.mass_update_media
         to:
+    action:
+      - action: mass.get_library
+        data:
+          limit: 500
+          media_type: track
+          order_by: sort_name
+        response_variable: mass_tracks
+
+      - variables:
+          tracks: >
+            {% set track_list = namespace(names=[]) %}
+            {% for track in mass_tracks['tracks'] %}
+              {% set track_list.names = track_list.names + [track.name] %}
+            {% endfor %}
+            {{ track_list.names | unique | list }}
     select:
       - name: "MASS Track"
         unique_id: mass_track
@@ -290,17 +315,11 @@ template:
               entity_id: input_text.mass_track
             data:
               value: "{{ option }}"
-        #TODO list all tracks you want to be able to select
-        options: >
-          {{ [
-            "Billie Jean",
-            "Ain't No Sunshine"
-          ] }}
+        options: "{{ tracks }}"
 
   ###############################################################################
-  ## Radio Station
+  ## Playlist
   ###############################################################################
-
   - trigger:
       - trigger: homeassistant
         event: start
@@ -309,8 +328,72 @@ template:
         event_type: event_template_reloaded
 
       - trigger: state
-        entity_id: input_text.mass_radio
+        entity_id:
+          - input_text.mass_playlist
+          - button.mass_update_media
         to:
+    action:
+      - action: mass.get_library
+        data:
+          favorite: false
+          limit: 500
+          media_type: playlist
+          order_by: sort_name
+        response_variable: mass_playlists
+
+      - variables:
+          playlists: >
+            {% set playlist_list = namespace(names=[]) %}
+            {% for playlist in mass_playlists['playlists'] %}
+              {% set playlist_list.names = playlist_list.names + [playlist.name] %}
+            {% endfor %}
+            {{ playlist_list.names | unique | list }}
+    select:
+      - name: "MASS Playlist"
+        unique_id: mass_playlist
+        state: "{{ states('input_text.mass_playlist') }}"
+        select_option:
+          - condition: template
+            value_template: "{{ option != none }}"
+
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.mass_playlist
+            data:
+              value: "{{ option }}"
+        options: "{{ playlists }}"
+
+  ###############################################################################
+  ## Radio Station
+  ###############################################################################
+  - trigger:
+      - trigger: homeassistant
+        event: start
+
+      - trigger: event
+        event_type: event_template_reloaded
+
+      - trigger: state
+        entity_id:
+          - input_text.mass_radio
+          - button.mass_update_media
+        to:
+    action:
+      - action: mass.get_library
+        data:
+          favorite: false
+          limit: 500
+          media_type: radio
+          order_by: sort_name
+        response_variable: mass_radios
+
+      - variables:
+          radios: >
+            {% set radio_list = namespace(names=[]) %}
+            {% for radio in mass_radios['radios'] %}
+              {% set radio_list.names = radio_list.names + [radio.name] %}
+            {% endfor %}
+            {{ radio_list.names | unique | list }}
     select:
       - name: "MASS Radio"
         unique_id: mass_radio
@@ -324,23 +407,136 @@ template:
               entity_id: input_text.mass_radio
             data:
               value: "{{ option }}"
-        #TODO list all radio stations you want to be able to select
-        options: >
-          {{ [
-            "93.9 Virgin Radio",
-            "105.1 The Bounce",
-            "Cool 100.7",
-            "Mix 96.7",
-            "AM 800 CKLW",
-            "CFMK Big 96.3 Kingston, ON"
-          ] }}
+        options: "{{ radios }}"
+
+  ###############################################################################
+  ## Artist Filter
+  ###############################################################################
+  - trigger:
+      - trigger: homeassistant
+        event: start
+
+      - trigger: event
+        event_type: event_template_reloaded
+
+      - trigger: state
+        entity_id:
+          - input_select.mass_media_type
+          - input_text.mass_artist_filter
+          - select.mass_track
+          - select.mass_album
+          - select.mass_album_filter
+          - button.mass_update_media
+        to:
+        not_from:
+          - unknown
+          - unavailable
+    action:
+      - action: mass.get_library
+        data:
+          media_type: track
+        response_variable: mass_tracks
+
+      - action: mass.get_library
+        data:
+          media_type: album
+        response_variable: mass_albums
+
+      - variables:
+          artists: >
+            {% set artist_list = namespace(names=['']) %}
+            {% if states('input_select.mass_media_type') == 'Track' %}
+              {% for track in mass_tracks['tracks'] %}
+                {% if track.name == states('select.mass_track')
+                    and states('select.mass_album_filter')
+                      in ['', 'unknown', track.album.name] %}
+                  {% set artist_list.names = artist_list.names + [track.artists[0].name] %}
+                {% endif %}
+              {% endfor %}
+            {% elif states('input_select.mass_media_type') == 'Album' %}
+              {% for album in mass_albums['albums'] %}
+                {% if album.name == states('select.mass_album') %}
+                  {% set artist_list.names = artist_list.names + [album.artists[0].name] %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {{ artist_list.names | unique | list }}
+    select:
+      - name: "MASS Artist Filter"
+        unique_id: mass_artist_filter
+        state: "{{ states('input_text.mass_artist_filter') }}"
+        select_option:
+          - condition: template
+            value_template: "{{ option != none }}"
+
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.mass_artist_filter
+            data:
+              value: "{{ option }}"
+        options: "{{ artists }}"
+
+  ###############################################################################
+  ## Album Filter
+  ###############################################################################
+  - trigger:
+      - trigger: homeassistant
+        event: start
+
+      - trigger: event
+        event_type: event_template_reloaded
+
+      - trigger: state
+        entity_id:
+          - input_select.mass_media_type
+          - input_text.mass_album_filter
+          - select.mass_track
+          - select.mass_artist_filter
+          - button.mass_update_media
+        to:
+        not_from:
+          - unknown
+          - unavailable
+    action:
+      - action: mass.get_library
+        data:
+          media_type: track
+        response_variable: mass_tracks
+
+      - variables:
+          albums: >
+            {% set album_list = namespace(names=['']) %}
+            {% if states('input_select.mass_media_type') == 'Track' %}
+              {% for track in mass_tracks['tracks'] %}
+                {% if track.name == states('select.mass_track')
+                    and states('select.mass_artist_filter')
+                      in ['', 'unknown', track.artists[0].name] %}
+                  {% set album_list.names = album_list.names + [track.album.name] %}
+                {% endif %}
+              {% endfor %}
+            {% endif %}
+            {{ album_list.names | unique | list }}
+    select:
+      - name: "MASS Album Filter"
+        unique_id: mass_album_filter
+        state: "{{ states('input_text.mass_album_filter') }}"
+        select_option:
+          - condition: template
+            value_template: "{{ option != none }}"
+
+          - action: input_text.set_value
+            target:
+              entity_id: input_text.mass_album_filter
+            data:
+              value: "{{ option }}"
+        options: "{{ albums }}"
 
 automation:
   ###############################################################################
   ## Update Mass Media Player Group - This automation automatically creates a
   ## group of all the Music Assistant media players available in Home Assistant
   ###############################################################################
-  - id: update_mass_media_players
+  - id: mass_update_media_players
     alias: "Update Mass Media Players"
     description: "Update mass media player group."
     mode: single
@@ -374,9 +570,10 @@ automation:
           - unknown
           - unavailable
     actions:
+      # wait for music assistant to load
       - wait_template: >
           {{ states.media_player
-              | selectattr('attributes.mass_player_id', 'defined')
+              | selectattr('attributes.mass_player_type', 'defined')
               | map(attribute='entity_id') | list
               | select('has_value') | list | count > 0 }}
         timeout: 300
@@ -387,6 +584,22 @@ automation:
           object_id: mass_players
           entities: >
             {{ states.media_player
-                | selectattr('attributes.mass_player_id', 'defined')
+                | selectattr('attributes.mass_player_type', 'defined')
                 | map(attribute='entity_id') | list
                 | select('has_value') | sort }}
+
+  ###############################################################################
+  ## Update Mass Media Library Items
+  ###############################################################################
+  - id: mass_update_media
+    alias: "MASS Update Media"
+    description: "Update mass media library items."
+    mode: single
+    max_exceeded: silent
+    triggers:
+      - trigger: time_pattern
+        minutes: 30 # every hour at 30 min after
+    actions:
+      - action: button.press
+        target:
+          entity_id: button.mass_update_media
