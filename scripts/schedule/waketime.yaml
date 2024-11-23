@@ -7,6 +7,10 @@ waketime:
   icon: mdi:sun-clock
   mode: single
   max_exceeded: silent
+  fields:
+    delay:
+      description: "Delay script execution for early trigger."
+      example: "true"
   sequence:
     - if:
         - or:
@@ -30,196 +34,219 @@ waketime:
 
         - stop: "Wake up routine cannot be run."
 
-    - choose:
-        - conditions: "{{ is_state('switch.alarm_clock_wake', 'on') }}"
-          sequence:
-            - action: switch.turn_off
-              target:
-                entity_id: switch.alarm_clock_wake
+    - if:
+        - condition: state
+          entity_id: input_boolean.alarm_clock_skip_next
+          state: "off"
+      then:
+        - if: "{{ delay | default(false) }}"
+          then:
+            - delay: 60 # compensate for early trigger in automation
 
-        - conditions: "{{ is_state('switch.alarm_clock_manual', 'on') }}"
-          sequence:
-            - action: switch.turn_off
-              target:
-                entity_id: switch.alarm_clock_manual
+            # wait for alarm clock to turn on (auto, manual, nap)
+            - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'on') }}"
+              timeout: 30
 
-        - conditions: "{{ is_state('switch.alarm_clock_nap', 'on') }}"
-          sequence:
-            - action: switch.turn_off
-              target:
-                entity_id: switch.alarm_clock_nap
+            # wait for alarm clock to be turned off
+            - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
 
-    - parallel:
-        - sequence:
-            - if:
-                - condition: state
-                  entity_id:
-                    - binary_sensor.daytime_illuminance_lights
-                    - binary_sensor.nighttime_illuminance_lights
-                  match: any
-                  state: "on"
-              then:
-                - action: script.turn_light_on
-                  data:
-                    lights:
-                      - light.bedroom_fan_light
-                      - light.bathroom_vanity_light_rgb
-                      - light.dining_room_light_rgb
-                      - light.kitchen_potlights
-                      - light.kitchen_cabinet_lights
-                    profile: default_min
-                    transition: 10
-                    activate_timer: false
+    - if:
+        - condition: state
+          alias: "Waketime run when alarm clock is active"
+          entity_id: binary_sensor.alarm_clock
+          state: "on"
+      then:
+        - action: switch.turn_off
+          target:
+            entity_id: "switch.alarm_clock_{{ states('input_select.alarm_clock_type') }}"
 
-                - delay: # wait for next set of lights
-                    minutes: 10
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: >
+          {% from 'presence.jinja' import occupancy_mode %}
+          {{ occupancy_mode() }}
+      continue_on_error: true
 
-                - action: script.turn_light_on
-                  data:
-                    lights:
-                      - light.bedroom_fan_light
-                      - light.bathroom_vanity_light_rgb
-                      - light.dining_room_light_rgb
-                      - light.kitchen_potlights
-                      - light.bedroom_fan_light
-                      - light.kitchen_potlights
-                      - light.kitchen_cabinet_lights
-                      - light.laundry_room_cabinet_lights
-                      - light.living_room_fan_light
-                    profile: default_low
-                    transition: 120
-                    activate_timer: false
+    - condition: state
+      alias: "Someone is still home"
+      entity_id: binary_sensor.someone_home
+      state: "on"
 
-                - delay: # wait for next set of lights
-                    minutes: 10
+    - action: script.arm_alarm
+      data:
+        mode: home
+        override: true
+      continue_on_error: true
 
-                - action: script.turn_light_on
-                  data:
-                    lights:
-                      - light.bedroom_fan_light
-                      - light.bathroom_vanity_light_rgb
-                      - light.dining_room_light_rgb
-                      - light.kitchen_potlights
-                      - light.bedroom_fan_light
-                      - light.kitchen_potlights
-                      - light.kitchen_cabinet_lights
-                      - light.laundry_room_cabinet_lights
-                      - light.kitchen_sink_light
-                      - light.living_room_fan_light
-                    profile: default
-                    transition: 120
-                    activate_timer: false
+    - if:
+        - condition: template
+          alias: "Wake up routine enabled."
+          value_template: >
+            {% if is_state('binary_sensor.owner_home', 'off') %}
+              {{ is_state('input_boolean.guest_morning', 'on') }}
+            {% else %}
+              {{ is_state('input_boolean.workday_morning', 'on') if is_state('binary_sensor.work_today', 'on')
+                  else is_state('input_boolean.weekend_morning', 'on') }}
+            {% endif %}
+      then:
+        - parallel:
+            - sequence:
+                - if:
+                    - condition: state
+                      entity_id:
+                        - binary_sensor.daytime_illuminance_lights
+                        - binary_sensor.nighttime_illuminance_lights
+                      match: any
+                      state: "on"
+                  then:
+                    - action: script.turn_light_on
+                      data:
+                        lights:
+                          - light.bedroom_fan_light
+                          - light.bathroom_vanity_light_rgb
+                          - light.dining_room_light_rgb
+                          - light.kitchen_potlights
+                          - light.kitchen_cabinet_lights
+                        profile: default_min
+                        transition: 10
+                        activate_timer: false
 
-        - sequence:
-            - action: input_select.select_option
-              target:
-                entity_id: input_select.occupancy_mode
-              data:
-                option: >
-                  {% from 'presence.jinja' import occupancy_mode %}
-                  {{ occupancy_mode() }}
-              continue_on_error: true
+                    - delay: # wait for next set of lights
+                        minutes: 10
 
-            - action: script.arm_alarm
-              data:
-                mode: home
-                override: true
-              continue_on_error: true
+                    - action: script.turn_light_on
+                      data:
+                        lights:
+                          - light.bedroom_fan_light
+                          - light.bathroom_vanity_light_rgb
+                          - light.dining_room_light_rgb
+                          - light.kitchen_potlights
+                          - light.bedroom_fan_light
+                          - light.kitchen_potlights
+                          - light.kitchen_cabinet_lights
+                          - light.laundry_room_cabinet_lights
+                          - light.living_room_fan_light
+                        profile: default_low
+                        transition: 120
+                        activate_timer: false
 
-            - if:
-                - condition: state
-                  entity_id:
-                    - input_boolean.occupancy_announcements
-                    - input_boolean.alarm_announcements
-                  match: any
-                  state: "on"
-              then:
-                - wait_for_trigger:
-                    - trigger: event
-                      event_type: occupancy_notification
-                  timeout: 60
+                    - delay: # wait for next set of lights
+                        minutes: 10
 
-            - if:
-                - condition: state
-                  entity_id: input_boolean.media_enabled_wake
-                  state: "on"
-              then:
-                - action: script.media_play
-                  data:
-                    preset: wake
-                  continue_on_error: true
+                    - action: script.turn_light_on
+                      data:
+                        lights:
+                          - light.bedroom_fan_light
+                          - light.bathroom_vanity_light_rgb
+                          - light.dining_room_light_rgb
+                          - light.kitchen_potlights
+                          - light.bedroom_fan_light
+                          - light.kitchen_potlights
+                          - light.kitchen_cabinet_lights
+                          - light.laundry_room_cabinet_lights
+                          - light.kitchen_sink_light
+                          - light.living_room_fan_light
+                        profile: default
+                        transition: 120
+                        activate_timer: false
 
-                - delay:
-                    minutes: "{{ states('input_number.media_wake_time') | int }}"
+            - sequence:
+                - if:
+                    - condition: state
+                      entity_id:
+                        - input_boolean.occupancy_announcements
+                        - input_boolean.alarm_announcements
+                      match: any
+                      state: "on"
+                  then:
+                    - wait_for_trigger:
+                        - trigger: event
+                          event_type: occupancy_notification
+                      timeout: 60
+
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.media_enabled_wake
+                      state: "on"
+                  then:
+                    - action: script.media_play
+                      data:
+                        preset: wake
+                      continue_on_error: true
+
+                    - delay:
+                        minutes: "{{ states('input_number.media_wake_time') | int }}"
+
+                    - variables:
+                        stop_player: >
+                          {{ expand('group.media_players')
+                              | selectattr('name', 'eq', states('select.media_speaker_wake'))
+                              | map(attribute='entity_id') | join }}
+
+                    - if: "{{ stop_player != '' }}"
+                      then:
+                        - action: script.turn_media_player_off
+                          data:
+                            entity_id: "{{ stop_player }}"
+                          continue_on_error: true
+                  else:
+                    - delay:
+                        minutes: "{{ states('input_number.media_wake_time') | int }}"
+
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.calendar_announcements
+                      state: "on"
+                  then:
+                    - action: button.press
+                      target:
+                        entity_id: button.announce_calendar_events_jason
+                      continue_on_error: true
 
                 - variables:
-                    stop_player: >
-                      {{ expand('group.media_players')
-                          | selectattr('name', 'eq', states('select.media_speaker_wake'))
-                          | map(attribute='entity_id') | join }}
+                    battery: "{{ states('sensor.jphone_battery_level') | int(-1) }}"
 
-                - if: "{{ stop_player != '' }}"
+                - if: "{{ 0 > battery < 50 }}"
                   then:
-                    - action: script.turn_media_player_off
+                    - action: script.tts_play
                       data:
-                        entity_id: "{{ stop_player }}"
+                        message: "Just a heads up, your mobile phone battery level is only {{ battery }} percent."
+                        quiet_play: true
                       continue_on_error: true
-              else:
-                - delay:
-                    minutes: "{{ states('input_number.media_wake_time') | int }}"
 
-            - if:
-                - condition: state
-                  entity_id: input_boolean.calendar_announcements
-                  state: "on"
-              then:
-                - action: button.press
-                  target:
-                    entity_id: button.announce_calendar_events_jason
-                  continue_on_error: true
+                - if:
+                    - condition: numeric_state
+                      entity_id: sensor.tts_saved_messages
+                      above: 0
+                  then:
+                    - action: script.tts_play_saved_messages
+                      continue_on_error: true
 
-            - variables:
-                battery: "{{ states('sensor.jphone_battery_level') | int(-1) }}"
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.morning_weather_enabled
+                      state: "on"
+                  then:
+                    - action: button.press
+                      target:
+                        entity_id: button.weather_report
+                      continue_on_error: true
 
-            - if: "{{ 0 > battery < 50 }}"
-              then:
-                - action: script.tts_play
-                  data:
-                    message: "Just a heads up, your mobile phone battery level is only {{ battery }} percent."
-                    quiet_play: true
-                  continue_on_error: true
+                - delay: 5 # allow weather report to start
 
-            - if:
-                - condition: numeric_state
-                  entity_id: sensor.tts_saved_messages
-                  above: 0
-              then:
-                - action: script.tts_play_saved_messages
-                  continue_on_error: true
+                - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
 
-            - if:
-                - condition: state
-                  entity_id: input_boolean.morning_weather_enabled
-                  state: "on"
-              then:
-                - action: button.press
-                  target:
-                    entity_id: button.weather_report
-                  continue_on_error: true
-
-            - delay: 5 # allow weather report to start
-
-            - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
-
-            - if:
-                - condition: state
-                  entity_id: input_boolean.media_enabled_morning
-                  state: "on"
-              then:
-                - action: script.media_play
-                  data:
-                    preset: morning
-                  continue_on_error: true
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.media_enabled_morning
+                      state: "on"
+                  then:
+                    - action: script.media_play
+                      data:
+                        preset: morning
+                      continue_on_error: true
 
 ###############################################################################
 ## Wake Up Switch - waketime button / zwave scenes
@@ -251,3 +278,4 @@ waketime_switch:
             - action: script.turn_on
               target:
                 entity_id: script.waketime
+

@@ -60,14 +60,49 @@ entities:
       secondary: "{{ states('sensor.barometric_pressure', with_unit=true) ~ ': ' ~ states('sensor.pressure_trend') }}"
     entities: !include /config/ui/card/weather/include/barometric_pressure_entities.yaml
 
-  - !include /config/ui/card/weather/include/precipitation_inactive_entity.yaml
-  - !include /config/ui/card/weather/include/precipitation_active_entity.yaml
-  - !include /config/ui/card/weather/include/precipitation_soon_entity.yaml
-  - !include /config/ui/card/weather/include/precipitation_today_entity.yaml
+  - type: custom:fold-entity-row
+    padding: 10
+    head:
+      type: custom:template-entity-row
+      entity: sensor.precipitation_type
+      name: "Precipitation"
+      state: > # 'None' contains ALT-0173 (blank char to prevent render as none)
+        {% set type = states('sensor.precipitation_type') %}
+        {{ 'None­' if type == 'none' else type | title }}
+      secondary: >
+        {% set rain = states('sensor.rain_accumulation_last_24_hours') | float(-1) %}
+        {% set snow = states('sensor.snow_accumulation_last_24_hours') | float(-1) %}
+        {% set ice = states('sensor.ice_accumulation_last_24_hours') | float(-1) %}
+        {%- if rain > 0 -%}
+          Rain: {{ '%0.1f' | format(rain) }} mm
+        {%- endif %}
+        {%- if snow > 0 -%}
+          {{- ' | ' if rain > 0 -}}
+          Snow: {{ '%0.1f' | format(snow) }} mm
+        {%- endif %}
+        {%- if ice > 0 -%}
+          {{- ' | ' if rain > 0 or snow > 0 -}}
+          Ice: {{ '%0.1f' | format(ice) }} mm
+        {%- endif %}
+    entities: !include /config/ui/card/weather/include/precipitation_entities.yaml
 
-  - sensor.pirateweather_current_day_liquid_accumulation #TODO
-  - sensor.pirateweather_current_day_snow_accumulation #TODO
-  - sensor.pirateweather_current_day_ice_accumulation #TODO
+  - type: conditional
+    conditions:
+      - condition: or
+        conditions:
+          - condition: numeric_state
+            entity: sensor.nearest_storm_distance
+            above: 0
+
+          - condition: state
+            entity: sensor.nearest_storm_bearing
+            state_not: unknown
+    row:
+      type: custom:fold-entity-row
+      padding: 10
+      head: !include /config/ui/card/weather/include/nearest_storm_entity.yaml
+      entities:
+        - !include /config/ui/card/weather/include/storm_radar.yaml
 
   - type: custom:fold-entity-row
     padding: 10
@@ -76,7 +111,15 @@ entities:
       entity: binary_sensor.lightning
       name: "Lightning"
       state: "{{ iif(is_state('binary_sensor.lightning', 'on'), 'Yes', 'No') }}"
-      secondary: "Strikes: {{ states('sensor.lightning_count') }} - Distance: {{ states('sensor.lightning_distance', with_unit=true) }}"
+      secondary: >
+        {% set strikes = states('sensor.lightning_count') | int(-1) %}
+        {% set distance = states('sensor.lightning_last_strike_distance') | int(-1) %}
+        {%- if strikes > 0 -%}
+          Strikes: {{ strikes }}
+        {%- endif %}
+        {%- if distance > 0 -%}
+          {{- ' | ' if strikes > 0 -}} Distance: {{ distance }}
+        {%- endif %}
       active: "{{ is_state('binary_sensor.lightning', 'on') }}" #BUG not working
       card_mod: #BUGFIX
         style: |
@@ -88,12 +131,6 @@ entities:
             ;
           }
     entities: !include /config/ui/card/weather/include/lightning_entities.yaml
-
-  - type: custom:fold-entity-row
-    padding: 10
-    head: !include /config/ui/card/weather/include/nearest_storm_entity.yaml
-    entities:
-      - !include /config/ui/card/weather/include/storm_radar.yaml
 
   - type: custom:fold-entity-row
     padding: 10
@@ -209,3 +246,8 @@ entities:
       style: >
         {% from 'weather.jinja' import iqvia_index_icon %}
         {{ iqvia_index_icon(states('sensor.cold_flu_index_today')) }}
+
+  - entity: sensor.pirateweather_time
+    name: "Forecast Updated"
+    format: relative
+

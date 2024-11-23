@@ -29,6 +29,9 @@
             save_message: false
             message: !include /config/include/weather_report.yaml
 
+###############################################################################
+## Weather Forecast Entities
+###############################################################################
 - trigger:
     - trigger: homeassistant
       event: start
@@ -96,8 +99,8 @@
         wind_speed_unit: "{{ state_attr('sensor.wind_speed', 'unit_of_measurement') }}"
         visibility: "{{ states('sensor.visibility') }}" # WeatherFlow Local
         visibility_unit: "{{ state_attr('sensor.visibility', 'unit_of_measurement') }}"
-        precipitation: "{{ states('sensor.precipitation_accumulation_today') }}" # WeatherFlow Cloud
-        precipitation_unit: "{{ state_attr('sensor.precipitation_accumulation_today', 'unit_of_measurement') }}"
+        precipitation: "{{ states('sensor.rain_accumulation_today') }}" # Pirate Weather
+        precipitation_unit: "{{ state_attr('sensor.rain_accumulation_today', 'unit_of_measurement') }}"
         updated: "{{ now().isoformat() }}"
         # use pirateweather, weatherflow first, no precipitation in envcan
         forecast: >
@@ -108,13 +111,16 @@
             {% elif daily['weather.forecast_home'] is defined
                 and daily['weather.forecast_home']['forecast'] is defined %}
               {{ daily['weather.forecast_home']['forecast'] }}
+            {% elif daily['weather.forecast_home'] is defined
+                and daily['weather.forecast_home']['forecast'] is defined %}
+              {{ daily['weather.forecast_home']['forecast'] }}
             {% elif daily['weather.windsor'] is defined
                 and daily['weather.windsor']['forecast'] is defined %}
               {{ daily['weather.windsor']['forecast'] }}
             {% endif %}
           {% endif %}
 
-    # use pirateweather, weatherflow first, no precipitation in envcan
+    # use pirateweather, first, no cloud, humidity, precipitation in others
     - name: "Hourly Weather"
       unique_id: hourly_weather
       state: "{{ states('sensor.current_condition') }}"
@@ -132,13 +138,16 @@
         wind_speed_unit: "{{ state_attr('sensor.wind_speed', 'unit_of_measurement') }}"
         visibility: "{{ states('sensor.visibility') }}" # WeatherFlow Local
         visibility_unit: "{{ state_attr('sensor.visibility', 'unit_of_measurement') }}"
-        precipitation: "{{ states('sensor.precipitation_accumulation_today') }}" # WeatherFlow Cloud
-        precipitation_unit: "{{ state_attr('sensor.precipitation_accumulation_today', 'unit_of_measurement') }}"
+        precipitation: "{{ states('sensor.rain_accumulation_today') }}" # Pirate Weather
+        precipitation_unit: "{{ state_attr('sensor.rain_accumulation_today', 'unit_of_measurement') }}"
         forecast: >
           {% if hourly is defined %}
             {% if hourly['weather.pirateweather'] is defined
                 and hourly['weather.pirateweather']['forecast'] is defined %}
               {{ hourly['weather.pirateweather']['forecast'] }}
+            {% elif hourly['weather.forecast_home'] is defined
+                and hourly['weather.forecast_home']['forecast'] is defined %}
+              {{ hourly['weather.forecast_home']['forecast'] }}
             {% elif hourly['weather.forecast_home'] is defined
                 and hourly['weather.forecast_home']['forecast'] is defined %}
               {{ hourly['weather.forecast_home']['forecast'] }}
@@ -148,6 +157,9 @@
             {% endif %}
           {% endif %}
 
+###############################################################################
+## Integrations
+###############################################################################
 - trigger:
     - trigger: homeassistant
       event: start
@@ -158,9 +170,7 @@
     - trigger: time_pattern
       minutes: "/1"
   binary_sensor:
-    ###############################################################################
-    ## Integrations
-    ###############################################################################
+
     - name: "OpenUV Integration Connected"
       unique_id: openuv_integration_connected
       picture: !secret OPENUV_ICON
@@ -173,7 +183,74 @@
       device_class: connectivity
       state: "{{ integration_entities('waqi') | select('has_value') | list | count > 0 }}"
 
-#TEST
+###############################################################################
+## Lightning Trigger Sensors
+###############################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: sensor.home_lightning_distance
+      to:
+  action:
+    - condition: numeric_state
+      entity_id: sensor.home_lightning_distance
+      above: -1
+
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.lightning_last_strike_distance
+      data:
+        value: "{{ now() }}"
+  sensor:
+    - name: "Lightning Last Strike Distance"
+      unique_id: lightning_last_strike_distance #VERIFY
+      icon: mdi:clock-star-four-points
+      device_class: distance
+      state_class: measurement
+      unit_of_measurement: km
+      state: "{{ states('input_number.lightning_last_strike_distance') | int }}"
+      attributes:
+        provider: "Blitzortung"
+      availability: "{{ has_value('input_number.lightning_last_strike_distance') }}"
+
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: sensor.lightning_count
+      to:
+  action:
+    - condition: numeric_state
+      entity_id: sensor.lightning_count
+      above: 0
+
+    - action: input_text.set_value
+      target:
+        entity_id: input_text.lightning_last_strike
+      data:
+        value: "{{ now() }}"
+  sensor:
+    - name: "Lightning Last Strike"
+      unique_id: lightning_last_strike #VERIFY
+      icon: mdi:clock-star-four-points
+      device_class: timestamp
+      state: >
+        {% set time = states('input_text.lightning_last_strike') %}
+        {{ time | as_datetime if time not in ['','unknown','unavailable'] else none }}
+      availability: "{{ has_value('input_text.lightning_last_strike') }}"
+
+###############################################################################
+## Precipitation Trigger Sensors
+###############################################################################
 - trigger:
     - trigger: homeassistant
       event: start
@@ -202,6 +279,64 @@
       state_class: measurement
       unit_of_measurement: mm
       state: "{{ states('input_number.rain_accumulation_today_checked') }}"
+
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: sensor.pirateweather_current_day_snow_accumulation
+      to:
+  action:
+    - variables:
+        previous: "{{ states('input_number.snow_accumulation_today_checked') | float(-1) }}"
+        current: "{{ states('sensor.pirateweather_current_day_snow_accumulation') | float(-1) }}"
+
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.snow_accumulation_today_checked
+      data:
+        value: "{{ 0 if current == 0 else iif(current > previous, current, previous) }}"
+  sensor:
+    - name: Snow Accumulation Today
+      unique_id: snow_accumulation_today
+      icon: mdi:weather-snowy
+      device_class: precipitation
+      state_class: measurement
+      unit_of_measurement: mm
+      state: "{{ states('input_number.snow_accumulation_today_checked') }}"
+
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: sensor.pirateweather_current_day_ice_accumulation
+      to:
+  action:
+    - variables:
+        previous: "{{ states('input_number.ice_accumulation_today_checked') | float(-1) }}"
+        current: "{{ states('sensor.pirateweather_current_day_ice_accumulation') | float(-1) }}"
+
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.ice_accumulation_today_checked
+      data:
+        value: "{{ 0 if current == 0 else iif(current > previous, current, previous) }}"
+  sensor:
+    - name: Ice Accumulation Today
+      unique_id: ice_accumulation_today
+      icon: mdi:weather-icey-heavy
+      device_class: precipitation
+      state_class: measurement
+      unit_of_measurement: mm
+      state: "{{ states('input_number.ice_accumulation_today_checked') }}"
 
 - binary_sensor:
     ###############################################################################
@@ -317,7 +452,7 @@
             if has_value('sensor.precipitation_start') else none %}
         {{ is_state('binary_sensor.precipitation_active', 'off')
             and is_state('binary_sensor.precipitation_likely_soon', 'off')
-            and time != none and time > now() and time - now() < timedelta(hours=12) }}
+            and time != none and time > now() and time - now() < timedelta(hours=24) }}
 
     - name: "Precipitation Alert"
       unique_id: precipitation_alert
@@ -347,9 +482,9 @@
       icon: mdi:flash-alert
       device_class: safety
       state: >
-        {{ is_number(states('sensor.lightning_distance'))
+        {{ is_number(states('sensor.lightning_last_strike_distance'))
             and is_number(states('sensor.lightning_count'))
-            and states('sensor.lightning_distance') | int < 5
+            and states('sensor.lightning_last_strike_distance') | int < 5
             and states('sensor.lightning_count') | int > 0 }}
 
     ###############################################################################
@@ -648,6 +783,20 @@
             and state_attr('sensor.daily_weather', 'forecast')[0].humidity is defined
             and is_number(state_attr('sensor.daily_weather', 'forecast')[0].humidity) }}
 
+    - name: "Outdoor Humidity Tomorrow"
+      unique_id: outdoor_humidity_tomorrow
+      device_class: humidity
+      state_class: measurement
+      unit_of_measurement: "%"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].humidity | int }}"
+      attributes:
+        provider: "Daily Weather"
+      availability: >
+        {{ state_attr('sensor.daily_weather', 'forecast') != none
+            and state_attr('sensor.daily_weather', 'forecast')[1] is defined
+            and state_attr('sensor.daily_weather', 'forecast')[1].humidity is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].humidity) }}
+
     ###############################################################################
     ## Dew Point
     ###############################################################################
@@ -738,7 +887,7 @@
 
     - name: "Snow Probability"
       unique_id: snow_probability
-      icon: mdi:weather-snowy-heavy
+      icon: mdi:weather-snowy
       unit_of_measurement: "%"
       state: "{{ states('sensor.tempest_st_00057689_snow_probability') }}"
       attributes:
@@ -779,7 +928,7 @@
       icon: mdi:weather-pouring
       device_class: precipitation
       unit_of_measurement: mm
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].precipitation | int }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].precipitation | float }}"
       attributes:
         provider: "Daily Weather"
       availability: >
@@ -793,7 +942,7 @@
       icon: mdi:weather-pouring
       device_class: precipitation
       unit_of_measurement: mm
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].precipitation | int }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].precipitation | float }}"
       attributes:
         provider: "Daily Weather"
       availability: >
@@ -802,21 +951,76 @@
             and state_attr('sensor.daily_weather', 'forecast')[1].precipitation is defined
             and is_number(state_attr('sensor.daily_weather', 'forecast')[1].precipitation) }}
 
+    - name: "Rain Expected Today"
+      unique_id: rain_expected_today
+      icon: mdi:weather-pouring
+      device_class: precipitation
+      unit_of_measurement: mm
+      state: "{{ states('sensor.pirateweather_liquid_accumulation_0d') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.pirateweather_liquid_accumulation_0d')) }}"
+
+    - name: "Rain Expected Tomorrow"
+      unique_id: rain_expected_tomorrow
+      icon: mdi:weather-pouring
+      device_class: precipitation
+      unit_of_measurement: mm
+      state: "{{ states('sensor.pirateweather_liquid_accumulation_1d') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.pirateweather_liquid_accumulation_1d')) }}"
+
+    - name: "Snow Expected Today"
+      unique_id: snow_expected_today
+      icon: mdi:weather-snowy
+      device_class: precipitation
+      unit_of_measurement: mm
+      state: "{{ states('sensor.pirateweather_snow_accumulation_0d') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.pirateweather_snow_accumulation_0d')) }}"
+
+    - name: "Snow Expected Tomorrow"
+      unique_id: snow_expected_tomorrow
+      icon: mdi:weather-snowy
+      device_class: precipitation
+      unit_of_measurement: mm
+      state: "{{ states('sensor.pirateweather_snow_accumulation_1d') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.pirateweather_snow_accumulation_1d')) }}"
+
+    - name: "Ice Expected Today"
+      unique_id: ice_expected_today
+      icon: mdi:weather-snowy-rainy
+      device_class: precipitation
+      unit_of_measurement: mm
+      state: "{{ states('sensor.pirateweather_ice_accumulation_0d') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.pirateweather_ice_accumulation_0d')) }}"
+
+    - name: "Ice Expected Tomorrow"
+      unique_id: ice_expected_tomorrow
+      icon: mdi:weather-snowy-rainy
+      device_class: precipitation
+      unit_of_measurement: mm
+      state: "{{ states('sensor.pirateweather_ice_accumulation_1d') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.pirateweather_ice_accumulation_1d')) }}"
+
     - name: "Precipitation Accumulation Today"
-      unique_id: precipitation_accumulation_today
+      unique_id: precipitation_accumulation_today #VERIFY
       icon: mdi:weather-pouring
       device_class: precipitation
       state_class: measurement
       unit_of_measurement: mm
-      state: "{{ states('sensor.home_sensors_precipitation_today') | float }}"
-      attributes:
-        provider: "WeatherFlow Cloud"
-      availability: "{{ is_number(states('sensor.home_sensors_precipitation_today')) }}"
-      #TODO can't use checked - values decrease
-
-      #TODO sensor.pirateweather_current_day_liquid_accumulation
-      #TODO sensor.pirateweather_current_day_snow_accumulation
-      #TODO sensor.pirateweather_current_day_ice_accumulation
+      state: >
+        {{ states('sensor.rain_accumulation_today') |float(0)
+            + states('sensor.snow_accumulation_today') |float(0)
+            + states('sensor.ice_accumulation_today') |float(0) }}
 
     - name: "Precipitation Accumulation Yesterday"
       unique_id: precipitation_accumulation_yesterday
@@ -835,7 +1039,7 @@
       icon: >
         {% set type = states(this.entity_id) %}
         {% if type == 'Rain' %} mdi:weather-pouring
-        {% elif type == 'Snow' %} mdi:weather-snowy-heavy
+        {% elif type == 'Snow' %} mdi:weather-snowy
         {% else %} mdi:weather-rainy
         {% endif %}
       state: >
@@ -863,7 +1067,7 @@
           {% set time.value = states.binary_sensor.precipitation_active.last_changed %}
         {% else %}
           {% for item in forecast %}
-            {% if loop.index0 < 12
+            {% if loop.index0 < 24
                 and item.precipitation_probability | int(-1) >= 30
                 and (item.condition | contains('rain')
                   or item.condition | contains('snow')
@@ -939,26 +1143,6 @@
       attributes:
         provider: "Blitzortung"
       availability: "{{ is_number(states('sensor.home_lightning_counter')) }}"
-
-    - name: "Lightning Distance"
-      unique_id: lightning_distance
-      device_class: distance
-      state_class: measurement
-      unit_of_measurement: km
-      state: >
-        {% set dist = states('sensor.home_lightning_distance') %}
-        {{ dist if is_number(dist) else none }}
-      attributes:
-        provider: "Blitzortung"
-
-    - name: "Lightning Last Strike"
-      unique_id: lightning_last_strike
-      icon: mdi:clock-star-four-points
-      device_class: timestamp
-      state: "{{ states('sensor.home_sensors_time_of_last_lightning_strike') }}"
-      attributes:
-        provider: "Weatherflow Cloud"
-      availability: "{{ has_value('sensor.home_sensors_time_of_last_lightning_strike') }}"
 
     ###############################################################################
     ## Barometric Pressure
