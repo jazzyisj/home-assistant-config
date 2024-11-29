@@ -618,7 +618,7 @@
     - name: "Precipitation Active"
       unique_id: precipitation_active
       icon: mdi:weather-pouring
-      state: "{{ states('sensor.precipitation_type') in ['Rain', 'Snow'] }}"
+      state: "{{ states('sensor.precipitation_type') in ['rain', 'snow', 'ice'] }}"
 
     - name: "Precipitation Likely Soon" # next 2 hours
       unique_id: precipitation_likely_soon
@@ -629,8 +629,8 @@
         {{ is_state('binary_sensor.precipitation_active', 'off')
             and time != none and time > now() and time - now() < timedelta(hours=2) }}
 
-    - name: "Precipitation Likely Today" # next 12 hours
-      unique_id: precipitation_likely_today
+    - name: "Precipitation Likely Next 24 Hours" # next 24 hours
+      unique_id: precipitation_likely_next_24_hours
       icon: mdi:weather-pouring
       state: >
         {% set time = states('sensor.precipitation_start') | as_datetime
@@ -890,7 +890,6 @@
         provider: "Pirate Weather"
       availability: "{{ has_value('sensor.pirateweather_daytime_high_temperature_time_0d') }}"
 
-
     - name: "Outdoor High Temperature Differential"
       unique_id: outdoor_high_temperature_differential
       icon: mdi:sun-thermometer
@@ -1059,40 +1058,60 @@
       icon: mdi:weather-rainy
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.hourly_weather', 'forecast')[0]['precipitation_probability'] | int(-1) }}"
+      state: "{{ state_attr('sensor.hourly_envcan', 'forecast')[0]['precipitation_probability'] | int(-1) }}"
       attributes:
-        provider: "Hourly Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.hourly_weather', 'forecast') != none
-            and state_attr('sensor.hourly_weather', 'forecast')[0] is defined
-            and state_attr('sensor.hourly_weather', 'forecast')[0].precipitation_probability is defined
-            and is_number(state_attr('sensor.hourly_weather', 'forecast')[0]['precipitation_probability']) }}
+        {{ state_attr('sensor.hourly_envcan', 'forecast') != none
+            and state_attr('sensor.hourly_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.hourly_envcan', 'forecast')[0].precipitation_probability is defined
+            and is_number(state_attr('sensor.hourly_envcan', 'forecast')[0]['precipitation_probability']) }}
 
     - name: "Precipitation Probability Today"
       unique_id: precipitation_probability_today
       icon: mdi:weather-rainy
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].precipitation_probability | int }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[0].precipitation_probability | int }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
-            and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].precipitation_probability is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].precipitation_probability) }}
+        {{ state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[0].precipitation_probability is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0].precipitation_probability) }}
+
+    - name: "Precipitation Probability Next 24 Hours"
+      unique_id: precipitation_probability_next_24_hours
+      icon: mdi:weather-rainy
+      unit_of_measurement: "%"
+      state: >
+        {% set pop = namespace(list=[0]) %}
+        {% for item in states.sensor.hourly_envcan.attributes.forecast %}
+          {% if loop.index0 < 24 %}
+            {% set pop.list =  pop.list + [states.sensor.hourly_envcan.attributes.forecast[loop.index0].precipitation_probability | float(-1)] %}
+          {% else %}
+            {% break %}
+          {% endif %}
+        {% endfor %}
+        {{ '%0.0f' | format(pop.list | max) }}
+      attributes:
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
+      availability: >
+        {{ states.sensor.hourly_envcan.attributes is defined
+            and states.sensor.hourly_envcan.attributes.forecast is defined }}
 
     - name: "Precipitation Probability Tomorrow"
       unique_id: precipitation_probability_tomorrow
       icon: mdi:weather-rainy
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].precipitation_probability | int }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[1].precipitation_probability | int }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
-            and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].precipitation_probability is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].precipitation_probability) }}
+        {{ state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[1] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[1].precipitation_probability is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[1].precipitation_probability) }}
 
     - name: "Fog Probability"
       unique_id: fog_probability
@@ -1117,7 +1136,7 @@
             and is_number(states('sensor.tempest_st_00057689_snow_probability')) }}
 
     - name: "Precipitation Intensity"
-      unique_id: precipitation_intensity #TEST use pirate or weatherflow
+      unique_id: precipitation_intensity #TEST use pirate or weatherflow?
       icon: mdi:weather-pouring
       device_class: precipitation_intensity
       state_class: measurement
@@ -1125,7 +1144,7 @@
       # sensor.home_sensors_precipitation_rate
       # sensor.pirateweather_precip_intensity
       state: "{{ states('sensor.home_sensors_precipitation_rate') | float }}"
-      attributes
+      attributes:
         # Pirate Weather
         # Weatherflow
         provider: "Weatherflow"
@@ -1135,15 +1154,24 @@
       unique_id: precipitation_intensity_text
       icon: mdi:weather-pouring
       state: >
+        {% set type = states('sensor.precipitation_type') %}
         {% set rate = states('sensor.precipitation_intensity') | float %}
-        {% if rate == 0 %} none
-        {% elif rate <= 0.6 %} drizzle
-        {% elif rate <= 1.0 %} very light
-        {% elif rate <= 4 %} light
-        {% elif rate <= 15 %} moderate
-        {% elif rate <= 30 %} heavy
-        {% elif rate <= 50 %} very heavy
-        {% else %} violent
+        {% if type in ['rain', '', 'unknown', 'unavailable', none] %}
+          {% if rate == 0 %} none
+          {% elif rate <= 0.6 %} drizzle
+          {% elif rate <= 1.0 %} very light
+          {% elif rate <= 4 %} light
+          {% elif rate <= 15 %} moderate
+          {% elif rate <= 30 %} heavy
+          {% elif rate <= 50 %} very heavy
+          {% else %} violent
+          {% endif %}
+        {% else %} {# snow and ice #}
+          {% if rate == 0 %} none
+          {% elif rate < 1 %} light
+          {% elif rate < 5 %} moderate
+          {% else %} heavy
+          {% endif %}
         {% endif %}
       attributes:
         provider: "{{ state_attr('sensor.precipitation_intensity', 'provider') }}"
@@ -1291,41 +1319,41 @@
       availability: "{{ is_number(states('sensor.home_sensors_precipitation_yesterday_checked')) }}"
 
     - name: "Precipitation Type"
-      unique_id: precipitation_type
+      unique_id: precipitation_type #TODO type ice
       icon: >
         {% set type = states(this.entity_id) %}
-        {% if type == 'Rain' %} mdi:weather-pouring
-        {% elif type == 'Snow' %} mdi:weather-snowy
+        {% if type == 'rain' %} mdi:weather-pouring
+        {% elif type == 'snow' %} mdi:weather-snowy
         {% else %} mdi:weather-rainy
         {% endif %}
-      # check tempest intensity > 0 when rain for local accuaracy
+      # check tempest intensity > 0 when condition is rain for local accuaracy
       state: >
         {% set condition = states('sensor.current_condition') %}
         {% if condition | contains('snow') %} Snow
         {% elif states('sensor.tempest_st_00057689_rain_intensity') | float(0) > 0
             and (condition | contains('rain')
-              or condition | contains('pouring')) %} Rain
+              or condition | contains('pouring')) %} rain
         {% elif states('sensor.precipitation_intensity') | float(0) > 0 %}
-          {% if is_state('binary_sensor.freezing', 'off') %} Rain
-          {% else %} Snow
+          {% if is_state('binary_sensor.freezing', 'off') %} rain
+          {% else %} snow
           {% endif %}
         {% else %} none
         {% endif %}
       availability: "{{ has_value('sensor.current_condition') }}"
 
-    - name: "Precipitation Start" # next 12 hours
+    - name: "Precipitation Start" # next 24 hours
       unique_id: precipitation_start
       icon: mdi:weather-pouring
       device_class: timestamp
       state: >
         {% set time = namespace(value=none) %}
-        {% set forecast = state_attr('sensor.hourly_weather', 'forecast') %}
+        {% set forecast = state_attr('sensor.hourly_envcan', 'forecast') %}
         {% if is_state('binary_sensor.precipitation_active', 'on') %}
           {% set time.value = states.binary_sensor.precipitation_active.last_changed %}
         {% else %}
           {% for item in forecast %}
             {% if loop.index0 < 24
-                and item.precipitation_probability | int(-1) >= 30
+                and item.precipitation_probability | int(-1) >= 40
                 and (item.condition | contains('rain')
                   or item.condition | contains('snow')
                   or item.condition | contains('storm')) %}
@@ -1334,13 +1362,13 @@
             {% endif %}
           {% endfor %}
         {% endif %}
-        {{ time.value }}
+        {{ as_timestamp(time.value) | timestamp_utc if time.value != none else none }}
       attributes:
         12hour: >
           {% from 'speech.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
         type: >
-          {% set forecast = state_attr('sensor.hourly_weather', 'forecast') %}
+          {% set forecast = state_attr('sensor.hourly_envcan', 'forecast') %}
           {% set type = namespace(value=none) %}
           {% if is_state('binary_sensor.precipitation_active', 'on') %}
             {% set type.value = states('sensor.precipitation_type') %}
@@ -1348,17 +1376,17 @@
             {% for item in forecast %}
               {% if loop.index0 < 12 and item.precipitation_probability | int(-1) >= 30 %}
                 {% if item.condition | contains('rain') or item.condition | contains('storm') %}
-                  {% set type.value = 'Rain' %}
+                  {% set type.value = 'rain' %}
                 {% elif item.condition | contains('snow') %}
-                  {% set type.value = 'Snow' %}
+                  {% set type.value = 'snow' %}
                 {% endif %}
               {% break %}
               {% endif %}
             {% endfor %}
           {% endif %}
           {{ type.value }}
-        provider: "Hourly Weather"
-      availability: "{{ state_attr('sensor.hourly_weather', 'forecast') not in ['', none] }}"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
+      availability: "{{ state_attr('sensor.hourly_envcan', 'forecast') not in ['', none] }}"
 
     ###############################################################################
     ## Storm & Lightning

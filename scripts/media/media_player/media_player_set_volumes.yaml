@@ -38,7 +38,7 @@ media_player_set_volumes:
         {% if is_state_attr(entity_id, 'type', 'group') %}
           {% set entities = state_attr('sensor.' ~ entity_id.split('.')[1], 'entity_id') %}
         {% else %}
-          {% set entities = [entities] %}  
+          {% set entities = [entities] %}
         {% endif %}
       {% elif entities | count == 1 %}
         {% if is_state_attr(entities[0], 'type', 'group') %}
@@ -99,76 +99,86 @@ media_player_set_volumes:
         sequence:
           - variables:
               player: "{{ media_players[repeat.index - 1] }}"
-              player_id: "{{ states[player].object_id }}"
-              source_volume: >
-                {% if source_off %} {{ states('input_number.' ~ player_id ~ '_' ~ source | replace('_off', '')) | float(-1) }}
-                {% else %} -1
-                {% endif %}
-          - if:
-              - condition: template
-                alias: "Media player is not unavailable"
-                value_template: "{{ has_value(player) }}"
 
-              - condition: template
-                alias: "Source volume is not zero if source_off" # user may have adj vol in off state don't override
-                value_template: "{{ source_volume > 0 if source_off else true }}"
-
-              #BLOOP don't set volumes if media player isn't on to prevent volume adjust pops (phone_all, phone_off)
-              - condition: template
-                alias: "Media player is not off if source is phone_off, phone_all"
-                value_template: "{{ states(player) not in ['idle', 'off'] if source in ['phone_all', 'phone_off'] else true }}"
-
-              #TV #WARNING (MainThread) [homeassistant.components.webostv.media_player] Error calling async_set_volume_level on entity media_player.bedroom_tv, state:off, error: WebOsTvCommandError("Not connected, can't execute command.")
-              - condition: template
-                alias: "Media player is on if TV"
-                value_template: >
-                  {{ is_state(player, ['playing', 'paused', 'buffering', 'on'])
-                      if is_state_attr(player, 'device_class', 'tv') else true }}
+          - if: "{{ player in state_attr('group.media_players', 'entity_id') }}"
             then:
               - variables:
-                  current_volume: >
-                    {{ volume if source == 'media'
-                        else states('input_number.' ~ player_id ~ '_current_volume') | float(-1) }}
-                  default_volume: "{{ states('input_number.' ~ player_id ~ '_default_volume') | float(-1) }}"
-                  volume_factor: >
-                    {% if default_volume > 0 and is_state('input_boolean.volume_balancing', 'on') %}
-                      {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor') | float }}
+                  player_id: "{{ states[player].object_id }}"
+                  source_volume: >
+                    {% if source_off %} {{ states('input_number.' ~ player_id ~ '_' ~ source | replace('_off', '')) | float(-1) }}
+                    {% else %} -1
                     {% endif %}
-                  quiet_volume: "{{ states('input_number.media_quiet_volume') | int / 100 }}"
-                  alarm_clock_volume: >
-                    {{ states('input_number.alarm_clock_volume_' ~ states('input_select.alarm_clock_type'))
-                        | float(-1)/100 if source == 'alarm_clock' }}
-                  reset_volume: >
-                    {% if is_state('binary_sensor.quiet_time', 'on') %}
-                      {% set reset_volume = quiet_volume if current_volume > quiet_volume else current_volume
-                          if current_volume > 0 and is_state(player, ['playing', 'paused', 'buffering', 'on']) else quiet_volume %}
-                    {% else %}
-                      {% set reset_volume = iif(is_state(player, ['playing', 'paused', 'buffering', 'on'])
-                          and not force_reset, current_volume, default_volume) %}
-                    {% endif %}
-                    {{ reset_volume }}
-                  new_volume: >
-                    {% if source in ['phone_all', 'tts_all'] %}
-                      {% set new_volume = current_volume if current_volume < 0.2 else 0.2 %}
-                    {% elif source == 'media' and phone_on %} {% set new_volume = 0 if speaker_on else 0.2 %}
-                    {% elif source_off %} {% set new_volume = source_volume %}
-                    {% elif source == 'alarm_clock' %} {% set new_volume = alarm_clock_volume %}
-                    {% elif source == 'reset' %} {% set new_volume = reset_volume %}
-                    {% elif volume | float > 0 %} {% set new_volume = volume | float/100 %}
-                    {% else %} {% set new_volume = current_volume %}
-                    {% endif %}
-                    {% if not quiet_override and is_state('binary_sensor.quiet_time', 'on') and not source in ['alarm_clock', 'tts'] %}
-                      {% set new_volume = new_volume if new_volume < quiet_volume else quiet_volume %}
-                    {% endif %}
-                    {% set new_volume = new_volume * volume_factor | float(1) %} {# volume factor 1 == no adjustment #}
-                    {{ 1 if new_volume > 1 else 0 if new_volume < 0 else '%0.2f' | format(new_volume) | float }}
+              - if:
+                  - condition: template
+                    alias: "Media player is not unavailable"
+                    value_template: "{{ has_value(player) }}"
 
-              - action: media_player.volume_set
-                target:
-                  entity_id: "{{ player }}"
+                  - condition: template
+                    alias: "Source volume is not zero if source_off" # user may have adj vol in off state don't override
+                    value_template: "{{ source_volume > 0 if source_off else true }}"
+
+                  #BLOOP don't set volumes if media player isn't on to prevent volume adjust pops (phone_all, phone_off)
+                  - condition: template
+                    alias: "Media player is not off if source is phone_off, phone_all"
+                    value_template: "{{ states(player) not in ['idle', 'off'] if source in ['phone_all', 'phone_off'] else true }}"
+
+                  #TV #WARNING (MainThread) [homeassistant.components.webostv.media_player] Error calling async_set_volume_level on entity media_player.bedroom_tv, state:off, error: WebOsTvCommandError("Not connected, can't execute command.")
+                  - condition: template
+                    alias: "Media player is on if TV"
+                    value_template: >
+                      {{ is_state(player, ['playing', 'paused', 'buffering', 'on'])
+                          if is_state_attr(player, 'device_class', 'tv') else true }}
+                then:
+                  - variables:
+                      current_volume: >
+                        {{ volume if source == 'media'
+                            else states('input_number.' ~ player_id ~ '_current_volume') | float(-1) }}
+                      default_volume: "{{ states('input_number.' ~ player_id ~ '_default_volume') | float(-1) }}"
+                      volume_factor: >
+                        {% if default_volume > 0 and is_state('input_boolean.volume_balancing', 'on') %}
+                          {{ 1/(0.5/default_volume) ** states('input_number.volume_log_factor') | float }}
+                        {% endif %}
+                      quiet_volume: "{{ states('input_number.media_quiet_volume') | int / 100 }}"
+                      alarm_clock_volume: >
+                        {{ states('input_number.alarm_clock_volume_' ~ states('input_select.alarm_clock_type'))
+                            | float(-1)/100 if source == 'alarm_clock' }}
+                      reset_volume: >
+                        {% if is_state('binary_sensor.quiet_time', 'on') %}
+                          {% set reset_volume = quiet_volume if current_volume > quiet_volume else current_volume
+                              if current_volume > 0 and is_state(player, ['playing', 'paused', 'buffering', 'on']) else quiet_volume %}
+                        {% else %}
+                          {% set reset_volume = iif(is_state(player, ['playing', 'paused', 'buffering', 'on'])
+                              and not force_reset, current_volume, default_volume) %}
+                        {% endif %}
+                        {{ reset_volume }}
+                      new_volume: >
+                        {% if source in ['phone_all', 'tts_all'] %}
+                          {% set new_volume = current_volume if current_volume < 0.2 else 0.2 %}
+                        {% elif source == 'media' and phone_on %} {% set new_volume = 0 if speaker_on else 0.2 %}
+                        {% elif source_off %} {% set new_volume = source_volume %}
+                        {% elif source == 'alarm_clock' %} {% set new_volume = alarm_clock_volume %}
+                        {% elif source == 'reset' %} {% set new_volume = reset_volume %}
+                        {% elif volume | float > 0 %} {% set new_volume = volume | float/100 %}
+                        {% else %} {% set new_volume = current_volume %}
+                        {% endif %}
+                        {% if not quiet_override and is_state('binary_sensor.quiet_time', 'on') and not source in ['alarm_clock', 'tts'] %}
+                          {% set new_volume = new_volume if new_volume < quiet_volume else quiet_volume %}
+                        {% endif %}
+                        {% set new_volume = new_volume * volume_factor | float(1) %} {# volume factor 1 == no adjustment #}
+                        {{ 1 if new_volume > 1 else 0 if new_volume < 0 else '%0.2f' | format(new_volume) | float }}
+
+                  - action: media_player.volume_set
+                    target:
+                      entity_id: "{{ player }}"
+                    data:
+                      volume_level: "{{ new_volume }}"
+                    continue_on_error: true
+            else:
+              - action: system_log.write
                 data:
-                  volume_level: "{{ new_volume }}"
-                continue_on_error: true
+                  logger: "{{ this.entity_id }}"
+                  level: error
+                  message: "Invalid media player [{{ player }}]."
 
     # always turn save volume automation back on
     - action: automation.turn_on
