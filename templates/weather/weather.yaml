@@ -380,7 +380,7 @@
         value: "{{ now() }}"
   sensor:
     - name: "Lightning Last Strike Distance"
-      unique_id: lightning_last_strike_distance #VERIFY
+      unique_id: lightning_last_strike_distance
       icon: mdi:clock-star-four-points
       device_class: distance
       state_class: measurement
@@ -412,7 +412,7 @@
         value: "{{ now() }}"
   sensor:
     - name: "Lightning Last Strike"
-      unique_id: lightning_last_strike #VERIFY
+      unique_id: lightning_last_strike
       icon: mdi:clock-star-four-points
       device_class: timestamp
       state: >
@@ -521,6 +521,38 @@
         provider: "Pirate Weather"
       availability: "{{ is_number(states('sensor.pirateweather_current_day_ice_accumulation')) }}"
 
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: sensor.precipitation_accumulation_today_calculated
+      to:
+  action:
+    - variables:
+        previous: "{{ states('input_number.precipitation_accumulation_today_checked') | float(-1) }}"
+        current: "{{ states('sensor.precipitation_accumulation_today_calculated') | float(-1) }}"
+
+    - action: input_number.set_value
+      target:
+        entity_id: input_number.precipitation_accumulation_today_checked
+      data:
+        value: "{{ 0 if current == 0 else iif(current > previous, current, previous) }}"
+  sensor:
+    - name: "Precipitation Accumulation Today"
+      unique_id: precipitation_accumulation_today
+      icon: mdi:weather-pouring
+      device_class: precipitation
+      state_class: measurement
+      unit_of_measurement: mm
+      state: "{{ states('input_number.precipitation_accumulation_today_checked') }}"
+      attributes:
+        provider: "Pirate Weather"
+      availability: "{{ is_number(states('sensor.precipitation_accumulation_today_calculated')) }}"
+
 - binary_sensor:
     ###############################################################################
     ## Integrations
@@ -618,7 +650,7 @@
     - name: "Precipitation Active"
       unique_id: precipitation_active
       icon: mdi:weather-pouring
-      state: "{{ states('sensor.precipitation_type') in ['rain', 'snow', 'ice'] }}"
+      state: "{{ states('sensor.precipitation_type') in ['rain', 'snow'] }}"
 
     - name: "Precipitation Likely Soon" # next 2 hours
       unique_id: precipitation_likely_soon
@@ -728,12 +760,12 @@
     ###############################################################################
     ## Condition
     ###############################################################################
-    #IDEA add icons for envcan extra values - req custom weather card
-    #NOTE need most accurate for precipitation_type - envcan
     - name: "Current Condition"
       unique_id: current_condition
-      icon: mdi:weather-partly-snowy-rainy
-      state: >
+      icon: >
+        {% from 'weather.jinja' import condition_icon %}
+        {{ condition_icon(states(this.entity_id)) }}
+      state: > #NOTE need accurate for precipitation_type - envcan
         {% set condition = states('weather.windsor_forecast') %}
         {% if condition | lower == 'clear' and is_state('sun.sun', 'above_horizon') %} sunny
         {% elif condition | lower == 'clear' and is_state('sun.sun', 'below_horizon') %} clear-night
@@ -755,7 +787,9 @@
 
     - name: "Condition Today"
       unique_id: condition_today
-      icon: mdi:weather-partly-snowy-rainy
+      icon: >
+        {% from 'weather.jinja' import condition_icon %}
+        {{ condition_icon(states(this.entity_id)) }}
       state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].condition }}"
       attributes:
         provider: "Daily Weather"
@@ -766,7 +800,9 @@
 
     - name: "Condition Tomorrow"
       unique_id: condition_tomorrow
-      icon: mdi:weather-partly-snowy-rainy
+      icon: >
+        {% from 'weather.jinja' import condition_icon %}
+        {{ condition_icon(states(this.entity_id)) }}
       state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].condition }}"
       attributes:
         provider: "Daily Weather"
@@ -807,7 +843,7 @@
       icon: mdi:thermometer
       state: >
         {% set temp = states('sensor.outdoor_temperature') | float %}
-        {% if temp >= 40 %} Inferno
+        {% if temp >= 40 %} Extreme Heat
         {% elif temp >= 35 %} Very Hot
         {% elif temp >= 30 %} Hot
         {% elif temp >= 25 %} Warm
@@ -815,8 +851,9 @@
         {% elif temp >= 15 %} Cool
         {% elif temp >= 5 %} Chilly
         {% elif temp >= 0 %} Cold
-        {% elif temp >= -7 %} Freezing
-        {% else %} Frigid
+        {% elif temp >= -5 %} Freezing
+        {% elif temp >= -15 %} Frigid
+        {% else %} Extreme Cold
         {% endif %}
       attributes:
         provider: "{{ state_attr('sensor.outdoor_temperature', 'provider') }}"
@@ -1033,20 +1070,22 @@
     - name: "Dew Point Comfort Level"
       unique_id: dew_point_comfort_level
       icon: mdi:thermometer-water
+      device_class: enum
       state: >
         {% set dewpoint = states('sensor.dew_point') | float %}
-        {% if dewpoint >= 80 %} Severely High
-        {% elif dewpoint >= 75 %} Miserable
-        {% elif dewpoint >= 70 %} Oppressive
-        {% elif dewpoint >= 65 %} Uncomfortable
-        {% elif dewpoint >= 60 %} Ok for Most
-        {% elif dewpoint >= 55 %} Comfortable
-        {% elif dewpoint >= 50 %} Very Comfortable
-        {% elif dewpoint >= 30 %} Somewhat Dry
-        {% elif dewpoint >= -0.5 %} Dry
+        {% if dewpoint >= 26 %} Severely High
+        {% elif dewpoint >= 24 %} Oppressive
+        {% elif dewpoint >= 21 %} Very Humid
+        {% elif dewpoint >= 18 %} Uncomfortable
+        {% elif dewpoint >= 16 %} Ok For Most
+        {% elif dewpoint >= 12 %} Comfortable
+        {% elif dewpoint >= 10 %} Very Comfortable
+        {% elif dewpoint >= 8 %} Somewhat Dry
+        {% elif dewpoint >= 5 %} Dry
         {% else %} Very Dry
         {% endif %}
       attributes:
+        options: "{{ ['Severely High', 'Oppressive', 'Very Humid', 'Uncomfortable', 'Ok For Most', 'Comfortable', 'Very Comfortable', 'Somewhat Dry', 'Dry', 'Very Dry'] }}"
         provider: "{{ state_attr('sensor.dew_point', 'provider') }}"
       availability: "{{ is_number(states('sensor.dew_point')) }}"
 
@@ -1136,17 +1175,13 @@
             and is_number(states('sensor.tempest_st_00057689_snow_probability')) }}
 
     - name: "Precipitation Intensity"
-      unique_id: precipitation_intensity #TEST use pirate or weatherflow?
+      unique_id: precipitation_intensity
       icon: mdi:weather-pouring
       device_class: precipitation_intensity
       state_class: measurement
       unit_of_measurement: mm/h
-      # sensor.home_sensors_precipitation_rate
-      # sensor.pirateweather_precip_intensity
       state: "{{ states('sensor.home_sensors_precipitation_rate') | float }}"
       attributes:
-        # Pirate Weather
-        # Weatherflow
         provider: "Weatherflow"
       availability: "{{ is_number(states('sensor.home_sensors_precipitation_rate')) }}"
 
@@ -1187,6 +1222,28 @@
         provider: "Pirate Weather"
       availability: "{{ is_number(states('sensor.pirateweather_daily_max_precip_intensity_0d')) }}"
 
+    - name: "Precipitation Accumulation Today Calculated"
+      unique_id: precipitation_accumulation_today_calculated
+      icon: mdi:weather-pouring
+      device_class: precipitation
+      state_class: measurement
+      unit_of_measurement: mm
+      state: >
+        {% set rain = states('sensor.rain_accumulation_today') | float(-1) %}
+        {% set snow = states('sensor.snow_accumulation_today') | float(-1) %}
+        {% set ice = states('sensor.ice_accumulation_today') | float(-1) %}
+        {% set total = -1 %}
+        {% if rain >= 0 %}{% set total = total + rain if total >= 0 else rain %}{% endif %}
+        {% if snow >= 0 %}{% set total = total + snow if total >= 0 else snow %}{% endif %}
+        {% if ice >= 0 %}{% set total = total + ice if total >= 0 else ice %}{% endif %}
+        {{ none if total < 0 else total }}
+      attributes:
+        provider: "{{ state_attr('sensor.rain_accumulation_today', 'provider') }}"
+      availability: >
+        {{ is_number(states('sensor.rain_accumulation_today'))
+            or is_number(states('sensor.snow_accumulation_today'))
+            or is_number(states('sensor.ice_accumulation_today')) }}
+
     - name: "Precipitation Expected Today"
       unique_id: precipitation_expected_today
       icon: mdi:weather-pouring
@@ -1202,7 +1259,7 @@
             and is_number(state_attr('sensor.daily_weather', 'forecast')[0].precipitation) }}
 
     - name: "Precipitation Expected Tomorrow"
-      unique_id: precipitation_expected_tomorrow #VERIFY does this include snow / ice?
+      unique_id: precipitation_expected_tomorrow
       icon: mdi:weather-pouring
       device_class: precipitation
       unit_of_measurement: mm
@@ -1285,28 +1342,6 @@
         provider: "Pirate Weather"
       availability: "{{ is_number(states('sensor.pirateweather_ice_accumulation_1d')) }}"
 
-    - name: "Precipitation Accumulation Today"
-      unique_id: precipitation_accumulation_today
-      icon: mdi:weather-pouring
-      device_class: precipitation
-      state_class: measurement
-      unit_of_measurement: mm
-      state: >
-        {% set rain = states('sensor.rain_accumulation_today') | float(-1) %}
-        {% set snow = states('sensor.snow_accumulation_today') | float(-1) %}
-        {% set ice = states('sensor.snow_accumulation_today') | float(-1) %}
-        {%- set total = -1 %}
-        {% if rain >= 0 %}{%- set total = total + rain if total >= 0 else rain %}{% endif %}
-        {% if snow >= 0 %}{%- set total = total + snow if total >= 0 else snow %}{% endif %}
-        {% if ice >= 0 %}{%- set total = total + ice if total >= 0 else ice %}{% endif %}
-        {{ none if total < 0 else total }}
-      attributes:
-        provider: "{{ state_attr('sensor.rain_accumulation_today', 'provider') }}"
-      availability: >
-        {{ is_number(states('sensor.rain_accumulation_today'))
-            or is_number(states('sensor.snow_accumulation_today'))
-            or is_number(states('sensor.snow_accumulation_today')) }}
-
     - name: "Precipitation Accumulation Yesterday"
       unique_id: precipitation_accumulation_yesterday
       icon: mdi:weather-pouring
@@ -1319,7 +1354,7 @@
       availability: "{{ is_number(states('sensor.home_sensors_precipitation_yesterday_checked')) }}"
 
     - name: "Precipitation Type"
-      unique_id: precipitation_type #TODO type ice
+      unique_id: precipitation_type
       icon: >
         {% set type = states(this.entity_id) %}
         {% if type == 'rain' %} mdi:weather-pouring
@@ -1329,7 +1364,7 @@
       # check tempest intensity > 0 when condition is rain for local accuaracy
       state: >
         {% set condition = states('sensor.current_condition') %}
-        {% if condition | contains('snow') %} Snow
+        {% if condition | contains('snow') %} snow
         {% elif states('sensor.tempest_st_00057689_rain_intensity') | float(0) > 0
             and (condition | contains('rain')
               or condition | contains('pouring')) %} rain
@@ -1591,7 +1626,7 @@
       unique_id: wind_direction
       icon: mdi:weather-windy
       state: >
-        {%- from 'speech.jinja' import cardinal_direction %}
+        {% from 'speech.jinja' import cardinal_direction %}
         {{- cardinal_direction(states('sensor.wind_bearing')) -}}
       attributes:
         provider: "{{ state_attr('sensor.wind_bearing', 'provider') }}"
@@ -1601,7 +1636,7 @@
       unique_id: wind_full_direction
       icon: mdi:weather-windy
       state: >
-        {%- from 'speech.jinja' import full_cardinal_direction %}
+        {% from 'speech.jinja' import full_cardinal_direction %}
         {{- full_cardinal_direction(states('sensor.wind_bearing')) -}}
       attributes:
         provider: "{{ state_attr('sensor.wind_bearing', 'provider') }}"
@@ -1742,6 +1777,15 @@
         provider: "OpenUV"
       availability: "{{ is_number(states('sensor.max_uv_index')) }}"
 
+    - name: "Ozone Level"
+      unique_id: ozone_level
+      device_class: aqi
+      state_class: measurement
+      state: "{{ states('sensor.current_ozone_level') }}"
+      attributes:
+        provider: "OpenUV"
+      availability: "{{ is_number(states('sensor.current_ozone_level')) }}"
+
     ###############################################################################
     ## Air Quality
     ###############################################################################
@@ -1763,8 +1807,8 @@
         {{ aqi_risk(states('sensor.air_quality_index')) }}
       availability: "{{ is_number(states('sensor.air_quality_index')) }}"
 
-    - name: "Ozone"
-      unique_id: ozone
+    - name: "Ozone Index"
+      unique_id: ozone_index
       device_class: aqi
       state_class: measurement
       state: "{{ states('sensor.windsor_ozone') }}"
@@ -1900,7 +1944,7 @@
     - name: "Fire Risk Today"
       unique_id: fire_risk_today
       icon: mdi:fire
-      state: "{{ '%0.1f' | format(states('sensor.pirateweather_fire_risk_level_0d') | float(-1)) }}"
+      state: "{{ states('sensor.pirateweather_fire_risk_level_0d') }}"
       attributes:
         provider: "Pirate Weather"
       availability: "{{ has_value('sensor.pirateweather_fire_risk_level_0d') }}"
