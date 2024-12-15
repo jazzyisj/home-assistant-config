@@ -24,8 +24,22 @@
     secondary: >
       {%- set exp = states('sensor.precipitation_expected_today') %}
       {%- if is_number(exp) and exp | float(-1) > 0 -%}
-        Expected: {{ '%0.1f' | format(exp) | float(-1) }} mm
+        Accumulation: {{ '%0.1f' | format(exp) | float(-1) }} mm
       {%- endif %}
+    card_mod:
+      style: >
+        {% from 'weather.jinja' import precipitation_color %}
+        {{ precipitation_color(states('sensor.precipitation_type')) }}
+
+- type: custom:template-entity-row
+  entity: sensor.precipitation_probability
+  name: "Probability"
+  state: "{{ states('sensor.precipitation_probability', with_unit=true) }}"
+  secondary: "Next 24h: {{ states('sensor.precipitation_probability_next_24_hours', with_unit=true) }}"
+  card_mod:
+    style: >
+      {% from 'weather.jinja' import pop_color %}
+      {{ pop_color(states('sensor.precipitation_probability')) }}
 
 - type: conditional
   conditions:
@@ -36,17 +50,17 @@
     type: custom:template-entity-row
     entity: binary_sensor.precipitation_likely_soon
     name: >
-      {% set type = state_attr('sensor.precipitation_start', 'type') %}
-      {{ iif(type in ['rain', 'snow', 'ice'], type | title, 'Precipitation') }} Likely Soon
+      {% set type = states('sensor.precipitation_type_expected') %}
+      {{ iif(type in ['rain', 'snow'], type | title, 'Precipitation') }} Likely Soon
     icon: mdi:weather-snowy-rainy
-    state: >
-      {%- if has_value('sensor.precipitation_start') %}
-        {{ state_attr('sensor.precipitation_start', '12hour') }}
-      {%- endif %}
+    state: "{{ state_attr('sensor.precipitation_start', '12hour') }}"
     secondary: >
-      {%- if is_number(states('sensor.precipitation_expected_today')) %}
-        Expected: {{ '%0.1f' | format(states('sensor.precipitation_expected_today') | float(-1)) }} mm
-      {%- endif %}
+      {% set tomorrow = now().day < as_datetime(states('sensor.precipitation_start')).day | default(false) %}
+      {% if is_number(iif(tomorrow, states('sensor.precipitation_expected_tomorrow'),
+          states('sensor.precipitation_expected_today'))) %}
+        Accumulation: {{ '%0.1f' | format(iif(tomorrow, states('sensor.precipitation_expected_tomorrow'),
+          states('sensor.precipitation_expected_today')) | float(-1)) }} mm
+      {% endif %}
     active: "{{ is_state('binary_sensor.precipitation_likely_soon', 'on') }}" #BUG not working
     card_mod: #BUGFIX #BUG not working in conditional row
       style: |
@@ -67,18 +81,16 @@
     type: custom:template-entity-row
     entity: binary_sensor.precipitation_likely_next_24_hours
     name: >
-      {% set type = state_attr('sensor.precipitation_start', 'type') %}
-      {{ iif(type in ['rain', 'snow', 'ice'], type | title, 'Precipitation') }} Likely Next 24 Hours
+      {% set type = states('sensor.precipitation_type_expected') %}
+      {{ iif(type in ['rain', 'snow'], type | title, 'Precipitation') }} Likely Next 24 Hours
     icon: mdi:weather-snowy-rainy
-    state: >
-      {% if has_value('sensor.precipitation_start') %}
-        {{ state_attr('sensor.precipitation_start', '12hour') }}
-      {% elif states('sensor.precipitation_probability_today') | int(-1) > 30 %}
-        {{ states('sensor.precipitation_probability_today', with_unit=true) }}
-      {% endif %}
+    state: "{{ state_attr('sensor.precipitation_start', '12hour') }}"
     secondary: >
-      {% if is_number(states('sensor.precipitation_expected_today')) %}
-        Expected: {{ '%0.1f' | format(states('sensor.precipitation_expected_today') | float(-1)) }} mm
+      {% set tomorrow = now().day < as_datetime(states('sensor.precipitation_start')).day | default(false) %}
+      {% if is_number(iif(tomorrow, states('sensor.precipitation_expected_tomorrow'),
+          states('sensor.precipitation_expected_today'))) %}
+        Accumulation: {{ '%0.1f' | format(iif(tomorrow, states('sensor.precipitation_expected_tomorrow'),
+          states('sensor.precipitation_expected_today')) | float(-1)) }} mm
       {% endif %}
     active: "{{ is_state('binary_sensor.precipitation_likely_next_24_hours', 'on') }}" #BUG not working
     card_mod: #BUGFIX #BUG not working in conditional row
@@ -109,28 +121,9 @@
       {%- endif %}
     active: "{{ is_state('binary_sensor.precipitation_active', 'on') }}" #BUG not working
     card_mod: #BUGFIX #BUG not working in conditional row
-      style: |
-        :host {
-          --paper-item-icon-color:
-            {% if is_state('binary_sensor.precipitation_active', 'on') %} var(--state-active-color)
-            {% else %} var(--state-icon-color)
-            {% endif %}
-          ;
-        }
-
-- type: conditional
-  conditions:
-    - condition: state
-      entity: sensor.precipitation_start
-      state_not: unknown
-  row:
-    entity: sensor.precipitation_start
-
-- type: custom:template-entity-row
-  entity: sensor.precipitation_probability
-  name: "Probability"
-  state: "{{ states('sensor.precipitation_probability', with_unit=true) }}"
-  secondary: "Next 24h: {{ states('sensor.precipitation_probability_next_24_hours', with_unit=true) }}"
+      style: >
+        {% from 'weather.jinja' import precipitation_color %}
+        {{ precipitation_color(states('sensor.precipitation_type')) }}
 
 - type: conditional
   conditions:
@@ -291,8 +284,8 @@
       entity: sensor.precipitation_accumulation_yesterday
       above: 0
   row:
-    - entity: sensor.precipitation_accumulation_yesterday
-      name: "Precipitation Yesterday"
+    entity: sensor.precipitation_accumulation_yesterday
+    name: "Precipitation Yesterday"
 
 - type: conditional
   conditions:
@@ -332,22 +325,6 @@
   tap_action:
     action: navigate
     navigation_path: rain-radar
-
-- type: button
-  name: "Cloud Radar"
-  icon: mdi:weather-cloudy
-  action_name: "VIEW"
-  tap_action:
-    action: navigate
-    navigation_path: cloud-radar
-
-- type: button
-  name: "Satellite"
-  icon: mdi:satellite
-  action_name: "VIEW"
-  tap_action:
-    action: navigate
-    navigation_path: ventusky-satellite
 
 - type: button
   name: "Rain Viewer"

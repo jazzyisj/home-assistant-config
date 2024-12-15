@@ -11,7 +11,7 @@ entities:
     state: "{{ states('sensor.current_condition') | title }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import condition_icon_color %}
+        {% from 'weather.jinja' import condition_color %}
         {{ condition_color(states('sensor.current_condition')) }}
 
   - type: custom:fold-entity-row
@@ -29,14 +29,40 @@ entities:
       secondary: >
         {{- states('sensor.outdoor_temperature', with_unit=true) }}
         {%- if states('sensor.outdoor_temperature') | int(-1) != states('sensor.outdoor_apparent_temperature') | int(-1) %}
-        ({{ states('sensor.outdoor_apparent_temperature') }})
+          | Feels Like: {{ states('sensor.outdoor_apparent_temperature', with_unit=true) }}
         {%- endif %}
-        {{- ' Trend: ' ~ states('sensor.outdoor_temperature_trend') }}
       card_mod:
         style: >
-          {% from 'weather.jinja' import temp_icon %}
+          {% from 'weather.jinja' import temp_color %}
           {{ temp_color(states('sensor.outdoor_temperature')) }}
     entities: !include /config/ui/card/weather/include/outdoor_temperature_entities.yaml
+
+  - entity: sensor.outdoor_temperature_trend
+    name: "Temperature Trend"
+    card_mod:
+      style: |
+        :host {
+          --paper-item-icon-color:
+            {% if has_value('sensor.outdoor_temperature_trend') %}
+              {% set trend = states('sensor.outdoor_temperature_trend') %}
+              {% if trend == 'Rising' %} var(--entity-heating-color)
+              {% elif trend == 'Falling' %} var(--entity-cooling-color)
+              {% else %} var(--state-icon-color)
+              {% endif %}
+            {% else %} var(--entity-disabled-color)
+            {% endif %}
+          ;
+        }
+
+  - type: custom:template-entity-row
+    entity: sensor.dew_point
+    name: "Dew Point"
+    state: "{{ states('sensor.dew_point_comfort_level') | title }}"
+    secondary: "{{ states('sensor.dew_point', with_unit=true) }}"
+    card_mod:
+      style: >
+        {% from 'weather.jinja' import temp_color %}
+        {{ temp_color(states('sensor.dew_point')) }}
 
   - type: custom:fold-entity-row
     padding: 10
@@ -44,11 +70,11 @@ entities:
       type: custom:template-entity-row
       entity: sensor.outdoor_humidity
       name: "Humidity"
-      state: "{{ states('sensor.dew_point_comfort_level') | title }}"
+      state: "{{ states('sensor.outdoor_humidity_level') | title }}"
       secondary: "{{ states('sensor.outdoor_humidity', with_unit=true) }}"
       card_mod:
         style: >
-          {% from 'weather.jinja' import humidity_icon %}
+          {% from 'weather.jinja' import humidity_color %}
           {{ humidity_color(states('sensor.outdoor_humidity')) }}
     entities: !include /config/ui/card/weather/include/outdoor_humidity_entities.yaml
 
@@ -56,15 +82,29 @@ entities:
     padding: 10
     head:
       type: custom:template-entity-row
-      entity: sensor.barometric_pressure
-      name: "Barometric Pressure"
-      state: "{{ states('sensor.barometric_pressure_description') | title }}"
-      secondary: "{{ states('sensor.barometric_pressure', with_unit=true) ~ ': ' ~ states('sensor.pressure_trend') }}"
+      entity: sensor.wind_speed
+      name: "Wind Conditions"
+      state: "{{ states('sensor.wind_beaufort_display') }}"
+      secondary: >
+        {{ states('sensor.wind_direction') ~ ' (' ~ states('sensor.wind_speed') ~ '/' ~ states('sensor.wind_gust', with_unit=true) }})
       card_mod:
         style: >
-          {% from 'weather.jinja' import pressure_icon %}
-          {{ pressure_color(states('sensor.barometric_pressure')) }}
-    entities: !include /config/ui/card/weather/include/barometric_pressure_entities.yaml
+          {% from 'weather.jinja' import wind_color %}
+          {{ wind_color(states('sensor.wind_gust')) }}
+    entities: !include /config/ui/card/weather/include/wind_entities.yaml
+
+  - type: custom:fold-entity-row
+    padding: 10
+    head:
+      type: custom:template-entity-row
+      entity: sensor.cloud_coverage
+      state: "{{ states('sensor.cloud_coverage_description') }}"
+      secondary: "{{ states('sensor.cloud_coverage', with_unit=true) }}"
+      card_mod:
+        style: >
+          {% from 'weather.jinja' import cloud_color %}
+          {{ cloud_color(states('sensor.cloud_coverage')) }}
+    entities: !include /config/ui/card/weather/include/cloud_entities.yaml
 
   - type: custom:fold-entity-row
     padding: 10
@@ -78,21 +118,26 @@ entities:
       secondary: "Probability: {{ states('sensor.precipitation_probability', with_unit = true) }}"
       card_mod:
         style: >
-          {% from 'weather.jinja' import pop_icon %}
-          {{ pop_color(states('sensor.precipitation_probability')) }}
+          {% if is_state('binary_sensor.precipitation_active', 'on') %}
+            {% from 'weather.jinja' import precipitation_color %}
+            {{ precipitation_color(states('sensor.precipitation_type')) }}
+          {% else %}
+            {% from 'weather.jinja' import pop_color %}
+            {{ pop_color(states('sensor.precipitation_probability')) }}
+          {% endif %}
     entities: !include /config/ui/card/weather/include/precipitation_entities.yaml
 
   - type: conditional
     conditions:
-      - condition: or
+      - condition: and
         conditions:
           - condition: numeric_state
             entity: sensor.nearest_storm_distance
             above: 0
 
-          - condition: state
-            entity: sensor.nearest_storm_bearing
-            state_not: unknown
+          - condition: numeric_state
+            entity: sensor.nearest_storm_distance
+            below: 100
     row:
       type: custom:fold-entity-row
       padding: 10
@@ -100,61 +145,59 @@ entities:
       entities:
         - !include /config/ui/card/weather/include/storm_radar.yaml
 
-  - type: custom:fold-entity-row
-    padding: 10
-    head:
-      type: custom:template-entity-row
-      entity: binary_sensor.lightning
-      name: "Lightning"
-      state: "{{ iif(is_state('binary_sensor.lightning', 'on'), 'Yes', 'No') }}"
-      secondary: >
-        {%- set strikes = states('sensor.lightning_count') | int(-1) %}
-        {%- set distance = states('sensor.lightning_last_strike_distance') | int(-1) %}
-        {%- if strikes > 0 -%}
-          Strikes: {{ strikes }}
-        {%- endif %}
-        {%- if distance > 0 -%}
-          {{- ' | ' if strikes > 0 -}} Distance: {{ distance }}
-        {%- endif %}
-      active: "{{ is_state('binary_sensor.lightning', 'on') }}" #BUG not working
-      card_mod: #BUGFIX
-        style: |
-          :host {
-            --paper-item-icon-color:
-              {% if is_state('binary_sensor.lightning', 'on') %} var(--state-active-color)
-              {% else %} var(--state-icon-color)
-              {% endif %}
-            ;
-          }
-    entities: !include /config/ui/card/weather/include/lightning_entities.yaml
+  - type: conditional
+    conditions:
+      - condition: or
+        conditions:
+          - condition: numeric_state
+            entity: sensor.lightning_count
+            above: 0
+
+          - condition: state
+            entity: binary_sensor.lightning
+            state: "on"
+    row:
+      type: custom:fold-entity-row
+      padding: 10
+      head:
+        type: custom:template-entity-row
+        entity: binary_sensor.lightning
+        name: "Lightning"
+        state: "{{ iif(is_state('binary_sensor.lightning', 'on'), 'Yes', 'No') }}"
+        secondary: >
+          {%- set strikes = states('sensor.lightning_count') | int(-1) %}
+          {%- set distance = states('sensor.lightning_distance') | int(-1) %}
+          {%- if strikes > 0 -%}
+            Strikes: {{ strikes }}
+          {%- endif %}
+          {%- if distance > 0 -%}
+            {{- ' | ' if strikes > 0 -}} Distance: {{ distance }}
+          {%- endif %}
+        active: "{{ is_state('binary_sensor.lightning', 'on') }}" #BUG not working
+        card_mod: #BUGFIX
+          style: |
+            :host {
+              --paper-item-icon-color:
+                {% if is_state('binary_sensor.lightning', 'on') %} var(--state-active-color)
+                {% else %} var(--state-icon-color)
+                {% endif %}
+              ;
+            }
+      entities: !include /config/ui/card/weather/include/lightning_entities.yaml
 
   - type: custom:fold-entity-row
     padding: 10
     head:
       type: custom:template-entity-row
-      entity: sensor.wind_speed
-      name: "Wind Conditions"
-      state: "{{ states('sensor.wind_beaufort_display') }}"
-      secondary: >
-        {{ states('sensor.wind_direction') ~ ' (' ~ states('sensor.wind_speed') ~ '/' ~ states('sensor.wind_gust', with_unit=true) }})
+      entity: sensor.barometric_pressure
+      name: "Barometric Pressure"
+      state: "{{ states('sensor.barometric_pressure_description') | title }}"
+      secondary: "{{ states('sensor.barometric_pressure', with_unit=true) ~ ': ' ~ states('sensor.pressure_trend') }}"
       card_mod:
         style: >
-          {% from 'weather.jinja' import wind_icon %}
-          {{ wind_color(states('sensor.wind_gust')) }}
-    entities: !include /config/ui/card/weather/include/wind_entities.yaml
-
-  - type: custom:fold-entity-row
-    padding: 10
-    head:
-      type: custom:template-entity-row
-      entity: sensor.cloud_coverage
-      state: "{{ states('sensor.cloud_coverage_description') }}"
-      secondary: "{{ states('sensor.cloud_coverage', with_unit=true) }}"
-      card_mod:
-        style: >
-          {% from 'weather.jinja' import cloud_icon %}
-          {{ cloud_color(states('sensor.cloud_coverage')) }}
-    entities: !include /config/ui/card/weather/include/cloud_entities.yaml
+          {% from 'weather.jinja' import pressure_color %}
+          {{ pressure_color(states('sensor.barometric_pressure')) }}
+    entities: !include /config/ui/card/weather/include/barometric_pressure_entities.yaml
 
   - type: custom:template-entity-row
     entity: sensor.uv_index
@@ -163,7 +206,7 @@ entities:
     secondary: "UV Index: {{ states('sensor.uv_index') }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import uv_index_icon %}
+        {% from 'weather.jinja' import uv_index_color %}
         {{ uv_index_color(states('sensor.uv_index')) }}
 
   - type: custom:fold-entity-row
@@ -176,7 +219,7 @@ entities:
       secondary: "AQI: {{ states('sensor.air_quality_index') }}"
       card_mod:
         style: >
-          {% from 'weather.jinja' import aqi_index_icon %}
+          {% from 'weather.jinja' import aqi_index_color %}
           {{ aqi_index_color(states('sensor.air_quality_index')) }}
     entities: !include /config/ui/card/weather/include/air_quality_entities.yaml
 
@@ -187,18 +230,18 @@ entities:
     secondary: "Fire Index: {{ states('sensor.fire_index') }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import fire_index_icon %}
+        {% from 'weather.jinja' import fire_index_color %}
         {{ fire_index_color(states('sensor.fire_index')) }}
 
   - type: custom:template-entity-row
-    entity: sensor.atmospheric_smoke
+    entity: sensor.smoke_level
     name: "Smoke Risk"
     state: "{{ states('sensor.smoke_risk') }}"
-    secondary: "Smoke Level: {{ states('sensor.atmospheric_smoke', with_unit=true) }}"
+    secondary: "Smoke Level: {{ states('sensor.smoke_level', with_unit=true) }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import smoke_level_icon %}
-        {{ smoke_level_color(states('sensor.atmospheric_smoke')) }}
+        {% from 'weather.jinja' import smoke_level_color %}
+        {{ smoke_level_color(states('sensor.smoke_level')) }}
 
   - type: custom:template-entity-row
     entity: sensor.allergy_index_today
@@ -207,7 +250,7 @@ entities:
     secondary: "Allergy Index: {{ states('sensor.allergy_index_today') }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import iqvia_index_icon %}
+        {% from 'weather.jinja' import iqvia_index_color %}
         {{ iqvia_index_color(states('sensor.allergy_index_today')) }}
 
   - type: custom:template-entity-row
@@ -217,7 +260,7 @@ entities:
     secondary: "Asthma Index: {{ states('sensor.asthma_index_today') }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import iqvia_index_icon %}
+        {% from 'weather.jinja' import iqvia_index_color %}
         {{ iqvia_index_color(states('sensor.asthma_index_today')) }}
 
   - type: custom:template-entity-row
@@ -227,7 +270,7 @@ entities:
     secondary: "Flu Index: {{ states('sensor.cold_flu_index_today') }}"
     card_mod:
       style: >
-        {% from 'weather.jinja' import iqvia_index_icon %}
+        {% from 'weather.jinja' import iqvia_index_color %}
         {{ iqvia_index_color(states('sensor.cold_flu_index_today')) }}
 
   - entity: sensor.pirateweather_time
