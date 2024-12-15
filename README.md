@@ -1,10 +1,10 @@
 # Home Assistant Configuration
 
-## [More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" height="200" width="400"/>](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png)
 
-![Home](https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png)
+## [View Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-##### <font color='cyan'>Updated 24-09-20</font>
+##### <font color='cyan'>Updated 24-12-15</font>
 
 ## HARDWARE
 
@@ -165,14 +165,14 @@
 - Weather Chart Card
 - Windrose Card
 
-## ENTITY COUNTS (43 Domains, 4340 Entities)
+## ENTITY COUNTS (43 Domains, 4247 Entities)
 
 - alarm_control_panel: 3
-- alert: 102
-- automation: 312
-- binary_sensor: 488
-- button: 135
-- calendar: 17
+- alert: 103
+- automation: 317
+- binary_sensor: 493
+- button: 138
+- calendar: 16
 - camera: 31
 - climate: 5
 - conversation: 1
@@ -180,30 +180,30 @@
 - device_tracker: 75
 - event: 75
 - fan: 9
-- group: 79
+- group: 80
 - image: 21
-- input_boolean: 199
+- input_boolean: 202
 - input_button: 2
 - input_datetime: 42
-- input_number: 175
-- input_select: 51
-- input_text: 116
-- light: 54
+- input_number: 182
+- input_select: 58
+- input_text: 139
+- light: 55
 - lock: 4
-- media_player: 41
+- media_player: 42
 - notify: 3
 - number: 83
 - person: 2
 - remote: 1
 - scene: 8
-- script: 65
-- select: 198
-- sensor: 1559
+- script: 66
+- select: 220
+- sensor: 1391
 - siren: 2
 - stt: 2
 - sun: 1
-- switch: 184
-- timer: 42
+- switch: 181
+- timer: 41
 - todo: 4
 - tts: 3
 - update: 125
