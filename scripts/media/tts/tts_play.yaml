@@ -44,9 +44,6 @@ tts_play:
     save_message:
       description: "Save message to play when home or after alarm."
       example: "true"
-    shower_tts:
-      description: "TTS replay for shower scene."
-      example: "true"
   sequence:
     - condition: state
       entity_id: input_boolean.tts_enabled
@@ -62,20 +59,34 @@ tts_play:
         quiet_play: "{{ quiet_play | default(false) }}"
         always_play: "{{ always_play | default(false) }}"
         ignore_away: "{{ ignore_away | default(false) }}"
-        shower_tts: "{{ shower_tts | default(false) }}"
+        media_active: "{{ is_state('binary_sensor.media', 'on') }}"
+        shower_tts: "{{ is_state('switch.shower_scene', 'on') }}"
         save_message: "{{ save_message | default(is_state('binary_sensor.mobile_phone_in_use', 'on')) }}"
         alert: "{{ alert | default(false) }}"
+        #MASS redirect tts to active mass player for resume, use first group or first single player found
+        active_player: >
+          {% if media_active %}
+            {% set group = expand(state_attr('binary_sensor.media', 'entity_id'))
+                | selectattr('attributes.type', 'eq', 'group')
+                | map(attribute='entity_id') | list %}
+            {% set single = expand(state_attr('binary_sensor.media', 'entity_id'))
+                | selectattr('attributes.type', 'eq', 'single')
+                | map(attribute='entity_id') | list %}
+            {{ group[0] if group != [] else single[0] }}
+          {% else %} {{ none }}
+          {% endif %}
         shower_player: >
           {{ expand('group.tts_media_players')
               | selectattr('name', 'eq', states('select.media_speaker_shower'))
               | map(attribute='entity_id') | join }}
-        media_player: >
+        tts_player: >
           {% if is_state('binary_sensor.wan', 'off') %}
             media_player.hass_media_player
           {% elif is_state('input_boolean.tts_override', 'on') %}
             {{ expand('group.tts_media_players')
               | selectattr('name', 'eq', states('select.tts_media_player_override'))
               | map(attribute='entity_id') | join }}
+          {% elif media_active %} {{ active_player }}
           {% elif shower_tts %} {{ shower_player }}
           {% elif media_player is defined %} {{ media_player }}
           {% else %}
@@ -93,16 +104,16 @@ tts_play:
               | map(attribute='entity_id') | join }}
           {% endif %}
         media_players: >
-          {% set media_players = expand(state_attr('sensor.' ~ states[media_player].object_id, 'entity_id')
-              if is_state_attr(media_player, 'type', 'group') else [media_player])
+          {% set media_players = expand(state_attr('sensor.' ~ states[tts_player].object_id, 'entity_id')
+              if is_state_attr(tts_player, 'type', 'group') else [tts_player])
               | map(attribute='entity_id') | list %}
           {{ media_players }}
         #MASS use mass player for tts play, default to hass player
         mass_player: >
           {% set mass = expand('group.mass_media_players')
-              | selectattr('name', 'eq', state_attr(media_player, 'friendly_name'))
+              | selectattr('name', 'eq', state_attr(tts_player, 'friendly_name'))
               | map(attribute='entity_id') | join %}
-          {{ media_player if mass == '' else mass }}
+          {{ tts_player if mass == '' else mass }}
         tts_service: > # force local tts service if wan disconnected
           {% if is_state('binary_sensor.wan', 'off') %}
             {% set provider = 'Piper' %}
@@ -125,10 +136,10 @@ tts_play:
           {% else %} tts.home_assistant_cloud
           {% endif %}
         tts_volume: >
-          {% if shower_tts %}
-            {% set tts_vol = states('input_number.media_volume_shower') | int %}
-          {% elif is_state('input_boolean.tts_override', 'on') %}
+          {% if is_state('input_boolean.tts_override', 'on') %}
             {% set tts_vol = states('input_number.tts_volume_override') | int %}
+          {% elif shower_tts %}
+            {% set tts_vol = states('input_number.media_volume_shower') | int %}
           {% elif volume is defined %}
             {% set tts_vol = volume | int(-1) %}
           {% elif alert %}
@@ -258,7 +269,7 @@ tts_play:
                 message: "{{ message }}"
                 target: >
                   {{ expand('group.tts_media_players')
-                      | selectattr('entity_id', 'eq', media_player)
+                      | selectattr('entity_id', 'eq', tts_player)
                       | map(attribute='name') | join }}
 
             - delay: 10 #ISSUE hack - keep script running for a few seconds, 10 avg tts length
@@ -268,14 +279,13 @@ tts_play:
           target:
             entity_id: input_text.tts_active_media_player
           data:
-            value: "{{ media_player }}"
+            value: "{{ tts_player }}"
 
         - action: input_boolean.turn_off
           target:
             entity_id: input_boolean.tts_muted
 
-        # shower tts - volumes set/saved by original message
-        - if: "{{ is_state('input_boolean.tts', 'off') and not shower_tts }}"
+        - if: "{{ is_state('input_boolean.tts', 'off') }}"
           then:
             - action: script.media_player_set_volumes
               data:
@@ -353,30 +363,18 @@ tts_play:
                   continue_on_error: true
 
                 # volume exceptions - skip if alert
-                - if: "{{ not alert }}"
-                  then:
-                    #IDEA set garage volume if garage occupied
-                    # set bathroom speaker volume if shower scene is on
-                    - if: >
-                        {{ 'media_player.bathroom_speaker' in active_players
-                              and is_state('switch.shower_scene', 'on') }}
-                      then:
-                        - action: media_player.volume_set
-                          target:
-                            entity_id: media_player.bathroom_speaker
-                          data:
-                            volume_level: "{{ states('input_number.media_volume_shower') | int / 100 }}"
+                # set bathroom speaker volume if shower scene is on
+                #IDEA set garage volume if garage occupied
+                #DISABLED #TEMP tts volume set directy if shower until #MASS groups fixed
+                # - if: "{{ not alert }}"
+                #   then:
+                #     - if: >
+                #         {{ 'media_player.bathroom_speaker' in active_players
+                #               and is_state('switch.shower_scene', 'on') }}
+                #       then:
+                #         - action: media_player.volume_set
+                #           target:
+                #             entity_id: media_player.bathroom_speaker
+                #           data:
+                #             volume_level: "{{ states('input_number.media_volume_shower') | int / 100 }}"
 
-    - if: >
-        {{ not shower_tts and is_state('switch.shower_scene', 'on')
-              and has_value(shower_player)
-              and shower_player not in media_players }}
-      then:
-        - action: script.turn_on
-          target:
-            entity_id: script.tts_play
-          data:
-            variables:
-              message: "{{ message }}"
-              shower_tts: true
-          continue_on_error: true

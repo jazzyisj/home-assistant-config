@@ -227,7 +227,6 @@
 - #QUESTION - question I need to answer
 - #DELETE - code tagged for deletion
 - #DISABLED - disabled code
-- #OPTION - optional parameter / code
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug
 - #LOCK_USER - lock user code
