@@ -9,64 +9,119 @@
     - trigger: state
       id: alert
       entity_id: alert.precipitation
+      to:
+
+    - trigger: state
+      id: change
+      entity_id: binary_sensor.precipitation_change_alert
       to: "on"
+      not_from:
+        - unknown
+        - unavailable
 
     # notification after work on days - windows, walk dog etc.
     - trigger: template
+      id: days
       value_template: >
-        {{ is_state('binary_sensor.precipitation_likely_next_24_hours', 'on')
+        {{ (is_state('binary_sensor.precipitation_likely_next_24_hours', 'on')
+            or is_state('binary_sensor.precipitation_likely_soon', 'on'))
             and is_state('binary_sensor.work_today', 'on')
             and is_state('sensor.work_shift_today', 'Days')
             and states('sensor.time') == '15:50' }}
 
     # notification before work on afternoons, weekends - windows, walk dog etc.
     - trigger: template
+      id: afternoons
       value_template: >
-        {{ is_state('binary_sensor.precipitation_likely_next_24_hours', 'on')
+        {{ (is_state('binary_sensor.precipitation_likely_next_24_hours', 'on')
+            or is_state('binary_sensor.precipitation_likely_soon', 'on'))
             and ((is_state('binary_sensor.work_today', 'on')
                 and is_state('sensor.work_shift_today', 'Afternoons'))
               or is_state('binary_sensor.work_today', 'off'))
             and states('sensor.time') == '10:45' }}
   conditions:
-    - condition: time
-      alias: "Prevent notifications at night"
-      after: "08:00:00"
-      before: "22:00:00"
+    - condition: or
+      conditions:
+        - condition: state
+          entity_id: alert.precipitation
+          state:
+            - idle
+            - "off"
 
-    - condition: template
-      alias: "Only once every 2 hours"
-      value_template: >
-        {{ trigger.id == 'alert' or (true if this.attributes.last_triggered == none
-            else now() - this.attributes.last_triggered > timedelta(hours=2)) }}
+        - condition: and
+          conditions:
+            - condition: or
+              conditions:
+                - condition: state
+                  entity_id: alert.precipitation
+                  state: "on"
+
+                - condition: state
+                  entity_id: binary_sensor.precipitation_change_alert
+                  state: "on"
+
+                - condition: template
+                  value_template: "{{ trigger.id in ['days', 'afternoons'] }}"
+
+            - condition: time
+              alias: "Prevent notifications at night"
+              after: "08:00:00"
+              before: "22:00:00"
+
+            - condition: template
+              alias: "Only once every 2 hours"
+              value_template: >
+                {{ trigger.id == 'change' or (true if this.attributes.last_triggered == none
+                    else now() - this.attributes.last_triggered > timedelta(hours=2)) }}
   actions:
-    - variables:
-        file: >
-          {%- from 'camera.jinja'import snapshot_filename -%}
-          weather_snapshots/{{- snapshot_filename('windsor_radar') -}}
+    - if:
+        - condition: state
+          entity_id: alert.precipitation
+          state:
+            - idle
+            - "off"
 
-    - action: camera.snapshot
-      target:
-        entity_id: camera.windsor_radar
-      data:
-        filename: "/config/www/{{ file }}"
-      continue_on_error: true
+        - condition: state
+          entity_id: binary_sensor.precipitation_change_alert
+          state: "off"
 
-    - action: notify.jason
-      data:
-        message: |
-          {%- from 'weather.jinja' import precipitation_text -%}
-          {{- precipitation_text() -}}
-        data:
-          tag: windsor_radar
-          group: Weather
-          visibility: public
-          notification_icon: mdi:weather-rainy
-          icon_url: !secret STORM_ICON
-          image: "/local/{{ file }}"
-          ledColor: !secret MINOR_COLOR
-          color: !secret MINOR_COLOR
-          vibrationPattern: !secret ALERT_VIBRATION
-          clickAction: /ui-mobile/storm-radar
-          actions:
-            - title: "Pause"
-              action: pause_alert_precipitation
+        - condition: template
+          value_template: "{{ not trigger.id in ['days', 'afternoonw'] }}"
+      then:
+        - action: notify.jason
+          data:
+            message: clear_notification
+            data:
+              tag: windsor_radar
+      else:
+        - variables:
+            file: >
+              {%- from 'camera.jinja'import snapshot_filename -%}
+              weather_snapshots/{{- snapshot_filename('windsor_radar') -}}
+
+        - action: camera.snapshot
+          target:
+            entity_id: camera.windsor_radar
+          data:
+            filename: "/config/www/{{ file }}"
+          continue_on_error: true
+
+        - action: notify.jason
+          data:
+            message: |
+              {%- from 'weather.jinja' import precipitation_text -%}
+              {{- precipitation_text() -}}
+            data:
+              tag: windsor_radar
+              group: Weather
+              visibility: public
+              notification_icon: mdi:weather-rainy
+              icon_url: !secret STORM_ICON
+              image: "/local/{{ file }}"
+              ledColor: !secret MINOR_COLOR
+              color: !secret MINOR_COLOR
+              vibrationPattern: !secret ALERT_VIBRATION
+              clickAction: /ui-mobile/storm-radar
+              actions:
+                - title: "Pause"
+                  action: pause_alert_precipitation
