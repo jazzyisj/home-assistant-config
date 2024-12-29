@@ -1,7 +1,7 @@
 # Home Assistant Configuration
 
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" height="200" width="400"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" height="200" width="400"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 ## [View Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
 ##### <font color='cyan'>Updated 24-12-15</font>
