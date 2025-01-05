@@ -5,6 +5,16 @@
 ## USAGE: https://github.com/jazzyisj/unavailable-entities-sensor/blob/main/README.md
 ###################################################################################################
 
+command_line: #TEST
+  sensor:
+      name: Disabled Device Entities
+      unique_id: disabled_device_entities
+      json_attributes:
+        - entities
+      value_template: >
+        {{ value_json.entities | length }}
+      command: 'jq ''.data.entities |= map(select(.disabled_by? != null) | {entity_id: .entity_id}) | del(.data.deleted_entities) | flatten | .[3]'' < .storage/core.entity_registry'
+
 # REQUIRED - This is the template sensor
 template:
   - sensor:
@@ -15,6 +25,64 @@ template:
         state: >
           {% set entities = state_attr('group.unavailable_entities', 'entity_id') %}
           {{ entities | count if entities != none else -1 }}
+
+      - name: "Unavailable Entities2"
+        unique_id: unavailable_entities2
+        icon: "{{ iif(states(this.entity_id)|int(-1) > 0, 'mdi:alert-circle', 'mdi:check-circle') }}"
+        state_class: measurement
+        state: >
+          {% set entities = state_attr('group.unavailable_entities2', 'entity_id') %}
+          {{ entities | count if entities != none else -1 }}
+
+      - name: "Unavailable Devices"
+        unique_id: unavailable_devices
+        icon: "{{ iif(states(this.entity_id)|int(-1) > 0, 'mdi:alert-circle', 'mdi:check-circle') }}"
+        state: >
+          {% set devices = state_attr(this.entity_id, 'devices') %}
+          {{ devices | count if devices != none else -1 }}
+        attributes:
+          devices: >
+            {%- from 'hass.jinja' import unavailable_devices -%}
+            {%- set devices = unavailable_devices() | from_json -%}
+            {%- set ns=namespace(rows=[]) -%}
+            {%- for info in devices -%}
+            {% set ns.rows = ns.rows + [info.name] %}
+            {% endfor -%}
+            {{ ns.rows }}
+
+      - name: "Unavailable Devices Plus"
+        unique_id: unavailable_devices_plus
+        icon: "{{ iif(states(this.entity_id)|int(-1) > 0, 'mdi:alert-circle', 'mdi:check-circle') }}"
+        state: >
+          {% set devices = state_attr(this.entity_id, 'devices') %}
+          {{ devices | count if devices != none else -1 }}
+        attributes:
+          devices: >
+            {%- set items = namespace(value=[]) %}
+            {%- for entity in expand(state_attr('group.unavailable_entities', 'entity_id')) %}
+            {%- set items.value = items.value + [device_attr(entity.entity_id, "name") ~ '|' ~ device_id(entity.entity_id) ~ '|' ~ entity.entity_id] %}
+            {%- endfor %}
+            {%- set items.value = items.value | sort %}
+            {%- set lastdev = namespace(id='') %}
+            {%- set lastname = namespace(value='') %}
+            {%- set devices = namespace(items=[]) %}
+            {%- set entities = namespace(items=[]) %}
+            {%- set device_entities = namespace(count=0) %}
+            {%- for item in items.value %}
+              {%- set device = item.split("|")[0] %}
+              {%- set device_id = item.split("|")[1] %}
+              {%- set entity =  item.split("|")[2] %}
+              {%- if device | lower == 'none' %}
+                {%- set entities.items = entities.items + [entity] %}
+              {%- elif lastdev.id != device_id and lastdev.id != "" %}
+                {%- set devices.items = devices.items + [lastname.value ~ ' [' ~ device_entities.count ~']'] %}
+                {%- set device_entities.count = 0 %}
+              {%- endif %}
+              {%- set lastdev.id = device_id %}
+              {%- set lastname.value = device %}
+              {%- set device_entities.count = device_entities.count + 1 %}
+            {%- endfor %}
+            {{ devices.items + entities.items }}
 
 # REQUIRED - Add individual entities to ignore to this group.
 group:
@@ -51,6 +119,20 @@ automation:
                 | rejectattr('domain', 'in', ['button', 'conversation', 'event', 'group', 'image',
                   'input_button', 'input_text', 'remote', 'tts', 'scene', 'stt'])
                 | rejectattr('entity_id', 'in', state_attr('group.ignored_entities', 'entity_id'))
+                | selectattr('state', 'in', ['unknown', 'unavailable'])
+                | map(attribute='entity_id') | list | sort }}
+
+      - action: group.set
+        data:
+          object_id: unavailable_entities2
+          entities: >
+            {% set ignored2 = state_attr('sensor.disabled_device_entities', 'entities')
+                |regex_replace(find='\[|\]|\{|\}|\'entity_id\':', replace='') %}
+            {{ states
+                | rejectattr('domain', 'in', ['button', 'conversation', 'event', 'group', 'image',
+                  'input_button', 'input_text', 'remote', 'tts', 'scene', 'stt'])
+                | rejectattr('entity_id', 'in', state_attr('group.ignored_entities', 'entity_id'))
+                | rejectattr('entity_id', 'in', ignored2)
                 | rejectattr('entity_id', 'eq', 'group.unavailable_entities')
                 | selectattr('state', 'in', ['unknown', 'unavailable'])
                 | map(attribute='entity_id') | list | sort }}
@@ -107,7 +189,7 @@ automation:
           title: "Unavailable Entities"
           message: >
             {% set ns = namespace(result=[]) %}
-            {% for s in expand(state_attr('sensor.unavailable_entities', 'entity_id')) %}
+            {% for s in expand(state_attr('group.unavailable_entities', 'entity_id')) %}
               {% set ns.result = ns.result + [
                   device_attr(s.entity_id, "name") ~ "|" ~ device_id(s.entity_id) ~ "|- **" ~ s.name ~ "**\n"
                   ~ "  - *entity_id*: " ~ s.entity_id ~ "\n"

@@ -10,10 +10,9 @@
 
 ### Server
 
-- Home Assistant Blue (ODROID-N2+)
+- Intel i5, 8GB RAM, 500GB SATA
 - Google Coral USB Video Accelerator
 - Aeon Labs Gen5 ZWave Controller (ZW090)
-- Braoadcom USB Bluetooth Dongle (BCM20702A0)
 - Amazon Fire10 Tablet (Wall Mount)
 
 ### Network

@@ -1,0 +1,28 @@
+{%- macro unavailable_devices() -%}
+  {#- list all devices that have at least one unavailable entity -#}
+  {% set suspicious_devices = states | rejectattr('state','ne','unavailable') | map(attribute='entity_id') | map('device_id') | unique | reject('eq',None) | list -%}
+  {%- set ns = namespace(unavailables = []) -%}
+  {#- create a list of entities to ignore. i.e. powercalc extends devices with entities. -#}
+  {%- set ignore_lst=integration_entities('powercalc') -%}
+  {%- for device_id in suspicious_devices -%}
+    {%- set ids = device_attr(device_id, 'identifiers') -%}
+    {%- set integration = 'unknown' if (not ids or ids|list|length == 0 or ids|list|first|length!=2) else ids|list|first|first -%}
+    {#- exlude entities of i.e. powercalc which extends devices with power entities -#}
+    {%- set entities= device_entities(device_id) | reject('in', ignore_lst) | list -%}
+    {%- set unavailable = expand(entities) | selectattr('state','eq','unavailable') |list|count -%}
+    {#- don't count available entities of connection type -#}
+    {%- set available = expand(entities) | selectattr('state','ne','unavailable') | list | count -%}
+    {#- so count connection entities in error state -#}
+    {%- set contypes = expand(entities) | selectattr('state','eq','off') | selectattr('attributes.device_class', 'defined') |selectattr('attributes.device_class','eq','connectivity') | list | count  -%}
+    {%- if unavailable!=0 and available-contypes==0  -%}
+      {#- preferably use named_by_user -#}
+      {%- set name = device_attr(device_id, 'name_by_user') -%}
+      {%- set name = device_attr(device_id, 'name') if name==None else name -%}
+      {%- set area = device_attr(device_id, 'area_id') or 'n/a' -%}
+      {%- set model = device_attr(device_id, 'model') or 'n/a' -%}
+      {%- set devices_info = {"name":name,"area":area,"model":model,"id":device_id,"available":available,"unavailable":unavailable,"integration":integration} -%}
+      {%- set ns.unavailables = ns.unavailables + [ devices_info ] -%}
+    {%- endif -%}
+  {%- endfor -%}
+  {{ ns.unavailables | to_json }}
+{%- endmacro -%}

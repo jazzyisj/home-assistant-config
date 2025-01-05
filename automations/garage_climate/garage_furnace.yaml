@@ -4,11 +4,18 @@
 - id: garage_climate_auto_on
   alias: "[Garage Climate] Auto On"
   description: "Turn garage furnace on."
+  mode: queued
   triggers:
     - trigger: state
       id: freeze
       entity_id: input_boolean.garage_freeze_protection
       to: "on"
+
+    - trigger: state
+      id: furnace
+      entity_id: switch.garage_furnace
+      to: "on"
+      for: 5 # switch can bounce back to off
 
     - trigger: state
       id: thermostat
@@ -21,13 +28,9 @@
 
     - condition: template
       value_template: >
-        {{ iif(trigger.id == 'thermostat',
-            is_state('input_boolean.garage_freeze_protection', 'on'), false) }}"
+        {{ is_state('input_boolean.garage_freeze_protection', 'on')
+            if trigger.id == 'thermostat' else true }}
   actions:
-    - action: climate.turn_on
-      target:
-        entity_id: climate.garage_thermostat
-
     - action: climate.set_preset_mode
       target:
         entity_id: climate.garage_thermostat
@@ -35,12 +38,17 @@
         # eco is freeze protection
         preset_mode: "{{ iif(trigger.id in ['freeze', 'thermostat'], 'eco', 'home') }}"
 
+    - action: climate.turn_on
+      target:
+        entity_id: climate.garage_thermostat
+
 ###############################################################################
 ## Garage Climate - Auto Off
 ###############################################################################
 - id: garage_climate_auto_off
   alias: "[Garage Climate] Auto Off"
   description: "Turn garage furnace off."
+  mode: queued
   triggers:
     - trigger: state
       id: occupancy
@@ -58,7 +66,7 @@
         minutes: 5
 
     - trigger: state
-      id: door
+      id: garage
       entity_id: binary_sensor.garage_door_open
       to: "on"
       not_from:
@@ -70,15 +78,12 @@
     - trigger: state
       entity_id: switch.garage_furnace
       to: "off"
+      for: 5 # switch can bounce back to on
 
     - trigger: state
       id: freeze
-      entity_id: input_boolean.garage_freeze_protection #TODO
+      entity_id: input_boolean.garage_freeze_protection
       to: "off"
-
-    # - trigger: state
-    #   entity_id: switch.garage_furnace #TODO
-    #   to: "off"
 
     - trigger: state
       id: thermostat
@@ -92,20 +97,20 @@
     - condition: template
       value_template: >
         {{ iif(trigger.id == 'thermostat',
-            is_state('binary_sensor.garage_door_open', 'on'), false) }}
+            is_state('binary_sensor.garage_door_open', 'on'), true) }}
   actions:
     - action: climate.turn_off
       target:
         entity_id: climate.garage_thermostat
 
-    - if: "{{ trigger.id in ['door', 'thermostat'] }}"
+    - if: "{{ trigger.id in ['garage', 'thermostat'] }}"
       then:
         - action: script.turn_on
           target:
             entity_id: script.tts_play
           data:
             variables:
-              message: "The garage heat has been turned off because the garage door has been opened."
+              message: "The garage heat has been turned off because the garage door is open."
           continue_on_error: true
 
         - wait_template: "{{ is_state('binary_sensor.garage_door_open', 'off') }}"

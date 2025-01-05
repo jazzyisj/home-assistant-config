@@ -74,16 +74,18 @@
         - heat_cool
         - fan_only
         - "off"
+      not_from:
+        - unknown
+        - unavailable
   conditions:
     - condition: state
       entity_id: script.set_thermostat
       state: "off"
 
-    - alias: "HVAC Window Door Open was not just triggered"
-      condition: template
-      value_template: >
-        {{ true if states.automation.climate_hvac_window_door_open.attributes.last_triggered == none
-            else now() - states.automation.climate_hvac_window_door_open.attributes.last_triggered > timedelta(seconds=15) }}
+    - condition: state
+      alias: "HVAC Window Door Open alert is not active"
+      entity_id: alert.hvac_window_door_open
+      state: idle
   actions:
     - action: input_select.select_option
       target:
@@ -144,6 +146,10 @@
   description: "Set thermostat temperatures."
   mode: restart
   triggers:
+    - trigger: homeassistant
+      id: startup
+      event: start
+
     - trigger: state
       id: occupancy
       entity_id: input_select.occupancy_mode
@@ -197,18 +203,26 @@
       entity_id: input_boolean.hvac_manual_mode
       state: "off"
 
-    - not:
-        - condition: state
-          entity_id: climate.thermostat
-          state: "off"
+    - condition: or
+      conditions:
+        - not:
+            - condition: state
+              entity_id: climate.thermostat
+              state: "off"
 
-        - condition: state
-          entity_id: alert.hvac_window_door_open
-          state: "on"
+            - condition: state
+              entity_id: alert.hvac_window_door_open
+              state: "on"
+
+        - condition: template
+          value_template: "{{ trigger.id == 'startup' }}"
 
     - condition: template
       alias: "HVAC boost is a valid number if trigger is boost"
-      value_template: "{{ iif(trigger.id == 'boost', is_number(states(trigger.entity_id)), true) }}"
+      value_template: >
+        {% if trigger.id == 'boost' %} {{ is_number(states(trigger.entity_id)) }}
+        {% else %} {{ true }}
+        {% endif %}
 
     - condition: template
       alias: "Occupancy override is off if occupancy trigger"
@@ -225,7 +239,7 @@
         {% else %} true
         {% endif %}
   actions:
-    #ERROR (MainThread) [homeassistant.components.script.set_thermostat] Set Thermostat: Choose at step 6: choice 1: Error executing script. Unexpected error for call_service at pos 1: Error from API: 429: RESOURCE_EXHAUSTED: Rate limited for the Thermostat.: Too Many Requests
+    #ERROR Error from API: 429: RESOURCE_EXHAUSTED: Rate limited for the Thermostat.: Too Many Requests
     # delay to allow user to finish setting temps, restart mode - will finish with last set value
     # prevent multiple set_thermostat triggers withc override on/off, occupancy mode etc.
     - delay: 60
