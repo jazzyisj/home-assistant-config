@@ -7,7 +7,7 @@
 # ========================================================================================
 
 # ----------------------------------------------------------------------------------------
-# Set the state or other attributes for the specified entity.
+# Set the state or other attributes for the specified  entity.
 # Updates from @xannor so that a new entity can be created if it does not exist.
 # ----------------------------------------------------------------------------------------
 

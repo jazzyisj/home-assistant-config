@@ -14,6 +14,7 @@
             replace='switch.\\1_camera_power', ignorecase=False) | list }}
   triggers:
     - trigger: homeassistant
+      id: starup
       event: start
 
     - trigger: state
@@ -33,6 +34,16 @@
       attribute: entity_id
       to:
   actions:
+    - if: "{{ trigger.id == 'startup' }}"
+      then:
+        - wait_template: >
+            {{ states('group.indoor_cameras') not in ['unknown', 'unavailable']
+                and states('binary_sensor.someone_home') not in ['unknown', 'unavailable']
+                and is_state('binary_sensor.wyze_integration_connected', 'on') }}
+          timeout: 300
+
+        - stop: "Startup didn't complete."
+
     - if: "{{ entities == none or entities | count == 0 }}"
       then:
         - stop: "No valid entities."
@@ -52,12 +63,13 @@
 ###############################################################################
 ## Camera - Restart Wyze
 ###############################################################################
-- id: camera_restart_wyze #TEST not required now?
+- id: camera_restart_wyze
   alias: "[Camera] Restart Wyze"
   description: "Restart the Wyze addon."
   max_exceeded: silent
   triggers:
     - trigger: homeassistant
+      id: startup
       event: start
 
     - trigger: state
@@ -68,11 +80,16 @@
         - unknown
         - unavailable
       for: 60
-  conditions:
-    - condition: state
-      entity_id: binary_sensor.wyze_integration_connected
-      state: "off"
   actions:
+    - if: "{{ trigger.id == 'startup' }}"
+      then:
+        - wait_template: "{{ is_state('binary_sensor.wyze_integration_connected', 'on') }}"
+          timeout: 300
+
+        - condition: state
+          entity_id: binary_sensor.wyze_integration_connected
+          state: "off"
+
     - action: hassio.addon_restart
       data:
         addon: 7094bb28_docker_wyze_bridge

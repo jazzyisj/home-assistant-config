@@ -355,7 +355,7 @@
       state: "{{ integration_entities('waqi') | select('has_value') | list | count > 0 }}"
 
 ###############################################################################
-## Temperature Trigger Sensors #TODO throttle updates (tempest)
+## Temperature Trigger Sensors
 ###############################################################################
 - trigger:
     - trigger: homeassistant
@@ -364,7 +364,7 @@
     - trigger: event
       event_type: event_template_reloaded
 
-    - trigger: time_pattern
+    - trigger: time_pattern #TODO throttle updates (tempest)
       minutes: "/10"
   sensor:
     - name: "Outdoor Apparent Temperature"
@@ -958,7 +958,7 @@
       state: "{{ states('sensor.pirateweather_daytime_high_temperature_time_0d') | as_datetime }}"
       attributes:
         12hour: >
-          {% from 'speech_helpers.jinja' import twelve_hour %}
+          {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
         provider: "Pirate Weather"
       availability: "{{ has_value('sensor.pirateweather_daytime_high_temperature_time_0d') }}"
@@ -983,7 +983,7 @@
       state: "{{ states('sensor.pirateweather_daytime_high_temperature_time_0d') | as_datetime }}"
       attributes:
         12hour: >
-          {% from 'speech_helpers.jinja' import twelve_hour %}
+          {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
         provider: "Pirate Weather"
       availability: "{{ has_value('sensor.pirateweather_daytime_high_temperature_time_0d') }}"
@@ -1035,7 +1035,7 @@
       state: "{{ states('sensor.pirateweather_daily_low_temperature_time_0d') | as_datetime }}"
       attributes:
         12hour: >
-          {% from 'speech_helpers.jinja' import twelve_hour %}
+          {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
         provider: "Pirate Weather"
       availability: "{{ has_value('sensor.pirateweather_daily_low_temperature_time_0d') }}"
@@ -1060,7 +1060,7 @@
       state: "{{ states('sensor.pirateweather_daily_low_temperature_time_1d') | as_datetime }}"
       attributes:
         12hour: >
-          {% from 'speech_helpers.jinja' import twelve_hour %}
+          {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
         provider: "Pirate Weather"
       availability: "{{ has_value('sensor.pirateweather_daily_low_temperature_time_1d') }}"
@@ -1473,24 +1473,22 @@
         {% elif type == 'snow' %} mdi:weather-snowy
         {% else %} mdi:weather-rainy
         {% endif %}
-      # check tempest intensity > 0 when condition is rain for local accuaracy
-      state:
-        > #TODO states('sensor.tempest_st_00057689_rain_intensity') | float(-1) > 0
+      # rain - check tempest intensity > 0 for local accuaracy
+      state: >
         {% set condition = states('sensor.current_condition') %}
         {% if condition | contains('snow') %} snow
-        {% elif states('sensor.tempest_st_00057689_rain_intensity') | float(-1) == -1
-            and (condition | contains('rain')
-              or condition | contains('pouring')
-              or condition | contains('storm')
-              or condition | contains('lightning')
-              or condition | contains('hail')) %} rain
-        {% elif states('sensor.precipitation_intensity') | float(-1) > 0 %}
-          {% if is_state('binary_sensor.freezing', 'off') %} rain
+        {% elif states('sensor.tempest_st_00057689_rain_intensity') | float(-1) > 0
+              or states('sensor.precipitation_intensity') | float(-1) > 0 %}
+            {% if condition | contains('rain')
+                or condition | contains('pouring')
+                or condition | contains('storm')
+                or condition | contains('lightning')
+                or condition | contains('hail') %} rain
+          {% elif is_state('binary_sensor.freezing', 'off') %} rain
           {% else %} snow
           {% endif %}
         {% else %} none
         {% endif %}
-      availability: "{{ has_value('sensor.current_condition') }}"
 
     - name: "Precipitation Type Expected"
       unique_id: precipitation_type_expected
@@ -1503,26 +1501,28 @@
       state: >
         {% set type = namespace(value=none) %}
         {% set forecast = state_attr('sensor.hourly_weather', 'forecast') %}
-          {% for item in forecast %}
-            {% if item.condition | contains('rain')
-                  or item.condition | contains('pouring')
-                  or item.condition | contains('storm')
-                  or item.condition | contains('lightning')
-                  or item.condition | contains('hail') %}
-              {% set type.value = 'rain' %}
-              {% break %}
-            {% elif item.condition | contains('snow') %}
-              {% set type.value = 'snow' %}
-              {% break %}
+        {% if forecast != none %}
+          {% for item in forecast  %}
+            {% if loop.index0 < 24 %}
+              {% if item.condition | contains('rain')
+                    or item.condition | contains('pouring')
+                    or item.condition | contains('storm')
+                    or item.condition | contains('lightning')
+                    or item.condition | contains('hail') %}
+                {% set type.value = 'rain' %}
+                {% break %}
+              {% elif item.condition | contains('snow') %}
+                {% set type.value = 'snow' %}
+                {% break %}
+              {% endif %}
+            {% else %} {% break %}
             {% endif %}
           {% endfor %}
+        {% endif %}
         {% if type.value == none %}
           {% set type.value = 'snow' if is_state('binary_sensor.freezing', 'on') else 'rain' %}
         {% endif %}
         {{ type.value }}
-      availability: >
-        {{ states.sensor.hourly_weather.attributes is defined
-            and states.sensor.hourly_weather.attributes.forecast is defined }}
 
     - name: "Precipitation Start" # next 24 hours
       unique_id: precipitation_start
@@ -1549,7 +1549,7 @@
         {{ as_timestamp(time.value) | timestamp_utc if time.value != none else none }}
       attributes:
         12hour: >
-          {% from 'speech_helpers.jinja' import twelve_hour %}
+          {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
         provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: "{{ state_attr('sensor.hourly_envcan', 'forecast') not in ['', none] }}"
