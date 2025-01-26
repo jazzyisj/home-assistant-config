@@ -1,39 +1,37 @@
 ###############################################################################
 ## Lock - Status Update
-## #BUG https://github.com/jazzyisj/home-assistant-config/issues/36
+## #BUG RF lock/unlock operation events not firing
+## https://github.com/jazzyisj/home-assistant-config/issues/36
 ## https://github.com/home-assistant/core/issues/79097
 ###############################################################################
 - id: lock_status_update
-  alias: "[Lock] Status Update"
-  description: "Update lock status sensor."
+  alias: "Lock Status Update"
+  description: "Update lock status sensor when lock zwave events are detected."
   mode: parallel
   variables:
     node_id: "{{ trigger.event.data['node_id'] | int(-1) }}"
     entity_id: >
-      {{ expand('group.entry_locks') | selectattr('attributes.node_id', 'eq', node_id)
+      {{ expand('group.entry_locks')
+          | selectattr('attributes.node_id', 'eq', node_id)
           | map(attribute='entity_id') | join }}
-    userID: >
+    user: >
+      {%- from 'lock.jinja' import lock_user %}
       {% if trigger.event.data.parameters is defined %}
         {% if trigger.event.data.parameters['userId'] is defined %}
           {% set userID = trigger.event.data.parameters['userId'] | int(-1) %}
         {% endif %}
       {% endif %}
-      {{ userID | default(-1) }}
-    user: > #LOCK_USER
-      {% set users = ['Hassio', 'Jason', 'Guest', 'Guest', 'Guest'] %}
-      {{ 'Keypad' if userID < 1 or userID > 5 else users[userID - 1] }}
+      {{ lock_user(userID | default(0)) }}
     event_label: "{{ trigger.event.data['event_label'] }}"
   triggers:
     - trigger: event
       event_type: zwave_js_notification
-  conditions:
-    - "{{ event_label.endswith('lock operation') and node_id > 0 }}"
-    - "{{ entity_id != '' }}"
+  conditions: "{{ event_label.endswith('lock operation') and node_id > 0 and  entity_id != '' }}"
   actions:
     - action: input_text.set_value
       target:
         entity_id: "input_text.{{ states[entity_id].object_id }}_status"
-      data: #BUG RF lock/unlock operation events not firing
+      data:
         value: >
           {% if event_label == 'Manual unlock operation' %} Unlocked (Manual)
           {% elif event_label == 'Manual lock operation' %} Locked (Manual)
@@ -41,5 +39,5 @@
           {% elif event_label == 'RF lock operation' %} Locked (Hassio)
           {% elif event_label == 'Keypad unlock operation' %} Unlocked ({{ user }})
           {% elif event_label == 'Keypad lock operation' %} Locked ({{ user }})
-          {% else %} {{ none }}
+          {% else %} ERROR
           {% endif %}

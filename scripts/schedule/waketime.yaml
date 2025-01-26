@@ -13,12 +13,22 @@ waketime:
       example: "true"
   sequence:
     - if:
+        - condition: state
+          alias: "Waketime run when alarm clock is active"
+          entity_id: binary_sensor.alarm_clock
+          state: "on"
+      then:
+        - action: switch.turn_off
+          target:
+            entity_id: "switch.alarm_clock_{{ states('input_select.alarm_clock_type') }}"
+    - if:
         - or:
             - condition: state
               entity_id: binary_sensor.someone_home
               state: "off"
 
-            - not:
+            - condition: not
+              conditions:
                 - condition: state
                   entity_id: input_select.occupancy_mode
                   state: Night
@@ -26,13 +36,43 @@ waketime:
             - condition: state
               entity_id: input_boolean.alarm_triggered # waketime disarms alarm
               state: "on"
+
+            - condition: and
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.work_today
+                  state: "on"
+
+                - condition: state
+                  entity_id: input_boolean.workday_morning
+                  state: "off"
+
+            - condition: and
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.work_today
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.weekend_morning
+                  state: "off"
+
+            - condition: and
+              conditions:
+                - condition: state
+                  entity_id: binary_sensor.owner_home
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.guest_morning
+                  state: "off"
       then:
         - action: browser_mod.notification
           data:
             duration: 10000
-            message: "Wake up routine cannot be run."
+            message: "Wake up routine is disabled or cannot be run."
 
-        - stop: "Wake up routine cannot be run."
+        - stop: "Wake up routine is disabled or cannot be run."
 
     - if:
         - condition: state
@@ -49,16 +89,14 @@ waketime:
 
             # wait for alarm clock to be turned off
             - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
+              timeout:
+                minutes: 60
+              continue_on_timeout: false
 
-    - if:
-        - condition: state
-          alias: "Waketime run when alarm clock is active"
-          entity_id: binary_sensor.alarm_clock
-          state: "on"
-      then:
-        - action: switch.turn_off
-          target:
-            entity_id: "switch.alarm_clock_{{ states('input_select.alarm_clock_type') }}"
+            - condition: state
+              alias: "Someone is still home"
+              entity_id: binary_sensor.someone_home
+              state: "on"
 
     - action: input_select.select_option
       target:
@@ -69,130 +107,122 @@ waketime:
           {{ occupancy_mode() }}
       continue_on_error: true
 
-    - condition: state
-      alias: "Someone is still home"
-      entity_id: binary_sensor.someone_home
-      state: "on"
-
     - action: script.arm_alarm
       data:
         mode: home
         override: true
       continue_on_error: true
 
-    - if:
-        - condition: template
-          alias: "Wake up routine enabled."
-          value_template: >
-            {% if is_state('binary_sensor.owner_home', 'off') %}
-              {{ is_state('input_boolean.guest_morning', 'on') }}
-            {% else %}
-              {{ is_state('input_boolean.workday_morning', 'on') if is_state('binary_sensor.work_today', 'on')
-                  else is_state('input_boolean.weekend_morning', 'on') }}
-            {% endif %}
-      then:
-        - parallel:
-            - sequence:
-                - if:
-                    - condition: state
-                      entity_id:
-                        - binary_sensor.daytime_illuminance_lights
-                        - binary_sensor.nighttime_illuminance_lights
-                      match: any
-                      state: "on"
+    - parallel:
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id:
+                    - binary_sensor.daytime_illuminance_lights
+                    - binary_sensor.nighttime_illuminance_lights
+                  match: any
+                  state: "on"
+              then:
+                - action: script.turn_light_on
+                  data:
+                    lights:
+                      - light.bedroom_fan_light
+                      - light.bathroom_vanity_light_rgb
+                      - light.dining_room_light_rgb
+                      - light.kitchen_potlights
+                      - light.kitchen_cabinet_lights
+                    profile: default_min
+                    transition: 10
+                    activate_timer: false
+                  continue_on_error: true
+
+                - delay: # wait for next set of lights
+                    minutes: 10
+
+                - action: script.turn_light_on
+                  data:
+                    lights:
+                      - light.bedroom_fan_light
+                      - light.bathroom_vanity_light_rgb
+                      - light.dining_room_light_rgb
+                      - light.kitchen_potlights
+                      - light.bedroom_fan_light
+                      - light.kitchen_potlights
+                      - light.kitchen_cabinet_lights
+                      - light.laundry_room_cabinet_lights
+                    profile: default_low
+                    transition: 120
+                    activate_timer: false
+                  continue_on_error: true
+
+                - delay: # wait for next set of lights
+                    minutes: 10
+
+                - action: script.turn_light_on
+                  data:
+                    lights:
+                      - light.bedroom_fan_light
+                      - light.bathroom_vanity_light_rgb
+                      - light.dining_room_light_rgb
+                      - light.kitchen_potlights
+                      - light.bedroom_fan_light
+                      - light.kitchen_potlights
+                      - light.kitchen_cabinet_lights
+                      - light.laundry_room_cabinet_lights
+                      - light.kitchen_sink_light
+                    profile: default
+                    transition: 120
+                    activate_timer: false
+                  continue_on_error: true
+
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id:
+                    - input_boolean.occupancy_announcements
+                    - input_boolean.alarm_announcements
+                  match: any
+                  state: "on"
+              then:
+                - wait_for_trigger:
+                    - trigger: event
+                      event_type: occupancy_notification
+                  timeout: 60
+
+            - if:
+                - condition: state
+                  entity_id: input_boolean.media_enabled_wake
+                  state: "on"
+              then:
+                - action: script.media_play
+                  data:
+                    preset: wake
+                  continue_on_error: true
+
+                - delay:
+                    minutes: "{{ states('input_number.media_wake_time') | int }}"
+
+                - variables:
+                    stop_player: >
+                      {{ expand('group.media_players')
+                          | selectattr('name', 'eq', states('select.media_speaker_wake'))
+                          | map(attribute='entity_id') | join }}
+
+                - if: "{{ stop_player != '' }}"
                   then:
-                    - action: script.turn_light_on
+                    - action: script.turn_media_player_off
                       data:
-                        lights:
-                          - light.bedroom_fan_light
-                          - light.bathroom_vanity_light_rgb
-                          - light.dining_room_light_rgb
-                          - light.kitchen_potlights
-                          - light.kitchen_cabinet_lights
-                        profile: default_min
-                        transition: 10
-                        activate_timer: false
-
-                    - delay: # wait for next set of lights
-                        minutes: 10
-
-                    - action: script.turn_light_on
-                      data:
-                        lights:
-                          - light.bedroom_fan_light
-                          - light.bathroom_vanity_light_rgb
-                          - light.dining_room_light_rgb
-                          - light.kitchen_potlights
-                          - light.bedroom_fan_light
-                          - light.kitchen_potlights
-                          - light.kitchen_cabinet_lights
-                          - light.laundry_room_cabinet_lights
-                        profile: default_low
-                        transition: 120
-                        activate_timer: false
-
-                    - delay: # wait for next set of lights
-                        minutes: 10
-
-                    - action: script.turn_light_on
-                      data:
-                        lights:
-                          - light.bedroom_fan_light
-                          - light.bathroom_vanity_light_rgb
-                          - light.dining_room_light_rgb
-                          - light.kitchen_potlights
-                          - light.bedroom_fan_light
-                          - light.kitchen_potlights
-                          - light.kitchen_cabinet_lights
-                          - light.laundry_room_cabinet_lights
-                          - light.kitchen_sink_light
-                        profile: default
-                        transition: 120
-                        activate_timer: false
-
-            - sequence:
-                - if:
-                    - condition: state
-                      entity_id:
-                        - input_boolean.occupancy_announcements
-                        - input_boolean.alarm_announcements
-                      match: any
-                      state: "on"
-                  then:
-                    - wait_for_trigger:
-                        - trigger: event
-                          event_type: occupancy_notification
-                      timeout: 60
-
-                - if:
-                    - condition: state
-                      entity_id: input_boolean.media_enabled_wake
-                      state: "on"
-                  then:
-                    - action: script.media_play
-                      data:
-                        preset: wake
+                        entity_id: "{{ stop_player }}"
                       continue_on_error: true
+              else:
+                - delay:
+                    minutes: "{{ states('input_number.media_wake_time') | int }}"
 
-                    - delay:
-                        minutes: "{{ states('input_number.media_wake_time') | int }}"
-
-                    - variables:
-                        stop_player: >
-                          {{ expand('group.media_players')
-                              | selectattr('name', 'eq', states('select.media_speaker_wake'))
-                              | map(attribute='entity_id') | join }}
-
-                    - if: "{{ stop_player != '' }}"
-                      then:
-                        - action: script.turn_media_player_off
-                          data:
-                            entity_id: "{{ stop_player }}"
-                          continue_on_error: true
-                  else:
-                    - delay:
-                        minutes: "{{ states('input_number.media_wake_time') | int }}"
-
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.jason_home
+                  state: "on"
+              then:
                 - if:
                     - condition: state
                       entity_id: input_boolean.calendar_announcements
@@ -214,65 +244,34 @@ waketime:
                         quiet_play: true
                       continue_on_error: true
 
-                - if:
-                    - condition: numeric_state
-                      entity_id: sensor.tts_saved_messages
-                      above: 0
-                  then:
-                    - action: script.tts_play_saved_messages
-                      continue_on_error: true
+            - if:
+                - condition: numeric_state
+                  entity_id: sensor.tts_saved_messages
+                  above: 0
+              then:
+                - action: script.tts_play_saved_messages
+                  continue_on_error: true
 
-                - if:
-                    - condition: state
-                      entity_id: input_boolean.morning_weather_enabled
-                      state: "on"
-                  then:
-                    - action: button.press
-                      target:
-                        entity_id: button.weather_report
-                      continue_on_error: true
+            - if:
+                - condition: state
+                  entity_id: input_boolean.morning_weather_enabled
+                  state: "on"
+              then:
+                - action: button.press
+                  target:
+                    entity_id: button.weather_report
+                  continue_on_error: true
 
-                - delay: 5 # allow weather report to start
+            - delay: 5 # allow weather report to start
 
-                - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+            - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
 
-                - if:
-                    - condition: state
-                      entity_id: input_boolean.media_enabled_morning
-                      state: "on"
-                  then:
-                    - action: script.media_play
-                      data:
-                        preset: morning
-                      continue_on_error: true
-
-###############################################################################
-## Wake Up Switch - waketime button / zwave scenes
-###############################################################################
-waketime_switch:
-  alias: "Waketime Switch"
-  description: "Turn off alarm clock or run waketime scene."
-  max_exceeded: silent
-  mode: restart
-  sequence:
-    - if:
-        - condition: state
-          entity_id: binary_sensor.alarm_clock
-          state: "on"
-      then:
-        - action: switch.turn_off
-          target:
-            entity_id: "switch.alarm_clock_{{ states('input_select.alarm_clock_type') }}"
-      else:
-        - if:
-            - condition: state
-              entity_id: script.waketime
-              state: "on"
-          then:
-            - action: script.turn_off
-              target:
-                entity_id: script.waketime
-          else:
-            - action: script.turn_on
-              target:
-                entity_id: script.waketime
+            - if:
+                - condition: state
+                  entity_id: input_boolean.media_enabled_morning
+                  state: "on"
+              then:
+                - action: script.media_play
+                  data:
+                    preset: morning
+                  continue_on_error: true
