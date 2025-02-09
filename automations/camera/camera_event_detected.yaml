@@ -9,8 +9,9 @@
     stored_traces: 30
   variables:
     id: "{{ trigger.payload_json['after']['id'] }}"
-    object: "{{ trigger.payload_json['after']['label'] }}"
     camera: "{{ trigger.payload_json['after']['camera'] }}"
+    object: "{{ trigger.payload_json['after']['label'] }}"
+    stationary: "{{ trigger.payload_json['after']['stationary'] }}"
     start_time: "{{ trigger.payload_json['after']['start_time'] }}"
     new: "{{ trigger.payload_json['type'] == 'new' }}"
     entered_zones: "{{ trigger.payload_json['after']['entered_zones'] }}"
@@ -22,15 +23,46 @@
       entity_id: input_boolean.camera_event_detection
       state: "on"
 
+    - alias: "Throttle notification unless front or side door"
+      condition: template
+      value_template: >
+        {{ true if this.attributes.last_triggered == none or camera in ['front_door', 'side_door']
+            else now() - this.attributes.last_triggered > timedelta(seconds=120) }}
+
     - alias: "Detected object is new"
       condition: template
       value_template: "{{ new }}"
 
-    - alias: "Detected object is not a dog"
+    - alias: "Camera not excluded for notifications"
       condition: template
-      value_template: "{{ object != 'dog' }}"
+      value_template: "{{ camera not in ['front_yard', 'back_yard'] }}"
 
-    # prevent notifications when arriving home
+    - alias: "Detected object is a person or a car"
+      condition: template
+      value_template: "{{ object in ['person', 'car'] }}"
+
+    - alias: "Detected object is moving"
+      condition: template
+      value_template: "{{ stationary == false }}"
+
+    - alias: "If camera is front drive, object is a car and driveway is in entered zones"
+      condition: template
+      value_template: >
+        {{ object == 'car' and 'driveway' in entered_zones
+            if camera == 'front_drive' else true }}
+
+    - alias: "If camera is front door, object is a person and porch is in entered zones"
+      condition: template
+      value_template: >
+        {{ object == 'person' and 'porch' in entered_zones
+            if camera == 'front_door' else true }}
+
+    - alias: "If camera is front yard, object is a person and near house is in entered zones"
+      condition: template
+      value_template: >
+        {{ object == 'person' and 'near_house' in entered_zones
+            if camera == 'front_yard' else true }}
+
     - alias: "Someone hasn't just arrived home"
       condition: state
       entity_id:
@@ -39,14 +71,12 @@
       attribute: just_arrived
       state: false
 
-    # prevent notifications when arriving home
     - alias: "Someone isn't almost home"
       condition: template
       value_template: >
         {{ is_state('input_boolean.jason_almost_home', 'off')
             and now() - states.input_boolean.jason_almost_home.last_changed > timedelta(seconds=120) }}
 
-    # prevent notifications when leaving home
     - alias: "Front/Side door was not just locked or unlocked"
       condition: template
       value_template: >
@@ -66,10 +96,7 @@
               then:
                 # don't play tts message if we just played one, unless front door
                 - if:
-                    - condition: template
-                      value_template: >
-                        {{ true if this.attributes.last_triggered == none or camera == 'front_door'
-                            else now() - this.attributes.last_triggered > timedelta(seconds=120) }}
+
                   then:
                     - action: script.turn_on
                       target:
@@ -91,13 +118,13 @@
                             There is a {{ object }} {{ prep }} the {{ camera | replace('_', ' ') }}!
                       continue_on_error: true
 
-                - action: script.turn_on
-                  target:
-                    entity_id: script.kiosk_display_camera
-                  data:
-                    variables:
-                      camera: "{{ camera }}"
-                  continue_on_error: true
+                # - action: script.turn_on #DISABLED until kiosk navigation is resolved
+                #   target:
+                #     entity_id: script.kiosk_display_camera
+                #   data:
+                #     variables:
+                #       camera: "{{ camera }}"
+                #   continue_on_error: true
 
         - sequence:
             - if:

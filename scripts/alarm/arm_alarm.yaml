@@ -7,9 +7,6 @@ arm_alarm:
   icon: mdi:alarm-bell
   mode: parallel
   fields:
-    zone:
-      description: "Alarm zone."
-      example: "master"
     mode:
       description: "Alarm arm mode."
       example: "away"
@@ -20,7 +17,6 @@ arm_alarm:
       description: "Bypass open sensors."
       example: "true"
   variables:
-    zone: "{{ zone | default('master') }}"
     mode: "{{ mode | default('away') }}"
     hass_code: !secret ALARMO_HA
     code: "{{ code | default(hass_code) }}"
@@ -41,213 +37,26 @@ arm_alarm:
 
         - stop: "Alarm is disabled and cannot be armed."
 
-    - if: "{{ is_state('alarm_control_panel.' ~ zone, alarm_mode) }}"
+    - if: "{{ is_state('alarm_control_panel.house', alarm_mode) }}"
       then:
         - action: system_log.write
           data:
             logger: "{{ this.entity_id }}"
             level: info
-            message: "Stop: {{ zone | title }} alarm is already {{ alarm_mode }}."
+            message: "Stop: Alarm is already {{ alarm_mode }}."
 
-        - stop: "{{ zone | title }} alarm is already {{ alarm_mode }}."
+        - stop: "Alarm is already {{ alarm_mode }}."
 
     #ALARMO save arm mode for alarm_open_sensors, done here in case no delay/arming state
-    # only master - forces zone to master alarm mode on rearm
-    - if: "{{ zone == 'master' }}"
-      then:
-        - action: input_select.select_option
-          target:
-            entity_id: input_select.current_arm_mode
-          data:
-            option: "{{ alarm_mode }}"
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.current_arm_mode
+      data:
+        option: "{{ alarm_mode }}"
 
-    - if: "{{ override }}"
-      then:
-        - action: alarmo.arm #ALARMO does not support target!
-          data:
-            entity_id: "alarm_control_panel.{{ zone }}"
-            mode: "{{ mode }}"
-            code: "{{ code }}"
-            force: true
-      else:
-        - if: "{{ zone in ['garage', 'master'] }}"
-          then:
-            - if:
-                - or:
-                    - condition: state
-                      entity_id: binary_sensor.garage_occupied
-                      state: "on"
-
-                    - condition: state
-                      entity_id: input_boolean.garage_alarm_override
-                      state: "on"
-              then:
-                - if: "{{ zone == 'master' }}"
-                  then:
-                    # arm house right away
-                    - action: alarmo.arm
-                      data:
-                        entity_id: alarm_control_panel.house
-                        mode: "{{ mode }}"
-                        code: "{{ code }}"
-
-                - wait_template: >
-                    {{ (is_state('binary_sensor.garage_occupied', 'off')
-                          or is_state('input_boolean.garage_alarm_override', 'on'))
-                        or is_state('alarm_control_panel.garage', alarm_mode)
-                        or is_state('alarm_control_panel.house', 'disarmed') }}
-                  timeout:
-                    minutes: 5
-
-                # arm garage if unoccupied, else notify
-                - if: "{{ wait.completed }}"
-                  then:
-                    - if: # only arm garage if house not disarmed
-                        - not:
-                            - condition: state
-                              entity_id: alarm_control_panel.house
-                              state: disarmed
-                      then:
-                        - action: alarmo.arm
-                          data:
-                            entity_id: alarm_control_panel.garage
-                            mode: "{{ mode }}"
-                            code: "{{ code }}"
-                  else:
-                    - variables: #TEMP side_door until garage_inside replaced
-                        file: "alarm_snapshots/{% from 'camera.jinja'import snapshot_filename %}{{ snapshot_filename('side_door') }}"
-
-                    # create camera snapshots
-                    - action: camera.snapshot
-                      target:
-                        entity_id: camera.side_door
-                      data:
-                        filename: "/config/www/{{ file }}"
-                      continue_on_error: true
-
-                    - repeat:
-                        sequence:
-                          - action: notify.jason
-                            data:
-                              title: "Garage Not Armed"
-                              message: "The garage alarm could not be armed because the garage is still occupied."
-                              data:
-                                tag: garage_alarm_occupied
-                                group: Alarm
-                                channel: Alert
-                                image: "/local/{{ file }}"
-                                notification_icon: mdi:shield-alert
-                                icon_url: !secret ALARM_ICON
-                                ledColor: !secret SEVERE_COLOR
-                                color: !secret SEVERE_COLOR
-                                vibrationPattern: !secret ALERT_VIBRATION
-                                clickAction: /ui-mobile/alarm
-                                actions:
-                                  - title: "Arm Garage"
-                                    action: arm_garage_alarm
-
-                                  - title: "Override"
-                                    action: garage_alarm_override
-
-                                  - title: "Cameras"
-                                    action: URI
-                                    uri: !secret LOREX_URI
-
-                          - wait_template: >
-                              {{ is_state('input_boolean.garage_alarm_override', 'on')
-                                  or is_state('alarm_control_panel.garage', alarm_mode)
-                                    or is_state('alarm_control_panel.house', 'disarmed') }}
-                            timeout:
-                              minutes: 5
-
-                        until: >
-                          {{ (is_state('input_boolean.garage_alarm_override', 'on')
-                                or not is_state('alarm_control_panel.garage', alarm_mode)
-                                  or not is_state('alarm_control_panel.house', 'disarmed'))
-                              or repeat.count == 3 }}
-
-                    - condition: state
-                      entity_id: input_boolean.garage_alarm_override
-                      state: "off"
-
-                    - condition: template
-                      value_template: >
-                        {{ not is_state('alarm_control_panel.garage', alarm_mode)
-                            and not is_state('alarm_control_panel.house', 'disarmed') }}
-
-                    - action: alarmo.arm
-                      data:
-                        entity_id: alarm_control_panel.garage
-                        mode: "{{ mode }}"
-                        code: "{{ hass_code }}"
-                        force: true # garage door might be open
-
-                    - wait_template: "{{ is_state('alarm_control_panel.garage', alarm_mode) }}"
-                      timeout: 30
-
-                    - variables:
-                        file: "alarm_snapshots/{% from 'camera.jinja'import snapshot_filename %}{{ snapshot_filename('kiosk') }}"
-
-                    # create camera snapshots
-                    - action: camera.snapshot
-                      target:
-                        entity_id: camera.side_door
-                      data:
-                        filename: "/config/www/{{ file }}"
-                      continue_on_error: true
-
-                    - action: notify.jason
-                      data:
-                        title: "Garage Alarm Armed"
-                        message: >
-                          The garage occupied sensor is {{ states('binary_sensor.garage_occupied') }}
-                          and the garage is {{ states('alarm_control_panel.garage') | replace('_', ' ') }}.
-                        data:
-                          tag: garage_alarm_armed
-                          group: Alarm
-                          channel: Alert
-                          image: "/local/{{ file }}"
-                          notification_icon: mdi:shield-alert
-                          icon_url: !secret ALARM_ICON
-                          ledColor: !secret SEVERE_COLOR
-                          color: !secret SEVERE_COLOR
-                          vibrationPattern: !secret ALERT_VIBRATION
-                          clickAction: /ui-mobile/alarm
-                          actions:
-                            - title: "Disarm"
-                              action: disarm_garage_alarm_jason
-
-                            - title: "Alarm"
-                              action: URI
-                              uri: !secret ALARM_URI
-
-                            - title: "Cameras"
-                              action: URI
-                              uri: !secret LOREX_URI
-              else:
-                - action: alarmo.arm
-                  data:
-                    entity_id: "alarm_control_panel.{{ zone }}"
-                    mode: "{{ mode }}"
-                    code: "{{ code }}"
-          else:
-            - action: alarmo.arm
-              data:
-                entity_id: "alarm_control_panel.house"
-                mode: "{{ mode }}"
-                code: "{{ code }}"
-
-    # reset garage alarm override id garage alarm is armed
-    - if:
-        - condition: state
-          entity_id: input_boolean.garage_alarm_override
-          state: "on"
-
-        - not:
-            - condition: state
-              entity_id: alarm_control_panel.garage
-              state: disarmed
-      then:
-        - action: input_boolean.turn_off
-          target:
-            entity_id: input_boolean.garage_alarm_override
+    - action: alarmo.arm
+      data:
+        entity_id: alarm_control_panel.house
+        mode: "{{ mode }}"
+        code: "{{ code }}"
+        force: "{{ override }}"
