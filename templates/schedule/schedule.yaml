@@ -155,25 +155,34 @@
 
     - name: "TOD Greeting"
       unique_id: tod_greeting
+      device_class: enum
       state: >
         {% set time = states('sensor.time') %}
         {{ 'morning' if '02:00' <= time < '12:00' else 'afternoon'
             if '12:00' <= time < '18:00' else 'evening' }}
+      attributes:
+        options: "{{ ['morning', 'afternoon', 'evening'] }}"
 
     - name: "TOD Goodbye"
       unique_id: tod_goodbye
+      device_class: enum
       state: >
         {% set time = states('sensor.time') %}
         {{ 'day' if '04:00' < time <= '12:00' else 'afternoon'
             if '12:00' < time < '17:00' else 'night' }}
+      attributes:
+        options: "{{ ['day', 'afternoon', 'night'] }}"
 
     - name: "Time Trigger Shift"
       unique_id: time_trigger_shift # used in reminders
+      device_class: enum
       state: >
         {% if is_state('sensor.work_shift_today', 'Days') and is_state('binary_sensor.work_today', 'on') %} days
         {% elif is_state('sensor.work_shift_today', 'Afternoons') and is_state('binary_sensor.work_today', 'on') %} afts
         {% else %} wknd
         {% endif %}
+      attributes:
+        options: "{{ ['days', 'afts', 'wknd'] }}"
 
     - name: "Waketime Today"
       unique_id: waketime_today
@@ -205,17 +214,16 @@
       unique_id: next_waketime
       device_class: timestamp
       icon: mdi:sun-clock
-      state: > #TEST
-        {% set use_alarms = false %}
-        {% set reset = today_at(states('input_datetime.day_reset')) %}
+      state: > #VERIFY or wake_tomorrow < wake_today
         {% set guest = today_at(states('input_datetime.guest_waketime')) %}
         {% set days = today_at(states('input_datetime.days_waketime')) %}
         {% set afts = today_at(states('input_datetime.afternoons_waketime')) %}
         {% set weekend = today_at(states('input_datetime.weekend_waketime')) %}
         {% set wake_today = as_datetime(states('sensor.waketime_today'), none) %}
+        {% set guest_mode = is_state('input_select.occupancy_mode', 'Guest') %}
         {% set work_tomorrow = is_state('binary_sensor.work_tomorrow', 'on') %}
         {% set set_alarms = state_attr('sensor.alarm_clock_next_alarm', 'set_alarms') %}
-        {% if is_state('input_select.occupancy_mode', 'Guest') %}
+        {% if guest_mode %}
           {% set wake_tomorrow = guest %}
         {% elif work_tomorrow %}
           {% set wake_tomorrow = afts if is_state('sensor.work_shift_tomorrow', 'Afternoons') else days %}
@@ -223,9 +231,8 @@
         {% else %}
           {% set wake_tomorrow = weekend %}
         {% endif %}
-        {% set wake_tomorrow = wake_tomorrow + timedelta(days=1)
-            if wake_tomorrow < now() else wake_tomorrow %}
-        {% if use_alarms and set_alarms != none %}
+        {% set wake_tomorrow = wake_tomorrow + timedelta(days=1) if wake_tomorrow < now() else wake_tomorrow %}
+        {% if not guest_mode and set_alarms != none %}
           {% set tomorrow_alarms = namespace(value=[]) %}
           {% for item in set_alarms %}
             {# select set alarms within 6 hours of tomorrow wake time #}
@@ -233,12 +240,12 @@
               {% set tomorrow_alarms.value = tomorrow_alarms.value + [item] %}
             {% endif %}
           {% endfor %}
-          {# set wake_tomorrow to next alarm - wake_alarms(min) #}
+          {# set wake_tomorrow to next alarm clock #}
           {% if tomorrow_alarms.value | count > 0 %}
             {% set wake_tomorrow = tomorrow_alarms.value | min | as_datetime %}
           {% endif %}
         {% endif %}
-        {{- wake_tomorrow if now() > wake_today else wake_today -}}
+        {{- wake_tomorrow if now() > wake_today or wake_tomorrow < wake_today else wake_today -}}
       attributes:
         12hour: >
           {% from 'schedule.jinja' import twelve_hour %}
