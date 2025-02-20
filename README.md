@@ -1,10 +1,12 @@
 # Home Assistant Configuration
 
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 ## [View Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-##### <font color='cyan'>Updated 24-12-15</font>
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+
+##### <font color='cyan'>Updated 25-02-20</font>
 
 ## HARDWARE
 
@@ -91,7 +93,6 @@
 - File editor
 - Frigate NVR
 - Glances
-- Home Assistant Google Drive Backup
 - Log Viewer
 - Mosquitto broker
 - MQTT Explorer
@@ -111,19 +112,23 @@
 - Adaptive Lighting
 - Alarmo
 - Asus Router
-- Balboa
 - Blitzortung
 - Browser Mod
 - Composite Device Tracker
+- Dew Point
 - Fontawesome
 - Frigate
 - Google Home
 - HACS
+- Import Statistics
 - Music Assistant
+- Navien Water Heater Custom Integration
 - Nest Protect
 - Ontario Energy Board
 - Pirate Weather
+- Pyscript
 - Smart ThinQ Sensors
+- Spook
 - Variables+History
 - Virtual Devices
 - Watchman
@@ -162,53 +167,53 @@
 - Vertical Stack In Card
 - Weather Radar Card
 - Weather Chart Card
-- Windrose Card
+- Wind Rose Card
 
-## ENTITY COUNTS (43 Domains, 4247 Entities)
+## ENTITY COUNTS (43 Domains, 4090 Entities)
 
-- alarm_control_panel: 3
-- alert: 103
-- automation: 317
-- binary_sensor: 493
-- button: 138
-- calendar: 16
-- camera: 31
+- alarm_control_panel: 1
+- alert: 101
+- automation: 313
+- binary_sensor: 526
+- button: 114
+- calendar: 12
+- camera: 33
 - climate: 5
 - conversation: 1
 - counter: 1
-- device_tracker: 75
-- event: 75
+- device_tracker: 53
+- event: 2
 - fan: 9
-- group: 80
-- image: 21
-- input_boolean: 202
+- group: 87
+- image: 36
+- input_boolean: 199
 - input_button: 2
-- input_datetime: 42
-- input_number: 182
-- input_select: 58
-- input_text: 139
-- light: 55
+- input_datetime: 40
+- input_number: 194
+- input_select: 55
+- input_text: 131
+- light: 59
 - lock: 4
-- media_player: 42
-- notify: 3
-- number: 83
+- media_player: 37
+- notify: 1
+- number: 55
 - person: 2
 - remote: 1
 - scene: 8
-- script: 66
-- select: 220
-- sensor: 1391
+- script: 68
+- select: 163
+- sensor: 1320
 - siren: 2
 - stt: 2
 - sun: 1
-- switch: 181
+- switch: 250
 - timer: 41
-- todo: 4
-- tts: 3
-- update: 125
+- todo: 3
+- tts: 4
+- update: 133
 - valve: 12
 - weather: 4
-- zone: 4
+- zone: 5
 
 ## TAGS USED IN CODE
 
