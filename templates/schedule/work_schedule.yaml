@@ -1,12 +1,12 @@
-###############################################################################
-## Templates - Work Schedule #VERIFY all templates
-###############################################################################
+###################################################################################################
+## Templates - Work Schedule
+###################################################################################################
 - trigger:
     # #MIDNIGHT day change happens at day_reset instead of midnight
     # to accomodate bedtimes after midnight and afternoon shifts
     # do not reload on restart, template reload - incorrect value if after midnight
     # before day_reset and shift is afternoons because no day_reset offset for
-    # now().weekday() or binary_sensor.workday
+    # now().weekday() or binary_sensor.workday_today
     - trigger: time
       at: input_datetime.day_reset
 
@@ -18,6 +18,7 @@
         - input_boolean.saturday_workday
         - input_boolean.sunday_workday
         - input_boolean.holiday_workday
+        - binary_sensor.work_holiday
         - binary_sensor.work_layoff
         - binary_sensor.work_vacation
       to:
@@ -44,7 +45,7 @@
           {% elif is_state('calendar.work_holiday', 'on') %} {{ is_state('input_boolean.holiday_workday', 'on') }}
           {% elif now().weekday() == 5 %} {{ is_state('input_boolean.saturday_workday', 'on') }}
           {% elif now().weekday() == 6 %} {{ is_state('input_boolean.sunday_workday', 'on') }}
-          {% else %} {{ is_state('binary_sensor.workday', 'on') }}
+          {% else %} {{ is_state('binary_sensor.workday_today', 'on') }}
           {% endif %}
         {% else %} {{ false }}
         {% endif %}
@@ -66,6 +67,7 @@
         - input_boolean.saturday_workday
         - input_boolean.sunday_workday
         - input_boolean.holiday_workday
+        - binary_sensor.work_holiday
         - binary_sensor.work_layoff
         - binary_sensor.work_vacation
       to:
@@ -84,7 +86,6 @@
       unique_id: work_tomorrow
       icon: "{{ state_attr('sensor.work_shift_tomorrow', 'icon') }}"
       # holiday/vacation/layoff start within 1 day and end > 1 day away = false
-      # calendar dates not tz aware - use as_local to add tz
       state: >
         {% set hol_tom = (is_state('binary_sensor.work_holiday', 'on')
               and not is_state_attr('binary_sensor.work_holiday', 'ends_today', true))
@@ -106,83 +107,77 @@
         {% else %} {{ false }}
         {% endif %}
 
-- binary_sensor:
-    # #MIDNIGHT state/start/end add day_reset for work today/tomorrow state/trigger
-    # calendar dates not tz aware - use as_local to add tz
+- trigger:
+    # #MIDNIGHT update at day_reset instead of midnight to accomodate bedtimes after midnight
+    # do not reload on restart, template reload - possible incorrect value if after midnight and
+    # before day_reset if bedtime after midnight
+    - trigger: time
+      at: input_datetime.day_reset
+
+    - trigger: state
+      entity_id: input_boolean.work_schedule
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      id: button
+      entity_id: button.update_calendar
+      to: ~
+      not_from:
+        - unknown
+        - unavailable
+  action:
+    - if: "{{ trigger.id == 'button' }}"
+      then:
+        - delay: 60 # let calendars update
+  binary_sensor:
     - name: "Work Holiday"
       unique_id: work_holiday
       icon: mdi:calendar-heart
       state: >
-        {% set start = as_datetime(state_attr('calendar.work_holiday', 'start_time'), none) %}
-        {% set end = as_datetime(state_attr('calendar.work_holiday', 'end_time'), none) %}
-        {% set reset = as_timedelta(states('input_datetime.day_reset')) %}
-        {% if start != none and end != none %}
-          {{ start | as_local + reset < now() < end | as_local + reset () }}
-        {% else %} {{ false }}
-        {% endif %}
+          {% from 'schedule.jinja' import rtoday %}
+          {{ rtoday('calendar.work_holiday') }}
       attributes:
         starts_tomorrow: >
-          {% set start = as_datetime(state_attr('calendar.work_holiday', 'start_time'), none) %}
-          {{ is_state('calendar.work_holiday', 'off')
-                and start | as_local < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
-              if start != none else false }}
+          {% from 'schedule.jinja' import starts_rtomorrow %}
+          {{ starts_rtomorrow('calendar.work_holiday') }}
         ends_today: >
-          {% set end = as_datetime(state_attr('calendar.work_holiday', 'end_time'), none) %}
-          {{ is_state('calendar.work_holiday', 'on')
-                and end | as_local < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
-              if end != none else false }}
+          {% from 'schedule.jinja' import ends_rtoday %}
+          {{ ends_rtoday('calendar.work_holiday') }}
       availability: "{{ has_value('calendar.work_holiday') }}"
 
-    # #MIDNIGHT state/start/end add day_reset for work today/tomorrow state/trigger
-    # calendar dates not tz aware - use as_local to add tz
     - name: "Work Vacation"
       unique_id: work_vacation
       icon: mdi:beach
       state: >
-        {% set start = as_datetime(state_attr('calendar.work_vacation_jason', 'start_time'), none) %}
-        {% set end = as_datetime(state_attr('calendar.work_vacation_jason', 'end_time'), none) %}
-        {% set reset = as_timedelta(states('input_datetime.day_reset')) %}
-        {% if start != none and end != none %}
-          {{ start | as_local + reset < now() < end | as_local + reset () }}
-        {% else %} {{ false }}
-        {% endif %}
+          {% from 'schedule.jinja' import rtoday %}
+          {{ rtoday('calendar.work_vacation_jason') }}
       attributes:
         starts_tomorrow: >
-          {% set start = as_datetime(state_attr('calendar.work_vacation_jason', 'start_time'), none) %}
-          {{ is_state('calendar.work_vacation_jason', 'off')
-                and start | as_local < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
-              if start != none else false }}
+          {% from 'schedule.jinja' import starts_rtomorrow %}
+          {{ starts_rtomorrow('calendar.work_vacation_jason') }}
         ends_today: >
-          {% set end = as_datetime(state_attr('calendar.work_vacation_jason', 'end_time'), none) %}
-          {{ is_state('calendar.work_vacation_jason', 'on')
-                and end | as_local < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
-              if end != none else false }}
+          {% from 'schedule.jinja' import ends_rtoday %}
+          {{ ends_rtoday('calendar.work_vacation_jason') }}
       availability: "{{ has_value('calendar.work_vacation_jason') }}"
 
-    # #MIDNIGHT state/start/end add day_reset for work today/tomorrow state/trigger
-    # calendar dates not tz aware - use as_local to add tz
     - name: "Work Layoff"
       unique_id: work_layoff
       icon: mdi:factory
       state: >
-        {% set start = as_datetime(state_attr('calendar.work_layoff', 'start_time'), none) %}
-        {% set end = as_datetime(state_attr('calendar.work_layoff', 'end_time'), none) %}
-        {% set reset = as_timedelta(states('input_datetime.day_reset')) %}
-        {% if start != none and end != none %}
-          {{ start | as_local + reset < now() < end | as_local + reset () }}
-        {% else %} {{ false }}
-        {% endif %}
+          {% from 'schedule.jinja' import rtoday %}
+          {{ rtoday('calendar.work_layoff') }}
       attributes:
         starts_tomorrow: >
-          {% set start = as_datetime(state_attr('calendar.work_layoff', 'start_time'), none) %}
-          {{ is_state('calendar.work_layoff', 'off')
-                and start | as_local < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
-              if start != none else false }}
+          {% from 'schedule.jinja' import starts_rtomorrow %}
+          {{ starts_rtomorrow('calendar.work_layoff') }}
         ends_today: >
-          {% set end = as_datetime(state_attr('calendar.work_layoff', 'end_time'), none) %}
-          {{ is_state('calendar.work_layoff', 'on')
-                and end | as_local < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
-              if end != none else false }}
+          {% from 'schedule.jinja' import ends_rtoday %}
+          {{ ends_rtoday('calendar.work_layoff') }}
       availability: "{{ has_value('calendar.work_layoff') }}"
 
 - sensor:
@@ -200,7 +195,6 @@
 
     # #MIDNIGHT shift start time forward by day_reset time
     # check for next days/afternoons start to be less than 24 hours away (end not in past)
-    # calendar dates not tz aware - use as_local to add tz
     # defaults to work_shift_today
     - name: "Work Shift Tomorrow"
       unique_id: work_shift_tomorrow
@@ -211,39 +205,29 @@
         {% else %} mdi:calendar-alert
         {% endif %}
       state: >
+        {% from 'schedule.jinja' import rdate %}
         {% set days = as_datetime(state_attr('calendar.days1', 'start_time'), none) %}
         {% set afts = as_datetime(state_attr('calendar.afternoons1', 'start_time'), none) %}
-        {% set reset = as_timedelta(states('input_datetime.day_reset')) %}
         {% if is_state('input_boolean.work_shift_override', 'on') %}
           {{ states('sensor.work_shift_today') }}
         {% elif days != none and afts != none %}
-          {% set days = days | as_local + reset %}
-          {% set afts = afts | as_local + reset %}
-          {% if days - timedelta(days=1) < now() %} Days
-          {% elif afts - timedelta(days=1) < now() %} Afternoons
-          {% else %}{{ states('sensor.work_shift_today') }}
+          {% if as_datetime(rdate(days)) - timedelta(days=1) < now() %} Days
+          {% elif as_datetime(rdate(afts)) - timedelta(days=1) < now() %} Afternoons
+          {% else -%} {{ states('sensor.work_shift_today') }}
           {% endif %}
-        {% else %}
-          {{ states('sensor.work_shift_today') }}
+        {% else %} {{ states('sensor.work_shift_today') }}
         {% endif %}
       attributes:
         options: "{{ ['Off', 'Days', 'Afternoons'] }}"
 
-    # calendar dates not tz aware - use as_local to add tz
     - name: "Next Work Holiday"
       unique_id: next_work_holiday
       icon: mdi:calendar-heart
       device_class: timestamp
       state: >
-        {{ state_attr('calendar.work_holiday', 'start_time') | as_datetime | as_local
-            if state_attr('calendar.work_holiday', 'start_time') != none else none }}
+        {% from 'schedule.jinja' import rdate %}
+        {{ rdate(state_attr('calendar.work_holiday', 'start_time')) }}
       attributes:
         display: >
-          {% set start = state_attr('calendar.work_holiday', 'start_time') %}
-          {% if start != none %}
-            {% set start = start | as_datetime | as_local %}
-            {% if is_state('calendar.work_holiday', 'on') %} Today
-            {% elif start - now() < timedelta(days=1) %} Tomorrow
-            {% else %} {{ start.strftime('%a, %b %d') }}
-            {% endif %}
-          {% endif %}
+          {% from 'schedule.jinja' import day_or_date %}
+          {{ day_or_date(states(this.entity_id), true, true) }}

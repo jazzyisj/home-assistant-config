@@ -1,0 +1,107 @@
+###################################################################################################
+## Set Thermostat
+###################################################################################################
+- id: set_thermostat
+  alias: "Set Thermostat"
+  description: "Set thermostat temperatures."
+  mode: restart
+  triggers:
+    - trigger: homeassistant
+      id: startup
+      event: start
+
+    - trigger: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+      for: 15 # prevent trigger on quick changes in state
+
+    - trigger: state
+      id: override
+      entity_id: input_boolean.hvac_presence_override
+      to:
+
+    - trigger: state
+      id: manual
+      entity_id: input_boolean.hvac_manual_mode
+      to: "off"
+
+    - trigger: state
+      id: home
+      entity_id:
+        - input_number.home_heat_temperature
+        - input_number.home_cool_temperature
+      to:
+      for: 5 # throttle
+
+    - trigger: state
+      id: night
+      entity_id:
+        - input_number.night_heat_temperature
+        - input_number.night_cool_temperature
+      to:
+      for: 5 # throttle
+
+    - trigger: state
+      id: guest
+      entity_id:
+        - input_number.guest_heat_temperature
+        - input_number.guest_cool_temperature
+      to:
+      for: 5 # throttle
+
+    - trigger: state
+      entity_id: input_select.hvac_mode
+      to:
+
+    - trigger: state
+      id: boost
+      entity_id: sensor.hvac_boost
+      to:
+  conditions:
+    - condition: state
+      entity_id: input_boolean.hvac_manual_mode
+      state: "off"
+
+    - condition: or
+      conditions:
+        - not:
+            - condition: state
+              entity_id: climate.thermostat
+              state: "off"
+
+            - condition: state
+              entity_id: alert.hvac_window_door_open
+              state: "on"
+
+        - condition: template
+          value_template: "{{ trigger.id == 'startup' }}"
+
+    - condition: template
+      alias: "HVAC boost is a valid number if trigger is boost"
+      value_template: >
+        {% if trigger.id == 'boost' %} {{ is_number(states(trigger.entity_id)) }}
+        {% else %} {{ true }}
+        {% endif %}
+
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: >
+        {{ iif(trigger.id == 'occupancy',
+            is_state('input_boolean.occupancy_override', 'off'), true) }}
+
+    - condition: template
+      alias: "Current occupancy mode corresponds to trigger preset"
+      value_template: >
+        {% if trigger.id == 'home' %} {{ is_state('input_select.occupancy_mode', 'Home') }}
+        {% elif trigger.id == 'night' %} {{ is_state('input_select.occupancy_mode', 'Night') }}
+        {% elif trigger.id == 'guest' %} {{ is_state('input_select.occupancy_mode', 'Guest') }}
+        {% else %} true
+        {% endif %}
+  actions:
+    #ERROR Error from API: 429: RESOURCE_EXHAUSTED: Rate limited for the Thermostat.: Too Many Requests
+    # delay to allow user to finish setting temps, restart mode - will finish with last set value
+    # prevent multiple set_thermostat triggers withc override on/off, occupancy mode etc.
+    - delay: 60
+
+    - action: script.set_thermostat
