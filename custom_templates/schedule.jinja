@@ -35,11 +35,142 @@ Check the clock! Your time to leave for work can not be determined today!
 {{- states(entity) | as_timestamp(none) | timestamp_custom('%-I:%M %p', true, none) -}}
 {%- endmacro -%}
 
+{%- macro day_and_time(date) -%}
+{# check if valid date, as_local to compare day() #}
+{%- set date = as_datetime(date, none) %}
+{% set show_date = false %}
+{%- if date != none %}
+  {%- set date = as_local(date) %}
+  {%- set cdate = as_local(date.replace(hour=0,minute=0,second=0,microsecond=0)) %}
+  {%- set today = now().replace(hour=0,minute=0,second=0,microsecond=0) %}
+  {%- if cdate.day == today.day %}
+    {% set day = 'Today' %}
+  {%- elif cdate - today == timedelta(days=-1) %}
+    {% set day = 'Yesterday' %}
+  {%- elif cdate - today == timedelta(days=1) %}
+    {% set day = 'Tomorrow' %}
+  {%- else %}
+    {% set day = date.strftime('%A') %}
+    {% set show_date = true if cdate - today > timedelta(days=6)
+          or cdate - today < timedelta(days=-1) else false %}
+  {%- endif %}
+  {{- day }}{{ date.strftime(', %b %-d') if show_date }}{{ date.strftime(' at %-I:%M %p') }}
+{%- else %}INVALID DATE
+{%- endif %}
+{%- endmacro -%}
+
+{%- macro day_or_date(date, short, dow) -%}
+{# check if valid date, as_timestamp to add tz #}
+{%- set date = as_datetime(date, none) %}
+{%- if date != none %}
+  {%- set date = as_datetime(as_timestamp(date)) %}
+  {%- set cdate = as_local(date.replace(hour=0,minute=0,second=0,microsecond=0)) %}
+  {%- set today = now().replace(hour=0,minute=0,second=0,microsecond=0) %}
+  {%- if dow %}{% set format = '%a, %b %d' if short else '%A, %B %d %Y' %}
+  {%- else %}{% set format = '%b %d' if short else '%B %d, %Y' %}
+  {%- endif %}
+  {%- if today == cdate %}Today
+  {%- elif cdate - today < timedelta(days=-1) %}Yesterday
+  {%- elif cdate - today < timedelta(days=1) %}Tomorrow
+  {%- else %}{{ date.strftime(format) }}
+  {%- endif %}
+{%- else %}INVALID DATE
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro rdate(date) -%}
+{# check if valid date, as_timestamp to add tz #}
+{%- set date = as_datetime(date, none) -%}
+{{ as_datetime(as_timestamp(date)) + as_timedelta(states('input_datetime.day_reset')) if date != none else none }}
+{%- endmacro -%}
+
+{%- macro rtoday(cal) -%}
+{# check if valid date, as_timestamp to add tz #}
+{%- set start = as_datetime(state_attr(cal, 'start_time'), none) %}
+{%- set end = as_datetime(state_attr(cal, 'end_time'), none) %}
+{%- set reset = as_timedelta(states('input_datetime.day_reset')) %}
+{{- as_datetime(as_timestamp(start)) < now() - reset < as_local(end)
+    if start != none and end != none else false }}
+{%- endmacro -%}
+
+{%- macro ends_rtoday(cal) -%}
+{# check if valid date, as_timestamp to add tz #}
+{%- set end = as_datetime(state_attr(cal, 'end_time'), none) %}
+{{- as_datetime(as_timestamp(end)) < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
+    if is_state(cal, 'on') and end != none else false }}
+{%- endmacro -%}
+
+{%- macro starts_rtomorrow(cal) -%}
+{# check if valid date, as_timestamp to add tz #}
+{% set start = as_datetime(state_attr(cal, 'start_time'), none) %}
+{{- as_datetime(as_timestamp(start)) < today_at(states('input_datetime.day_reset')) + timedelta(days=1, minutes=1)
+      if is_state(cal, 'off') and start != none else false }}
+{%- endmacro -%}
+
 {%- macro reminder_done(reminder) -%}
 {%- set entity = 'button.' ~ reminder ~ '_done' %}
 {%- set last_done = as_datetime(states(entity)) | as_local if has_value(entity) else none %}
 {%- if last_done != none -%}
 Last completed {{ last_done.strftime('today at %-I:%M %p')
   if now().day == last_done.day else last_done.strftime('%A at %-I:%M %p') }}
-{%- endif %}
+{%- endif -%}
+{%- endmacro -%}
+
+{%- macro schedule_switch_style() -%}
+:host {
+  --paper-item-icon-color:
+    {% if is_state('input_boolean.work_schedule', 'off') %} var(--entity-disabled-color)
+    {% else %} var(--state-icon-color)
+    {% endif %}
+  ;
+  --state-active-color:
+    {% if is_state('input_boolean.work_schedule_lock', 'on') %} var(--entity-warning-color)
+    {% else %} var(--entity-active-color)
+    {% endif %}
+  ;
+  --switch-checked-color:
+    {% if is_state('input_boolean.work_schedule_lock', 'on') %} var(--entity-warning-color)
+    {% else %} var(--primary-color)
+    {% endif %}
+  ;
+  --switch-checked-button-color:
+    {% if is_state('input_boolean.work_schedule_lock', 'on') %} var(--entity-warning-color)
+    {% else %} var(--primary-color)
+    {% endif %}
+  ;
+  --switch-checked-track-color:
+    {% if is_state('input_boolean.work_schedule_lock', 'on') %} var(--entity-warning-color)
+    {% else %} var(--state-icon-color)
+    {% endif %}
+  ;
+  --switch-unchecked-color:
+    {% if is_state('input_boolean.work_schedule', 'off') %} var(--entity-disabled-color)
+    {% else %} var(--state-icon-color);
+    {% endif %}
+  ;
+  --switch-unchecked-button-color:
+    {% if is_state('input_boolean.work_schedule', 'off') %} var(--entity-disabled-color)
+    {% else %} var(--state-icon-color);
+    {% endif %}
+  ;
+  --switch-unchecked-track-color:
+    {% if is_state('input_boolean.work_schedule', 'off') %} var(--entity-disabled-color)
+    {% else %} var(--state-icon-color);
+    {% endif %}
+  ;
+}
+{%- endmacro -%}
+
+{%- macro schedule_cal_sensor_style() -%}
+:host {
+  --paper-item-icon-color:
+    {% if is_state('input_boolean.work_schedule', 'off') %} var(--entity-disabled-color)
+    {% else %} var(--state-icon-color)
+    {% endif %}
+  ;
+  --state-binary_sensor-active-color:
+    {% if is_state('input_boolean.work_schedule', 'off') %} var(--entity-disabled-color)
+    {% else %} var(--entity-active-color)
+    {% endif %}
+}
 {%- endmacro -%}
