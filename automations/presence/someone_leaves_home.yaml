@@ -1,0 +1,54 @@
+###################################################################################################
+## Someone Leaves Home
+###################################################################################################
+- id: someone_leaves_home
+  alias: "Someone Leaves Home"
+  description: "Run leave home script when someone leaves home."
+  mode: parallel
+  triggers:
+    - trigger: state
+      entity_id:
+        - binary_sensor.jason_home
+        - binary_sensor.guest_home
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+      for: 5 # allow home override to turn on
+  actions:
+    - if: # if someone just_arrived within last 2 minutes wait to see if person really left
+        - condition: template
+          value_template: "{{ now() - states.input_select.last_person_to_arrive.last_changed < timedelta(minutes=2) }}"
+      then:
+        - wait_template: "{{ is_state(trigger.entity_id, 'on') }}"
+          timeout:
+            minutes: 2
+
+        - condition: template
+          value_template: "{{ is_state(trigger.entity_id, 'off') }}"
+
+    # clear last_person_to_leave so last_changed is updated even if set value hasn't changed
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.last_person_to_leave
+      data:
+        option: none
+
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.last_person_to_leave
+      data:
+        option: >
+          {% from 'presence.jinja' import trigger_person %}
+          {{ trigger_person(trigger) | title }}
+
+    - wait_template: "{{ is_state('binary_sensor.someone_home', 'off') }}"
+      timeout: 60
+
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: >
+          {% from 'presence.jinja' import occupancy_mode %}
+          {{ occupancy_mode() }}

@@ -1,0 +1,113 @@
+###################################################################################################
+## Someone Arrives Home
+###################################################################################################
+- id: someone_arrives_home
+  alias: "Someone Arrives Home"
+  description: "Determine who arrived home and run arrive home script."
+  mode: parallel
+  variables:
+    person: >
+      {% from 'presence.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+    first_home: "{{ state_attr('binary_sensor.someone_home', 'home') | count == 1 }}"
+  triggers:
+    - trigger: state
+      entity_id:
+        - binary_sensor.jason_home
+        - binary_sensor.guest_home
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      for: 5 # allow first_home to calculate
+  actions:
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: >
+          {% from 'presence.jinja' import occupancy_mode %}
+          {{ occupancy_mode() }}
+
+    - parallel:
+        - sequence:
+            - if: "{{ person != 'guest' }}"
+              then:
+                # clear last_person_to_arrive so last_changed attribute gets updated if even if value didn't change
+                - action: input_select.select_option
+                  target:
+                    entity_id: input_select.last_person_to_arrive
+                  data:
+                    option: none
+
+                - action: input_select.select_option
+                  target:
+                    entity_id: input_select.last_person_to_arrive
+                  data:
+                    option: "{{ person | title }}"
+
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: "input_boolean.{{ person }}_almost_home"
+
+                - action: "notify.{{ person }}"
+                  data:
+                    message: clear_notification
+                    data:
+                      tag: "{{ person }}_heading_home"
+
+                # update traffic sensors to ensure time to home is zeroed out
+                - action: script.update_traffic_sensors
+                  continue_on_error: true
+
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.occupancy_announcements
+                  state: "on"
+              then:
+                - action: script.tts_play
+                  data:
+                    save_message: false
+                    message: "{{ 'A guest has arrived.' if person == 'guest' else person | title ~ ' is home' }}"
+                  continue_on_error: true
+
+            - delay: 90 # let person get in house
+
+            - if: # only if person still home (may have come and gone)
+                - condition: template
+                  alias: "Person is still home"
+                  value_template: "{{ is_state('binary_sensor.' ~ person ~ '_home', 'on') }}"
+              then:
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.occupancy_announcements
+                      state: "on"
+                  then:
+                    - action: script.tts_play
+                      data:
+                        save_message: false
+                        message: |
+                          Good {{ states('sensor.tod_greeting') }} {{ person | title if person != 'guest' }}!
+                          Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
+                      continue_on_error: true
+
+                - if: "{{ first_home }}"
+                  then:
+                    - if:
+                        - condition: numeric_state
+                          entity_id: sensor.tts_saved_messages
+                          above: 0
+                      then:
+                        - action: script.tts_play_saved_messages
+                          continue_on_error: true
+
+                        - wait_template: "{{ is_state('script.tts_play_saved_messages', 'off') }}"
+                          timeout:
+                            minutes: 5
+
+                    - if: "{{ is_state('input_boolean.media_enabled_' ~ person, 'on') }}"
+                      then:
+                        - action: script.media_play
+                          data:
+                            preset: "{{ person }}"

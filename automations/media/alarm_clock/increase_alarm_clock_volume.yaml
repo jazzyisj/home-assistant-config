@@ -1,0 +1,53 @@
+###################################################################################################
+## Increase Alarm Clock Volume
+###################################################################################################
+- id: increase_alarm_clock_volume
+  alias: "Increase Alarm Clock Volume"
+  description: "Turn up alarm clock volume at specified interval."
+  mode: restart
+  variables:
+    alarm_type: "{{ states('input_select.alarm_clock_type') }}"
+    media_player: "{{ states('sensor.alarm_clock_active_media_player') }}"
+    volume: "{{ states('input_number.alarm_clock_volume_' ~ alarm_type) | float/100 }}"
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.alarm_clock
+      to: "on"
+      for:
+        minutes: 2
+  conditions:
+    - condition: state
+      entity_id: input_boolean.alarm_clock_increase_volume
+      state: "on"
+  actions:
+    - repeat:
+        sequence:
+          - if: "{{ is_state('switch.alarm_clock_snooze', 'on') }}"
+            then:
+              # reset volume to original volume
+              - action: media_player.volume_set
+                target:
+                  entity_id: "{{ media_player }}"
+                data:
+                  volume_level: "{{ volume }}"
+
+              - wait_template: "{{ is_state('switch.alarm_clock_snooze', 'off') }}"
+                timeout:
+                  minutes: 60
+                continue_on_timeout: false
+
+          - action: media_player.volume_up
+            target:
+              entity_id: "{{ media_player }}"
+
+          - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
+            timeout:
+              minutes: 2
+        until:
+          - or:
+              - condition: state
+                entity_id: binary_sensor.alarm_clock
+                state: "off"
+
+              - condition: template
+                value_template: "{{ state_attr(media_player, 'volume_level') | float(1) > 0.9 }}"

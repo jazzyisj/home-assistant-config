@@ -1,0 +1,207 @@
+
+###################################################################################################
+## Set Occupancy Mode
+###################################################################################################
+- id: set_occupancy_mode
+  alias: "Set Occupancy Mode"
+  description: "Set occupancy mode."
+  max_exceeded: silent
+  triggers:
+    - trigger: event
+      id: home
+      event_type: mobile_app_notification_action
+      event_data:
+        action: set_home_mode
+
+    - trigger: event
+      id: away
+      event_type: mobile_app_notification_action
+      event_data:
+        action: set_away_mode
+  actions:
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: "{{ trigger.id | title }}"
+
+###################################################################################################
+## Occupancy Mode Reset
+###################################################################################################
+- id: occupancy_mode_reset
+  alias: "Occupancy Mode Reset"
+  description: "Auto select occupancy mode."
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.startup_pending
+      to: "off"
+  actions:
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.occupancy_mode
+      data:
+        option: >
+          {% from 'presence.jinja' import occupancy_mode %}
+          {{ occupancy_mode() }}
+
+###################################################################################################
+## Occupancy Mode Changed
+###################################################################################################
+- id: occupancy_mode_changed
+  alias: "Occupancy Mode Changed"
+  description: "Set occupancy mode options, validate occupancy mode change."
+  mode: restart
+  variables:
+    prev_mode: "{{ trigger.from_state.state }}"
+  triggers:
+    - trigger: state
+      entity_id: input_select.occupancy_mode
+      to:
+  actions:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Home
+          sequence:
+            - action: script.turn_off
+              target:
+                entity_id: script.bedtime
+
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.owner_home
+                  state: "off"
+              then:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.occupancy_override
+
+                # select guest if guest home or previous occupancy mode (should be away/vacation)
+                - action: input_select.select_option
+                  target:
+                    entity_id: input_select.occupancy_mode
+                  data:
+                    option: "{{ 'Guest' if is_state('binary_sensor.guest_home', 'on') else prev_mode }}"
+
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: input_boolean.occupancy_override
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Night
+          sequence:
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: "off"
+              then:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.occupancy_override
+
+                - action: input_select.select_option # back to previous mode
+                  target:
+                    entity_id: input_select.occupancy_mode
+                  data:
+                    option: "{{ prev_mode }}" # should be away/vacation
+
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: input_boolean.occupancy_override
+              else:
+                # turn off to stop actions occuring in night mode
+                - action: automation.turn_off
+                  target:
+                    entity_id: automation.someone_arrives_home
+                  data:
+                    stop_actions: true
+
+                - action: automation.turn_on
+                  target:
+                    entity_id: automation.someone_arrives_home
+
+                - variables:
+                    off_entities:
+                      - input_boolean.bedtime_delayed
+                      - script.bedtime
+                      - script.waketime
+                      - switch.company_scene
+                      - switch.movie_scene
+                      - switch.chill_scene
+
+                - repeat:
+                    for_each: "{{ off_entities }}"
+                    sequence:
+                      - if: "{{ is_state(repeat.item, 'on') }}"
+                        then:
+                          - action: homeassistant.turn_off
+                            target:
+                              entity_id: "{{ repeat.item }}"
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state:
+                - Away
+                - Vacation
+          sequence:
+            # turn off to stop actions occuring in away/vaction mode
+            - action: automation.turn_off
+              target:
+                entity_id: automation.someone_arrives_home
+              data:
+                stop_actions: true
+
+            - action: automation.turn_on
+              target:
+                entity_id: automation.someone_arrives_home
+
+            - variables:
+                off_entities:
+                  - input_boolean.bedtime_delayed
+                  - script.waketime
+                  - script.bedtime
+                  - switch.company_scene
+                  - switch.movie_scene
+                  - switch.chill_scene
+                  - switch.shower_scene
+
+            - repeat:
+                for_each: "{{ off_entities }}"
+                sequence:
+                  - if: "{{ is_state(repeat.item, 'on') }}"
+                    then:
+                      - action: homeassistant.turn_off
+                        target:
+                          entity_id: "{{ repeat.item }}"
+
+        - conditions:
+            - condition: state
+              entity_id: input_select.occupancy_mode
+              state: Guest
+          sequence:
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.owner_home
+                  state: "on"
+              then:
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.occupancy_override
+
+                - action: input_select.select_option
+                  target:
+                    entity_id: input_select.occupancy_mode
+                  data:
+                    option: "{{ 'Night' if prev_mode == 'Night' else 'Home' }}"
+
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: input_boolean.occupancy_override
+              else:
+                - action: script.turn_off
+                  target:
+                    entity_id: script.bedtime

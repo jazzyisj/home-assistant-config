@@ -1,0 +1,69 @@
+###################################################################################################
+## Arrive Home Notification
+###################################################################################################
+- id: arrive_home_notification
+  alias: "Arrive Home Notification"
+  description: "Send notification when someone almost home or home."
+  mode: parallel
+  variables:
+    person: >
+      {% from 'presence.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.jason_home
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      entity_id: input_boolean.jason_almost_home
+      to:
+        - "on"
+        - "off"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.occupancy_notifications
+      state: "on"
+
+    - condition: template
+      value_template: "{{ is_state_attr('binary_sensor.' ~ person ~ '_home', 'just_left', 'false') }}"
+  actions:
+    - action: "notify.{{ person }}"
+      data:
+        message: "{{ person | title }} Arriving Home."
+        data:
+          tag: "{{ person }}_arriving_home"
+          persistent: true
+          sticky: >
+            {{ true if is_state('binary_sensor.' ~ person ~ '_home', 'off')
+                or states.binary_sensor[person ~ '_home'].last_changed
+                  > now() - timedelta(minutes=5) else false }}
+          timeout: 600
+          chronometer: true
+          when: "{{ (now().timestamp() + 600) | int }}"
+          notification_icon: mdi:home-account
+          icon_url: !secret ARRIVE_HOME_ICON
+          clickAction: /ui-mobile/alarm
+          actions:
+            - title: "Alarm"
+              action: URI
+              uri: !secret ALARM_URI
+
+            - title: "Disarm"
+              action: "arriving_disarm_alarm_{{ person }}"
+
+            - title: "Garage"
+              action: "open_garage_{{ person }}"
+
+    - wait_template: "{{ is_state('alarm_control_panel.house', 'disarmed') }}"
+      timeout: 600 # remainder of timeout for notification
+
+    - action: "notify.{{ person }}"
+      data:
+        message: clear_notification
+        data:
+          tag: "{{ person }}_arriving_home"

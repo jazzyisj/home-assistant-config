@@ -1,0 +1,55 @@
+###################################################################################################
+## Unlock House Locks
+###################################################################################################
+- id: unlock_house_locks
+  alias: "Unlock House Locks"
+  description: "Unlock house entry locks."
+  mode: queued
+  variables:
+    locks: >
+      {% if trigger.id == 'danger' %}
+        {% set locks = state_attr('group.entry_locks', 'entity_id') %}
+      {% elif trigger.id == 'doorbell' %}
+        {% set locks = ['lock.front_door_lock'] %}
+      {% elif trigger.id == 'arriving' %}
+        {% set locks = ['lock.back_door_lock', 'lock.side_door_lock'] %}
+      {% else %}
+        {% set locks = state_attr('group.house_locks', 'entity_id') %}
+      {% endif %}
+      {{ expand(locks) | selectattr('state', 'eq', 'locked') | map(attribute='entity_id') | list | sort }}
+    person: >
+      {% from 'presence.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+  triggers:
+    - trigger: event
+      id: arriving
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arriving_home_jason
+
+    - trigger: event
+      id: doorbell
+      event_type: mobile_app_notification_action
+      event_data:
+        action: doorbell_unlock_door
+
+    - trigger: state
+      id: danger
+      entity_id: binary_sensor.danger_alarm
+      to: "on"
+  conditions:
+    - "{{ locks | count > 0 }}"
+  actions:
+    - if: "{{ person == 'jason' }}"
+      then:
+        - action: script.unlock_entry_locks
+          target:
+            entity_id: "{{ locks }}"
+          data:
+            code: !secret LOCK_JASON #LOCK_USER
+      else:
+        - action: script.unlock_entry_locks
+          target:
+            entity_id: "{{ locks }}"
+          data:
+            code: !secret LOCK_HASS #LOCK_USER

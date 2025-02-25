@@ -1,0 +1,517 @@
+###################################################################################################
+## Work Shift Select
+###################################################################################################
+- id: work_shift_select
+  alias: "Work Shift Select"
+  description: "Select today shift when calendar/selection changes."
+  max_exceeded: silent
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.work_schedule
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      entity_id:
+        - calendar.days1
+        - calendar.days2
+        - calendar.afternoons1
+        - calendar.afternoons2
+      to: "on"
+      from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      entity_id:
+        - calendar.days1
+        - calendar.days2
+        - calendar.afternoons1
+        - calendar.afternoons2
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      #MIDNIGHT delayed for day reset time, prevent bedtimes missed sunday night aft -> days
+      for: "{{ states('input_datetime.day_reset') }}"
+
+    - trigger: state
+      entity_id: input_select.current_work_shift
+      to:
+      for: 1 # req or input_select won't update in UI
+
+    - trigger: state
+      entity_id: input_boolean.work_shift_override
+      to: "off"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.work_shift_override
+      state: "off"
+  actions:
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: >
+          {% if is_state('input_boolean.work_schedule', 'on') %}
+            {% if (is_state('input_boolean.work_today_on', 'on') or is_state('input_boolean.work_tomorrow_on', 'on'))
+                or (is_state('binary_sensor.work_layoff', 'off') and is_state('binary_sensor.work_vacation', 'off')) %}
+              {% if is_state('calendar.afternoons1', 'on') or is_state('calendar.afternoons2', 'on') %} Afternoons
+              {% elif is_state('calendar.days1', 'on') or is_state('calendar.days2', 'on') %} Days
+              {% else %} {{ states('input_select.current_work_shift') }}
+              {% endif %}
+            {% else %} Off
+            {% endif %}
+          {% else %} Off
+          {% endif %}
+
+###################################################################################################
+## Set Day Shift
+###################################################################################################
+- id: set_day_shift
+  alias: "Set Day Shift"
+  description: "Set day work shift."
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: set_day_shift
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.work_shift_override
+
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: Days
+
+###################################################################################################
+## Set Afternoon Shift
+###################################################################################################
+- id: set_afternoon_shift
+  alias: "Set Afternoon Shift"
+  description: "Set afternoon work shift."
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: set_aft_shift
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.work_shift_override
+
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: Afternoons
+
+###################################################################################################
+## Work Schedule Changed
+###################################################################################################
+- id: work_schedule_changed
+  alias: "Work Schedule Changed"
+  description: "Reset work schedule settings, send notification."
+  mode: restart
+  triggers:
+    - trigger: state
+      id: schedule
+      entity_id:
+        - input_boolean.work_schedule
+        - binary_sensor.work_holiday
+        - binary_sensor.work_layoff
+        - binary_sensor.work_vacation
+      to:
+        - "on"
+        - "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      id: shift
+      entity_id: input_select.current_work_shift
+      to:
+      for: 5 # allow reset if override on
+  conditions:
+    - or:
+        - condition: state
+          entity_id: input_boolean.work_schedule
+          state: "off"
+
+        - condition: state
+          entity_id: input_boolean.work_schedule_lock
+          state: "off"
+  actions:
+    - if:
+        - or:
+            - condition: trigger
+              id: schedule
+
+            - condition: state
+              entity_id: input_boolean.work_schedule
+              state: "off"
+
+            - condition: state
+              entity_id:
+                - binary_sensor.work_holiday
+                - binary_sensor.work_layoff
+                - binary_sensor.work_vacation
+              match: any
+              state: "on"
+      then:
+        - action: input_boolean.turn_off
+          target:
+            entity_id:
+              - input_boolean.saturday_workday
+              - input_boolean.sunday_workday
+              - input_boolean.holiday_workday
+
+        - condition: state
+          entity_id: input_boolean.work_schedule
+          state: "off"
+
+        - action: input_boolean.turn_off
+          target:
+            entity_id:
+              - input_boolean.work_today_on
+              - input_boolean.work_today_off
+              - input_boolean.work_tomorrow_on
+              - input_boolean.work_tomorrow_off
+              - input_boolean.work_shift_override
+              - input_boolean.work_schedule_lock
+
+    - delay: 15 # allow reset/shift to change, prevent double trigger
+
+    - action: notify.jason
+      data:
+        title: "Work Schedule"
+        message: |
+          Work Schedule: {{ states('input_boolean.work_schedule') | title }}
+          Layoff: {{ states('binary_sensor.work_layoff') | title }}
+          Vacation: {{ states('binary_sensor.work_vacation') | title }}
+          Work Today: {{ states('binary_sensor.work_today') | title }}
+          Today Shift: {{ states('sensor.work_shift_today') | title }}
+          Work Tomorrow: {{ states('binary_sensor.work_tomorrow') | title }}
+          Tomorrow Shift: {{ states('sensor.work_shift_tomorrow') | title }}
+        data:
+          tag: work_schedule
+          visibility: public
+          timeout: 86400
+          notification_icon: mdi:factory
+          icon_url: !secret WORK_ICON
+          clickAction: /ui-mobile/presence
+          actions:
+            - title: "Work {{ iif(is_state('input_boolean.work_schedule', 'on'), 'Off', 'On') }}"
+              action: work_schedule_toggle
+
+            - title: "Set {{ iif(is_state('sensor.work_shift_today', 'Afts'), 'Days', 'Afts') }}"
+              action: "{{ iif(is_state('sensor.work_shift_today', 'Afts'), 'set_day_shift', 'set_aft_shift') }}"
+
+            - title: "Today {{ iif(is_state('binary_sensor.work_today', 'on'), 'Off', 'On') }}"
+              action: work_today_toggle
+
+###################################################################################################
+## Work Settings Reset
+###################################################################################################
+- id: work_setting_reset
+  alias: "Work Settings Reset"
+  description: "Turn work setting off if work schedule off."
+  mode: parallel
+  triggers:
+    - trigger: state
+      id: toggle
+      entity_id:
+        - input_boolean.saturday_workday
+        - input_boolean.sunday_workday
+        - input_boolean.holiday_workday
+        - input_boolean.work_today_on
+        - input_boolean.work_today_off
+        - input_boolean.work_tomorrow_on
+        - input_boolean.work_tomorrow_off
+      to: "on"
+
+    - trigger: state
+      entity_id:
+        - input_boolean.work_schedule_lock
+        - input_boolean.work_shift_override
+      to: "on"
+  conditions:
+    - or:
+        - condition: state
+          entity_id: input_boolean.work_schedule
+          state: "off"
+
+        - condition: state
+          entity_id: binary_sensor.work_layoff
+          state: "on"
+
+        - condition: state
+          entity_id: binary_sensor.work_vacation
+          state: "on"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: "{{ trigger.entity_id }}"
+      continue_on_error: true
+
+    - action: browser_mod.notification
+      data:
+        duration: 10000
+        message: "Work setting cannot be enabled.  Work schedule is not enabled or work layoff/vacation is on."
+      continue_on_error: true
+
+###################################################################################################
+## Toggle Work Schedule
+###################################################################################################
+- id: toggle_work_schedule
+  alias: "Toggle Work Schedule"
+  description: "Toggle work schedule."
+  max_exceeded: silent
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: work_schedule_toggle
+  actions:
+    - action: input_boolean.toggle
+      target:
+        entity_id: input_boolean.work_schedule
+
+###################################################################################################
+## Toggle Work Today
+###################################################################################################
+- id: toggle_work_today
+  alias: "Toggle Work Today"
+  description: "Toggle work today."
+  max_exceeded: silent
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: work_today_toggle
+  actions:
+    - if:
+        - condition: state
+          entity_id: binary_sensor.work_today
+          state: "on"
+      then:
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.work_today_off
+
+        - action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.work_today_on
+      else:
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.work_today_on
+
+        - action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.work_today_off
+
+###################################################################################################
+## Reset Work Today Off
+###################################################################################################
+- id: reset_work_today_off
+  alias: "Reset Work Today Off"
+  description: "Turn boolean off at end of day."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+
+    - trigger: state
+      entity_id: input_boolean.work_today_on
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id:
+        - input_boolean.work_schedule
+        - input_boolean.work_today_off
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.work_today_off
+
+###################################################################################################
+## Reset Work Tomorrow Off
+###################################################################################################
+- id: reset_work_tomorrow_off
+  alias: "Reset Tomorrow Work Off"
+  description: "Turn boolean off at end of day, turn on work today off boolean."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+
+    - trigger: state
+      entity_id: input_boolean.work_tomorrow_on
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.work_tomorrow_off
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+  actions:
+    - delay: 5 # let automation.schedule_reset_work_off_today run first
+
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.work_today_off
+
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.work_tomorrow_off
+
+###################################################################################################
+## Reset Work Today On
+###################################################################################################
+- id: reset_work_today_on
+  alias: "Reset Work Today On"
+  description: "Turn boolean off at end of day."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+
+    - trigger: state
+      entity_id: input_boolean.work_today_off
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.work_today_on
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.work_today_on
+
+###################################################################################################
+## Reset Work Tomorrow On
+###################################################################################################
+- id: reset_work_tomorrow_on
+  alias: "Reset Work Tomorrow On"
+  description: "Turn boolean off at end of day, turn on work today on boolean."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+
+    - trigger: state
+      entity_id: input_boolean.work_tomorrow_off
+      to: "on"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.work_tomorrow_on
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+  actions:
+    - delay: 5 # let automation.schedule_reset_work_on_today run first
+
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.work_today_on
+
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.work_tomorrow_on
+
+###################################################################################################
+## Reset Saturday Workday
+###################################################################################################
+- id: reset_saturday_workday
+  alias: "Reset Saturday Workday"
+  description: "Turn boolean off after Saturday."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+  conditions:
+    - condition: state
+      entity_id: input_boolean.saturday_workday
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+
+    - condition: template
+      alias: "Today is Sunday"
+      value_template: "{{ now().weekday() == 6 }}"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.saturday_workday
+
+###################################################################################################
+## Reset Sunday Workday
+###################################################################################################
+- id: reset_sunday_workday
+  alias: "Reset Sunday Workday"
+  description: "Turn boolean off after Sunday."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+  conditions:
+    - condition: state
+      entity_id: input_boolean.sunday_workday
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+
+    - condition: template
+      alias: "Today is Monday"
+      value_template: "{{ now().weekday() == 0 }}"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.sunday_workday
+
+###################################################################################################
+## Reset Holiday Workday
+## stays on for multi-day holiday until holidays done
+###################################################################################################
+- id: reset_holiday_workday
+  alias: "Reset Holiday Workday"
+  description: "Turn boolean off after holiday."
+  triggers:
+    - trigger: time
+      at: input_datetime.day_reset
+  conditions:
+    - condition: state
+      entity_id: input_boolean.holiday_workday
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.work_schedule_lock
+      state: "off"
+
+    - condition: state
+      entity_id: calendar.work_holiday
+      state: "off"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.holiday_workday

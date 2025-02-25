@@ -407,7 +407,6 @@
           {% endif %}
         options: "{{ state_attr('select.alarm_clock_media_player_wake', 'options') }}"
 
-
     - name: "Alarm Clock Wake Next Alarm"
       unique_id: alarm_clock_wake_next_alarm
       device_class: timestamp
@@ -415,31 +414,39 @@
         {% from 'media.jinja' import alarm_clock_icon %}
         {{ alarm_clock_icon(this.entity_id) }}
       state: >
+        {% set reset = today_at(states('input_datetime.day_reset')) %}
         {% set days = today_at(states('input_datetime.days_waketime')) %}
         {% set afts = today_at(states('input_datetime.afternoons_waketime')) %}
         {% set wkds = today_at(states('input_datetime.weekend_waketime')) %}
         {% set guest = today_at(states('input_datetime.guest_waketime')) %}
+        {% set work_today = is_state('binary_sensor.work_today', 'on') %}
+        {% set work_tomorrow = today_at(states('input_datetime.guest_waketime')) %}
         {% if is_state('input_select.occupancy_mode', 'Guest') %}
           {% set next_alarm = guest if is_state('input_boolean.alarm_clock_guest', 'on') else none %}
         {% else %}
-          {% set alarm_today = wkds if is_state('binary_sensor.work_today', 'off')
+          {% set alarm_today = wkds if not work_today
               else afts if is_state('sensor.work_shift_today', 'Afternoons') else days %}
-          {% set alarm_tom = wkds if is_state('binary_sensor.work_tomorrow', 'off')
+          {% set alarm_tom = wkds if not work_tomorrow
               else afts if is_state('sensor.work_shift_tomorrow', 'Afternoons') else days %}
+          {# set tomorrows alarm time is today's time + 1 day #}
           {% set alarm_tom = alarm_tom + timedelta(days=1) %}
           {# set next alarm to tomorrows alarm time if now is past alarm time #}
           {% set next_alarm = alarm_tom if now() > alarm_today else alarm_today %}
-
           {# set next alarm to null if not boolean enabled #}
-          {% if (now() <= alarm_today and is_state('input_boolean.alarm_clock_wake_workdays', 'off')
-                if is_state('binary_sensor.work_today', 'on')
-                  else is_state('binary_sensor.work_tomorrow', 'off')
-                    and is_state('input_boolean.alarm_clock_wake_weekends', 'off'))
-              or (now() > alarm_today and is_state('binary_sensor.work_tomorrow', 'off')
-                and is_state('input_boolean.alarm_clock_wake_weekends', 'off'))
-              or (now() > alarm_today and is_state('binary_sensor.work_tomorrow', 'on')
+          {# now between reset and alarm_today - today #}
+          {# now between midnight and reset - tomorrow #}
+          {# now between alarm_today and midnight - tomorrow #}
+          {% if (reset < now() <= alarm_today and work_today
                 and is_state('input_boolean.alarm_clock_wake_workdays', 'off'))
-              or (now() > alarm_today and is_state('binary_sensor.work_tomorrow', 'off')
+              or  (reset < now() <= alarm_today and not work_today
+                and is_state('input_boolean.alarm_clock_wake_weekends', 'off'))
+              or (reset > now() <= alarm_today and work_tomorrow
+                and is_state('input_boolean.alarm_clock_wake_workdays', 'off'))
+              or (reset > now() <= alarm_today and not work_tomorrow
+                and is_state('input_boolean.alarm_clock_wake_weekends', 'off'))
+              or (now() > alarm_today and work_tomorrow
+                and is_state('input_boolean.alarm_clock_wake_workdays', 'off'))
+              or (now() > alarm_today and not work_tomorrow
                 and is_state('input_boolean.alarm_clock_wake_weekends', 'off')) %}
             {% set next_alarm = none %}
           {% endif %}

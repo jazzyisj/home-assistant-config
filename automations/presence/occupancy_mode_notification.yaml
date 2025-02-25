@@ -1,0 +1,170 @@
+###################################################################################################
+## Turn Occupancy Notifications Off
+###################################################################################################
+- id: turn_occupancy_notifications_off
+  alias: "Turn Occupancy Notifications Off"
+  description: "Turn off occupancy notifications boolean."
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_occupancy_notifications
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.occupancy_notifications
+
+    - action: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: occupancy_notification
+
+###################################################################################################
+## Occupancy Mode Notification
+###################################################################################################
+- id: occupancy_mode_notification
+  alias: "Occupancy Mode Notification"
+  description: "Send notification when occupancy mode or alarm state has changed."
+  mode: single
+  max_exceeded: silent
+  variables:
+    run_delay: 5
+    occupancy_changed: >
+      {{ is_state('input_boolean.occupancy_announcements', 'on')
+          and now() - states.input_select.occupancy_mode.last_changed
+            < timedelta(seconds=run_delay) }}
+    alarm_changed: >
+        {{ is_state('input_boolean.alarm_announcements', 'on')
+            and now() - states.alarm_control_panel.house.last_changed
+              < timedelta(seconds=run_delay) }}
+  triggers:
+    - trigger: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+        - Night
+        - Away
+        - Vacation
+
+    - trigger: state
+      id: armed
+      entity_id: alarm_control_panel.house
+      to:
+        - armed_home
+        - armed_night
+        - armed_away
+        - armed_vacation
+
+    - trigger: state
+      id: disarmed
+      entity_id: alarm_control_panel.house
+      to: disarmed
+      from:
+        - armed_home
+        - armed_night
+        - armed_away
+        - armed_vacation
+        - pending
+        - triggered
+  conditions:
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: >
+        {{ iif(trigger.id == 'occupancy',
+            is_state('input_boolean.occupancy_override', 'off'), true) }}
+
+    - condition: template
+      alias: "Alarm enabled if alarm trigger"
+      value_template: "{{ iif(trigger.id in ['armed', 'disarmed'], is_state('input_boolean.alarm_enabled', 'on'), true) }}"
+
+    - not:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: &bad_states
+            - triggered
+            - pending
+            - arming
+  actions:
+    # allow corresponding occupancy/alarm mode state to set, prevent double tts
+    - delay: "{{ run_delay }}" # allow alarm to enter arming state
+
+    - not:
+        - condition: state
+          entity_id: alarm_control_panel.house
+          state: *bad_states
+
+    - parallel:
+        - sequence:
+            - if:
+                - "{{ is_state('input_boolean.occupancy_announcements', 'on')
+                  if trigger.id == 'occupancy' else true }}"
+                - "{{ is_state('input_boolean.alarm_announcements', 'on')
+                  if trigger.id in ['armed', 'disarmed'] else true }}"
+              then:
+                - action: script.tts_play
+                  data:
+                    message: |
+                      {%- if occupancy_changed -%}
+                      The house is now in {{ states('input_select.occupancy_mode') }} mode
+                      {%- endif %}
+                      {%- if occupancy_changed and alarm_changed %}, and the
+                        {%- elif occupancy_changed %}.
+                        {%- elif alarm_changed %} The
+                        {%- endif %}
+                      {%- if alarm_changed %} alarm is {{ states('sensor.alarm_status') }}.
+                      {%- endif %}
+                      {{ 'Personalized occupant automations are disabled.' if states('input_select.occupancy_mode') == 'Guest' }}
+                    ignore_away: true
+                  continue_on_error: true
+
+                - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+                  timeout: 60
+
+                - event: occupancy_notification
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.occupancy_notifications
+                  state: "on"
+              then:
+                - action: notify.jason
+                  data:
+                    title: "{{ iif(is_state('input_boolean.alarm_triggered', 'on'), 'Alarm Triggered', 'House Mode') }}"
+                    message: |
+                      <b>Occupancy Mode: </b>{{ states('input_select.occupancy_mode') }}
+                      <b>Alarm Mode: </b>{{ states('sensor.alarm_status') }}
+                      {%- if is_state('input_boolean.alarm_triggered', 'on') %}
+                      <b>Alarm Trigger: </b><span style="color:red">{{ states('input_text.current_alarm') }}</span>
+                      <b>Disarmed By: </b>{{ states('input_text.alarm_changed_by') }}
+                      {%- endif -%}
+                      <b>Home: </b>
+                      {%- from 'speech_helpers.jinja' import array_to_clist %}
+                      {%- from 'speech_helpers.jinja' import plural %}
+                      {{- array_to_clist(state_attr('binary_sensor.someone_home', 'home'), true) }}
+                      {%- if is_state('binary_sensor.charlie_home', 'on') %}
+                        {%- if is_state('binary_sensor.someone_home', 'on') %}, Charlie
+                        {%- else %} Charlie
+                        {%- endif %}
+                      {%- else %}
+                        {%- if is_state('binary_sensor.someone_home', 'off') %} Nobody {%- endif %}
+                      {%- endif %}
+                    data:
+                      subject: "Occupancy Mode: {{ states('input_select.occupancy_mode') }}"
+                      tag: occupancy_notification
+                      notification_icon: "{{ state_attr('input_select.occupancy_mode', 'icon') }}"
+                      icon_url: "/local/images/notification/{{ states('input_select.occupancy_mode') | lower }}_icon.png"
+                      clickAction: /ui-mobile/presence
+                      actions:
+                        - title: "Home"
+                          action: set_home_mode
+
+                        - title: "Away"
+                          action: set_away_mode
+
+                        - title: "Alarm"
+                          action: URI
+                          uri: !secret ALARM_URI
+                  continue_on_error: true

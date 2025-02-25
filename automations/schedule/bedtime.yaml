@@ -1,0 +1,217 @@
+###################################################################################################
+## Bedtime
+###################################################################################################
+- id: bedtime
+  alias: "Bedtime"
+  description: "Run bed time routine."
+  triggers:
+    - trigger: time
+      id: bedtime
+      at: sensor.bedtime_warning
+  actions:
+    - action: script.bedtime
+      data:
+        warning: true
+
+###################################################################################################
+## Bedtime Delay Turned On
+###################################################################################################
+- id: bedtime_delay_turned_on
+  alias: "Bedtime Delay Turned On"
+  description: "Bedtime delay turned on."
+  max_exceeded: silent
+  variables:
+    bedtime_delay: "{{ states('input_number.bedtime_delay') | int }}"
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.bedtime_delayed
+      to: "on"
+  actions:
+    - if:
+        - condition: state
+          entity_id: input_select.occupancy_mode
+          state:
+            - Night
+            - Away
+            - Vacation
+      then:
+        - action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.bedtime_delayed
+
+        - action: browser_mod.notification
+          data:
+            duration: 10000
+            message: |
+              Bedtime delay has been turned off.
+              The house is in {{ states('input_select.occupancy_mode') }} mode.
+
+        - stop: "Bedtime not run, occupancy mode is {{ states('input_select.occupancy_mode') }}."
+      else:
+        - action: script.delay_bedtime
+
+###################################################################################################
+## Bedtime Delay Changed
+###################################################################################################
+- id: bedtime_delay_changed
+  alias: "Bedtime Delay Changed"
+  description: "Restart bedtime delay if delay changed."
+  max_exceeded: silent
+  triggers:
+    - trigger: state
+      entity_id: input_number.bedtime_delay
+      to:
+  conditions:
+    - condition: state
+      entity_id: timer.bedtime_delay
+      state: active
+  actions:
+    - action: timer.start
+      target:
+        entity_id: timer.bedtime_delay
+      data:
+        duration:
+          minutes: "{{ states('input_number.bedtime_delay') | int }}"
+
+###################################################################################################
+## Bedtime Delay Turned Off
+###################################################################################################
+- id: bedtime_delay_turned_off
+  alias: "Bedtime Delay Turned Off"
+  description: "Run bedtime script."
+  max_exceeded: silent
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.bedtime_delayed
+      to: "off"
+  actions:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.scene_active
+              state: "on"
+          sequence:
+            - action: automation.turn_off
+              target:
+                entity_id: automation.bedtime_delay_turned_on
+              data:
+                stop_actions: false
+
+            - action: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.bedtime_delayed
+
+            - action: browser_mod.notification
+              data:
+                duration: 10000
+                message: "Bedtime delay cannot be turned off when a scene is active."
+
+            - action: automation.turn_on
+              target:
+                entity_id: automation.bedtime_delay_turned_on
+
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.bedtime_active
+              state: "on"
+
+            - condition: state
+              entity_id: script.bedtime
+              state: "off"
+          sequence:
+            - action: timer.cancel
+              target:
+                entity_id: timer.bedtime_delay
+
+            - action: script.bedtime
+              data:
+                warning: false
+      default:
+        - action: timer.cancel
+          target:
+            entity_id: timer.bedtime_delay
+
+###################################################################################################
+## Turn Bedtime Delay On
+###################################################################################################
+- id: turn_bedtime_delay_on
+  alias: "Turn Bedtime Delay On"
+  description: "Turn on bedtime delay boolean."
+  max_exceeded: silent
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: bedtime_delay_on
+
+    - trigger: state
+      entity_id: binary_sensor.scene_active
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.bedtime_delayed
+
+###################################################################################################
+## Turn Bedtime Delay Off
+###################################################################################################
+- id: turn_bedtime_delay_off
+  alias: "Turn Bedtime Delay Off"
+  description: "Turn off bedtime delay boolean."
+  max_exceeded: silent
+  triggers:
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: bedtime_delay_off
+
+    - trigger: event
+      event_type: timer.finished
+      event_data:
+        entity_id: timer.bedtime_delay
+
+    - trigger: event
+      event_type: timer.cancelled
+      event_data:
+        entity_id: timer.bedtime_delay
+
+    - trigger: state
+      entity_id: binary_sensor.scene_active
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.bedtime_delayed
+
+###################################################################################################
+## Clear Bedtime Notification
+###################################################################################################
+- id: clear_bedtime_notification
+  alias: "Clear Bedtime Notification"
+  description: "Clear notification."
+  max_exceeded: silent
+  triggers:
+    - trigger: state
+      entity_id: input_boolean.bedtime_delayed
+      to: "off"
+
+    - trigger: state
+      entity_id: input_select.occupancy_mode
+      to: Night
+
+    - trigger: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: clear_bedtime
+  actions:
+    - action: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: bedtime_alert

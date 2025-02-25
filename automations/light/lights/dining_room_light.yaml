@@ -1,0 +1,113 @@
+###################################################################################################
+## Reset Dining Room Light Color
+###################################################################################################
+- id: reset_dining_room_light_color
+  alias: "Reset Dining Room Light Color"
+  description: "Reset dining room light color."
+  max_exceeded: silent
+  triggers:
+    - trigger: state
+      id: switch
+      entity_id: input_boolean.media_color_light_sync
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      id: player
+      entity_id: media_player.dining_room_hub
+      to: "off"
+      for: 15 # switching between playlists/tts
+
+    - trigger: state
+      entity_id:
+        - binary_sensor.work_commute_active
+        - alert.work_commute_jason
+        - alert.late_for_work_jason
+      to:
+        - "off"
+        - idle
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      entity_id: binary_sensor.scene_active
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+  conditions:
+    - condition: state
+      entity_id: light.dining_room_light_rgb
+      state: "on"
+
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: "off"
+
+    - condition: state
+      entity_id: timer.dining_room_light
+      state: idle
+
+    - condition: template
+      value_template: "{{ iif(trigger.id == 'player', is_state('input_boolean.media_color_light_sync', 'on'), true) }}"
+
+    - condition: template
+      value_template: >
+        {% set entities = state_attr('binary_sensor.scene_active', 'entity_id') %}
+        {% if entities != none %}
+          {{ 'light.dining_room_light_rgb' not in state_attr('binary_sensor.scene_active', 'entity_id') }}
+        {% else %} {{ true }}
+        {% endif %}
+  actions:
+    - if:
+        - condition: or
+          conditions:
+            - condition: state
+              entity_id: binary_sensor.work_commute_active
+              state: "on"
+
+            - condition: state
+              entity_id: alert.work_commute_jason
+              state: "on"
+
+            - condition: state
+              entity_id: alert.late_for_work_jason
+              state: "on"
+      then:
+        - action: script.work_commute_lights
+      else:
+        - if:
+            - condition: state
+              entity_id: binary_sensor.nighttime_illuminance_lights
+              state: "off"
+
+            - condition: state
+              entity_id: binary_sensor.daytime_illuminance_lights
+              state: "off"
+          then:
+            - action: script.turn_light_on
+              data:
+                lights: light.dining_room_light_rgb
+                activate_timer: false
+                profile: default_min # reset color
+
+            - action: light.turn_off
+              target:
+                entity_id: light.dining_room_light_rgb
+          else:
+            - if: "{{ is_state('switch.adaptive_lighting_rgb_lights', 'off') }}"
+              then:
+                - action: script.turn_light_on
+                  data:
+                    lights: light.dining_room_light_rgb
+                    activate_timer: false
+                    profile: default
+              else:
+                - action: adaptive_lighting.set_manual_control
+                  data:
+                    entity_id: switch.adaptive_lighting_rgb_lights
+                    lights: light.dining_room_light_rgb
+                    manual_control: false

@@ -1,0 +1,108 @@
+###################################################################################################
+## Jason Heading Home
+###################################################################################################
+- id: jason_heading_home
+  alias: "Jason Heading Home"
+  description: "Turn on HVAC override, send notification."
+  max_exceeded: silent
+  triggers:
+    - trigger: template
+      id: near
+      value_template: "{{ 'person.jason' in state_attr('zone.near_home', 'persons') }}"
+      for: 60
+
+    - trigger: state
+      id: almost
+      entity_id: input_boolean.jason_almost_home
+      to: "on"
+
+    - trigger: state
+      id: home
+      entity_id: binary_sensor.jason_home
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+  conditions:
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id == 'near',
+            is_state('sensor.home_jason_direction_of_travel', 'towards'), true) }}
+
+    - condition: template
+      value_template: >
+        {{ iif(trigger.id in ['almost', 'near'],
+            is_state('binary_sensor.jason_home', 'off'), true) }}
+
+    - condition: template
+      value_template: >
+        {{ true if this.attributes.last_triggered == none
+            else now() - this.attributes.last_triggered > timedelta(minutes=15)
+              or trigger.id == 'home' }}
+  actions:
+    - if:
+        - condition: state
+          entity_id:
+            - binary_sensor.someone_home
+            - input_boolean.hvac_manual_mode
+          state: "off"
+      then:
+        - action: input_boolean.turn_on
+          entity_id: input_boolean.hvac_presence_override
+
+    - condition: state
+      entity_id: input_boolean.presence_alerts
+      state: "on"
+
+    - if:
+        - condition: trigger
+          id: home
+      then:
+        - action: notify.jason
+          data:
+            message: clear_notification
+            data:
+              tag: jason_heading_home"
+      else:
+        - action: notify.jason
+          data:
+            message: "Jason is heading home. Get a beer ready for him!"
+            data:
+              tag: jason_heading_home
+              group: Presence
+              visibility: public
+              timeout: 600
+              notification_icon: mdi:home-account
+              icon_url: !secret ARRIVE_HOME_ICON
+              clickAction: /ui-mobile/presence
+
+###################################################################################################
+## Jason Leaving Work
+## leaving work before end of scheduled work day
+###################################################################################################
+- id: jason_leaving_work
+  alias: "Jason Leaving Work"
+  description: "Override occupancy mode to preheat/cool house when someone leaving work before commute time."
+  mode: parallel
+  max: 5
+  triggers:
+    - trigger: zone
+      id: zone
+      entity_id: person.jason
+      zone: zone.work
+      event: leave
+  conditions:
+    - condition: state
+      entity_id:
+        - binary_sensor.someone_home
+        - binary_sensor.home_commute_active
+        - input_boolean.hvac_manual_mode
+      state: "off"
+
+    - condition: template
+      alias: "At work for at least 15 minutes"
+      value_template: "{{ now() - trigger.from_state.last_changed > timedelta(minutes=15) }}"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.hvac_presence_override

@@ -1,0 +1,194 @@
+###################################################################################################
+## Phone Disconnected Presence Override
+###################################################################################################
+- id: phone_disconnected_presence_override
+  alias: "Phone Disconnected Presence Override"
+  description: ""
+  mode: single
+  variables:
+    person: >
+      {% from 'presence.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.jason_phone_connected
+      to: "off"
+      from: "on"
+  conditions: "{{ is_state('person.' ~ person, 'home') }}"
+  actions:
+    - action: input_boolean.turn_on
+      target:
+        entity_id: "input_boolean.home_override_{{ person }}"
+
+    - action: input_boolean.turn_on
+      target:
+        entity_id: "input_boolean.{{ person }}_home"
+
+###################################################################################################
+## Lock Status Presense Override
+###################################################################################################
+- id: lock_status_presense_override
+  alias: "Lock Status Presense Override"
+  description: "Toggle override boolean when required if door unlocked by code."
+  mode: parallel
+  variables:
+    person: >
+      {% from 'presence.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+  triggers:
+    - trigger: state
+      id: unlocked
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+        - sensor.garage_door_lock_status
+      to:
+        - Unlocked (Jason)
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      id: locked
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+      to:
+        - Locked (Jason)
+      not_from:
+        - unknown
+        - unavailable
+  actions:
+    - if: "{{ trigger.id == 'unlocked' }}"
+      then:
+        - wait_template: "{{ is_state('person.jason', 'home') }}"
+          timeout: 15
+
+        - if: >
+            {{ is_state('person.' ~ person , 'home')
+                and is_state('binary_sensor.' ~ person ~ '_phone_connected', 'on') }}
+          then:
+            - action: input_boolean.turn_off
+              target:
+                entity_id: "input_boolean.home_override_{{ person }}"
+          else:
+            - action: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.home_override_{{ person }}"
+
+            - action: input_boolean.turn_on
+              target:
+                entity_id: "input_boolean.{{ person }}_home"
+
+      else:
+        - action: input_boolean.turn_on
+          target:
+            entity_id: "input_boolean.home_override_{{ person }}"
+
+        - action: input_boolean.turn_off
+          target:
+            entity_id: "input_boolean.{{ person }}_home"
+
+###################################################################################################
+## Reset Presence Override
+###################################################################################################
+- id: reset_presence_override
+  alias: "Reset Presence Override"
+  description: "Reset override boolean when tracker state to/from home."
+  mode: parallel
+  variables:
+    person: >
+      {% from 'presence.jinja' import trigger_person %}
+      {{ trigger_person(trigger) }}
+  triggers:
+    - trigger: state
+      id: home
+      entity_id: person.jason
+      to: home
+      for: 300 # in case lock code triggered override
+
+    - trigger: state
+      id: away
+      entity_id: person.jason
+      from: home
+      not_to:
+        - unknown
+        - unavailable
+      for: 30
+
+    - trigger: state
+      id: lock
+      entity_id:
+        - sensor.side_door_lock_status
+        - sensor.front_door_lock_status
+        - sensor.back_door_lock_status
+      to:
+        - Unlocked (Jason)
+      not_from:
+        - unknown
+        - unavailable
+
+    - trigger: event
+      id: action
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_presence_override_jason
+
+    - trigger: state
+      id: sensor
+      entity_id: binary_sensor.jason_phone_connected
+      to: "on"
+      from: "off"
+  conditions:
+    - "{{ is_state('input_boolean.home_override_' ~ person, 'on') }}"
+    - "{{ is_state('binary_sensor.' ~ person ~ '_phone_connected', 'on') }}"
+  actions:
+    - action: input_boolean.turn_off
+      target:
+        entity_id: "input_boolean.home_override_{{ person }}"
+
+###################################################################################################
+## Jason Override Alert
+###################################################################################################
+- id: jason_override_alert
+  alias: "Jason Override Alert"
+  description: "Play notification when presence override boolean turns on."
+  max_exceeded: silent
+  triggers:
+    - trigger: state
+      entity_id:
+        - input_boolean.home_override_jason
+        - binary_sensor.jason_home
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      for:
+        minutes: 15 # allow override to turn off before notifications
+
+    - trigger: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      for:
+        minutes: 15 # allow override to turn off before notifications
+  conditions:
+    - condition: state
+      entity_id: input_boolean.home_override_jason
+      state: "on"
+
+    - condition: template
+      alias: "Occupancy override is off if occupancy trigger"
+      value_template: >
+        {{ iif(trigger.id == 'occupancy',
+            is_state('input_boolean.occupancy_override', 'off'), true) }}
+  actions:
+    - action: script.tts_play
+      data:
+        message: "Attention! Jason's presence override is on."
+        ignore_away: true
+        quiet_play: true

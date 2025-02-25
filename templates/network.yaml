@@ -44,22 +44,16 @@
         {{ is_state('binary_sensor.speedtest_integration_connected', 'off')
             and is_state('input_boolean.network_alerts', 'on') }}
 
-    - name: "WIFI AP Upstairs Offline Alert"
-      unique_id: wifi_ap_upstairs_offline_alert
+    - name: "WIFI AP Offline Alert"
+      unique_id: wifi_ap_offline_alert
       icon: mdi:wifi
       device_class: problem
-      delay_on: 60
+      delay_on:
+        minutes: 30
       state: >
         {{ not is_state('device_tracker.wifi_ap_upstairs', 'home')
-            and is_state('input_boolean.network_alerts', 'on') }}
-
-    - name: "WIFI AP Garage Offline Alert"
-      unique_id: wifi_ap_garage_offline_alert
-      icon: mdi:wifi
-      device_class: problem
-      delay_on: 60
-      state: >
-        {{ not is_state('device_tracker.wifi_ap_garage', 'home')
+            or not is_state('device_tracker.wifi_ap_garage', 'home')
+            or not is_state('device_tracker.google_wifi', 'home')
             and is_state('input_boolean.network_alerts', 'on') }}
 
     - name: "WAN"
@@ -90,6 +84,21 @@
             and is_state('input_boolean.startup_pending', 'off') }}
 
 - sensor:
+    - name: "Router WIFI"
+      unique_id: router_wifi
+      icon: "{{ 'mdi:wifi' if is_state(this.entity_id, 'on') else 'mdi:wifi' }}"
+      device_class: enum
+      state: >
+        {% set ghz2 = is_state('switch.rt_ax58u_wireless_2_4_ghz', 'on') %}
+        {% set ghz5 = is_state('switch.rt_ax58u_wireless_5_ghz', 'on') %}
+        {% if ghz2 and ghz5 %} On
+        {% elif ghz2 %} 2 GHz
+        {% elif ghz5 %} 5 GHz
+        {% else %} Off
+        {% endif %}
+      attributes:
+        options: "{{ ['Off', 'On', '2 GHz', '5 GHz'] }}"
+
     - name: "Wireless Devices"
       unique_id: wireless_devices
       icon: mdi:access-point-network
@@ -116,16 +125,38 @@
       icon: mdi:network
       device_class: enum
       state: >
-        {% if is_state('binary_sensor.wan', 'off') %} critical
-        {% elif states('sensor.speedtest_download') | int(-1) < 50
-            or states ('sensor.speedtest_upload') | int(-1) < 50
-            or states('sensor.speedtest_ping') | int(-1) > 60  %} severe
-        {% elif states('sensor.speedtest_download') | int(-1) < 100
-            or states ('sensor.speedtest_upload') | int(-1) < 100
-            or states('sensor.speedtest_ping') | int(-1) > 40 %} warning
-        {% elif states('sensor.speedtest_download') | int(-1) < 150
-            or states ('sensor.speedtest_upload') | int(-1) < 150
-            or states('sensor.speedtest_ping') | int(-1) > 20 %} minor
+        {% set cpu = states('sensor.rt_ax58u_cpu') | int(-1) %}
+        {% set ram = states('sensor.rt_ax58u_ram') | int(-1) %}
+        {% set temp = states('sensor.rt_ax58u_temperature_cpu') | int(-1) %}
+        {% set up = states('sensor.speedtest_upload') | int(-1) %}
+        {% set down = states('sensor.speedtest_download') | int(-1) %}
+        {% set ping = states('sensor.speedtest_ping') | int(-1) %}
+        {% if is_state('binary_sensor.wan', 'off')
+            or is_state('binary_sensor.wifi_ap_offline_alert', 'on')
+            or cpu > 64
+            or ram > 90
+            or temp > 80
+            or down < 50
+            or up < 50
+            or ping > 80 %} critical
+        {% elif cpu > 64
+            or ram > 85
+            or temp > 75
+            or down < 100
+            or up < 100
+            or ping > 60 %} severe
+        {% elif cpu > 54
+            or ram > 80
+            or temp > 70
+            or down < 150
+            or up < 150
+            or ping > 40 %} warning
+        {% elif cpu > 44
+            or ram > 75
+            or temp > 60
+            or down < 200
+            or up < 200
+            or ping > 20 %} minor
         {% else %} ok
         {% endif %}
       attributes:
