@@ -39,11 +39,6 @@
     - trigger: event
       event_type: event_template_reloaded
 
-    # allow weather entities to populate
-    - trigger: state
-      entity_id: input_boolean.startup_pending
-      to: "off"
-
     - trigger: time_pattern
       minutes: /15
 
@@ -56,6 +51,13 @@
         - unknown
         - unavailable
   action:
+    - wait_template: >
+        {{ is_state('binary_sensor.weatherflow_integration_connected', 'on')
+            and is_state('binary_sensor.pirateweather_integration_connected', 'on')
+            and is_state('binary_sensor.envcan_integration_connected', 'on') }}
+      timeout: 120
+      continue_on_timeout: true
+
     - action: weather.get_forecasts
       data:
         type: daily
@@ -70,18 +72,6 @@
         entity_id: *forecasts
       response_variable: hourly
   sensor:
-    - name: Weather Forecasts
-      unique_id: weather_forecasts #TEMP while testing
-      device_class: timestamp
-      state: "{{ utcnow() }}"
-      attributes:
-        envcan_hourly: "{% if hourly is defined and hourly['weather.windsor_forecast'] is defined %}{{ hourly['weather.windsor_forecast']['forecast'] }}{% endif %}"
-        envcan_daily: "{% if daily is defined and daily['weather.windsor_forecast'] is defined %}{{ daily['weather.windsor_forecast']['forecast'] }}{% endif %}"
-        pirate_hourly: "{% if hourly is defined and hourly['weather.pirateweather'] is defined %}{{ hourly['weather.pirateweather']['forecast'] }}{% endif %}"
-        pirate_daily: "{% if daily is defined and daily['weather.pirateweather'] is defined %}{{ daily['weather.pirateweather']['forecast'] }}{% endif %}"
-        weatherflow_hourly: "{% if hourly is defined and hourly['weather.forecast_home'] is defined %}{{ hourly['weather.forecast_home']['forecast'] }}{% endif %}"
-        weatherflow_daily: "{% if daily is defined and daily['weather.forecast_home'] is defined %}{{ daily['weather.forecast_home']['forecast'] }}{% endif %}"
-
     - name: "Daily Weather"
       unique_id: daily_weather
       state: "{{ states('sensor.current_condition') }}"
@@ -104,20 +94,16 @@
         updated: "{{ utcnow() }}"
         # use pirateweather, weatherflow first, no precipitation in envcan
         forecast: >
-          {% if daily is defined %}
-            {% if daily['weather.pirateweather'] is defined
-                and daily['weather.pirateweather']['forecast'] is defined %}
-              {{ daily['weather.pirateweather']['forecast'] }}
-            {% elif daily['weather.forecast_home'] is defined
-                and daily['weather.forecast_home']['forecast'] is defined %}
-              {{ daily['weather.forecast_home']['forecast'] }}
-            {% elif daily['weather.windsor_forecast'] is defined
-                and daily['weather.windsor_forecast']['forecast'] is defined %}
-              {{ daily['weather.windsor_forecast']['forecast'] }}
-            {% endif %}
-          {% endif %}
+          {% set tempest = state_attr('sensor.tempest_hub_weather', 'daily_forecast') %}
+          {% set pirate = daily['weather.pirateweather']['forecast']
+              if daily is defined and daily['weather.pirateweather'] is defined else none %}
+          {% set weatherflow = daily['weather.forecast_home']['forecast']
+              if daily is defined and daily['weather.forecast_home'] is defined else none %}
+          {% set envcan = daily['weather.windsor_forecast']['forecast']
+              if daily is defined and daily['weather.windsor_forecast'] is defined else none %}
+          {{ pirate if pirate != none else tempest if tempest != none
+              else weatherflow if weatherflow != none else envcan if envcan != none else none }}
 
-    # use pirateweather, first, no cloud, humidity, precipitation in others
     - name: "Hourly Weather"
       unique_id: hourly_weather
       state: "{{ states('sensor.current_condition') }}"
@@ -137,21 +123,18 @@
         visibility_unit: "{{ state_attr('sensor.visibility', 'unit_of_measurement') }}"
         precipitation: "{{ states('sensor.precipitation_accumulation_today') }}"
         precipitation_unit: "{{ state_attr('sensor.precipitation_accumulation_today', 'unit_of_measurement') }}"
+        # use pirateweather, first, no cloud, humidity, precipitation in others
         forecast: >
-          {% if hourly is defined %}
-            {% if hourly['weather.pirateweather'] is defined
-                and hourly['weather.pirateweather']['forecast'] is defined %}
-              {{ hourly['weather.pirateweather']['forecast'] }}
-            {% elif hourly['weather.forecast_home'] is defined
-                and hourly['weather.forecast_home']['forecast'] is defined %}
-              {{ hourly['weather.forecast_home']['forecast'] }}
-            {% elif hourly['weather.windsor_forecast'] is defined
-                and hourly['weather.windsor_forecast']['forecast'] is defined %}
-              {{ hourly['weather.windsor_forecast']['forecast'] }}
-            {% endif %}
-          {% endif %}
+          {% set tempest = state_attr('sensor.tempest_hub_weather', 'hourly_forecast') %}
+          {% set pirate = hourly['weather.pirateweather']['forecast']
+              if hourly is defined and hourly['weather.pirateweather'] is defined else none %}
+          {% set weatherflow = hourly['weather.forecast_home']['forecast']
+              if hourly is defined and hourly['weather.forecast_home'] is defined else none %}
+          {% set envcan = hourly['weather.windsor_forecast']['forecast']
+              if hourly is defined and hourly['weather.windsor_forecast'] is defined else none %}
+          {{ pirate if pirate != none else tempest if tempest != none
+              else weatherflow if weatherflow != none else envcan if envcan != none else none }}
 
-    #TEMP while testing
     - name: "Daily Envcan"
       unique_id: daily_envcan
       state: >
@@ -175,7 +158,6 @@
         dew_point: "{{ states('sensor.windsor_dew_point') }}"
         temperature_unit: "{{ state_attr('sensor.windsor_temperature', 'unit_of_measurement') }}"
         humidity: "{{ states('sensor.windsor_humidity') }}"
-        # cloud_coverage:
         pressure: "{{ states('sensor.windsor_barometric_pressure') }}"
         pressure_unit: "{{ state_attr('sensor.windsor_barometric_pressure', 'unit_of_measurement') }}"
         wind_bearing: "{{ states('sensor.windsor_wind_bearing') }}"
@@ -184,8 +166,6 @@
         wind_speed_unit: "{{ state_attr('sensor.windsor_wind_speed', 'unit_of_measurement') }}"
         visibility: "{{ states('sensor.windsor_visibility') }}"
         visibility_unit: "{{ state_attr('sensor.windsor_visibility', 'unit_of_measurement') }}"
-        # precipitation:
-        # precipitation_unit:
         updated: "{{ states('sensor.windsor_observation_time') | as_datetime }}"
         forecast: >
           {% if daily is defined
@@ -202,7 +182,6 @@
         dew_point: "{{ states('sensor.windsor_dew_point') }}"
         temperature_unit: "{{ state_attr('sensor.windsor_temperature', 'unit_of_measurement') }}"
         humidity: "{{ states('sensor.windsor_humidity') }}"
-        # cloud_coverage:
         pressure: "{{ states('sensor.windsor_barometric_pressure') }}"
         pressure_unit: "{{ state_attr('sensor.windsor_barometric_pressure', 'unit_of_measurement') }}"
         wind_bearing: "{{ states('sensor.windsor_wind_bearing') }}"
@@ -211,8 +190,6 @@
         wind_speed_unit: "{{ state_attr('sensor.windsor_wind_speed', 'unit_of_measurement') }}"
         visibility: "{{ states('sensor.windsor_visibility') }}"
         visibility_unit: "{{ state_attr('sensor.windsor_visibility', 'unit_of_measurement') }}"
-        # precipitation:
-        # precipitation_unit:
         updated: "{{ states('sensor.windsor_observation_time') | as_datetime }}"
         forecast: >
           {% if hourly is defined
@@ -229,7 +206,6 @@
         dew_point: "{{ states('sensor.home_sensors_dew_point') }}"
         temperature_unit: "{{ state_attr('sensor.home_sensors_temperature', 'unit_of_measurement') }}"
         humidity: "{{ states('sensor.home_sensors_humidity') }}"
-        # cloud_coverage:
         pressure: "{{ states('sensor.home_sensors_sea_level_pressure') }}"
         pressure_unit: "{{ state_attr('sensor.home_sensors_sea_level_pressure', 'unit_of_measurement') }}"
         wind_bearing: "{{ states('sensor.home_sensors_wind_direction') }}"
@@ -256,7 +232,6 @@
         dew_point: "{{ states('sensor.home_sensors_dew_point') }}"
         temperature_unit: "{{ state_attr('sensor.home_sensors_temperature', 'unit_of_measurement') }}"
         humidity: "{{ states('sensor.home_sensors_humidity') }}"
-        # cloud_coverage:
         pressure: "{{ states('sensor.home_sensors_sea_level_pressure') }}"
         pressure_unit: "{{ state_attr('sensor.home_sensors_sea_level_pressure', 'unit_of_measurement') }}"
         wind_bearing: "{{ states('sensor.home_sensors_wind_direction') }}"
@@ -373,7 +348,7 @@
       state_class: measurement
       unit_of_measurement: °C
       state: >
-        {% set tempest = states('sensor.tempest_st_00168451_feels_like_temperature') %}
+        {% set tempest = states('sensor.tempest_feels_like_temperature') %}
         {% set pirate = states('sensor.pirateweather_apparent_temperature') %}
         {% if is_number(tempest) %} {% set temp = tempest %}
         {% elif pirate | float(-99) > -99 %} {% set temp = pirate %}
@@ -381,13 +356,13 @@
         {{ '%0.1f' | format(temp | float) }}
       attributes:
         provider: >
-          {% set tempest = states('sensor.tempest_st_00168451_feels_like_temperature') %}
+          {% set tempest = states('sensor.tempest_feels_like_temperature') %}
           {% set pirate = states('sensor.pirateweather_apparent_temperature') %}
           {% if is_number(tempest) %} Tempest
           {% elif pirate | float(-99) -99 %} Pirate Weather
           {% endif %}
       availability: >
-        {% set tempest = states('sensor.tempest_st_00168451_feels_like_temperature') %}
+        {% set tempest = states('sensor.tempest_feels_like_temperature') %}
         {% set pirate = states('sensor.pirateweather_apparent_temperature') %}
         {{ is_number(tempest) or pirate | float(-99) -99 }}
 
@@ -920,7 +895,7 @@
       state_class: measurement
       unit_of_measurement: °C
       state: >
-        {% set tempest = states('sensor.tempest_st_00168451_temperature') %}
+        {% set tempest = states('sensor.tempest_temperature') %}
         {% set pirate = states('sensor.pirateweather_temperature') %}
         {% if is_number(tempest) %} {% set temp = tempest %}
         {% elif pirate | float(-99) >= -60 %} {% set temp = pirate %}
@@ -928,13 +903,13 @@
         {{ '%0.1f' | format(temp | float) }}
       attributes:
         provider: >
-          {% set tempest = states('sensor.tempest_st_00168451_temperature') %}
+          {% set tempest = states('sensor.tempest_temperature') %}
           {% set pirate = states('sensor.pirateweather_temperature') %}
           {% if is_number(tempest) %} Tempest
           {% elif pirate | float(-99) >= -60 %} Pirate Weather
           {% endif %}
       availability: >
-        {% set tempest = states('sensor.tempest_st_00168451_temperature') %}
+        {% set tempest = states('sensor.tempest_temperature') %}
         {% set pirate = states('sensor.pirateweather_temperature') %}
         {{ is_number(tempest) or pirate | float(-99) >= -60 }}
 
@@ -1139,7 +1114,7 @@
       state_class: measurement
       unit_of_measurement: "%"
       state: >
-        {% set tempest = states('sensor.tempest_st_00168451_humidity') %}
+        {% set tempest = states('sensor.tempest_humidity') %}
         {% set pirate = states('sensor.pirateweather_humidity') %}
         {% if tempest | int(-1) >= 0 %} {% set humidity = tempest %}
         {% elif pirate | int(-1) >= 0 %} {% set humidity = pirate %}
@@ -1147,13 +1122,13 @@
         {{ humidity | int(-1) }}
       attributes:
         provider: >
-          {% set tempest = states('sensor.tempest_st_00168451_humidity') %}
+          {% set tempest = states('sensor.tempest_humidity') %}
           {% set pirate = states('sensor.pirateweather_humidity') %}
           {% if tempest | int(-1) >= 0 %} Tempest
           {% elif pirate | int(-1) >= 0 %} Pirate Weather
           {% endif %}
       availability: >
-        {% set tempest = states('sensor.tempest_st_00168451_humidity') %}
+        {% set tempest = states('sensor.tempest_humidity') %}
         {% set pirate = states('sensor.pirateweather_humidity') %}
         {{ tempest | int(-1) >= 0 or pirate | int(-1) >= 0 }}
 
@@ -1212,7 +1187,7 @@
       state_class: measurement
       unit_of_measurement: °C
       state: >
-        {% set tempest = states('sensor.tempest_st_00168451_dew_point') %}
+        {% set tempest = states('sensor.tempest_dew_point') %}
         {% set pirate = states('sensor.pirateweather_dew_point') %}
         {% if is_number(tempest) %} {% set dew = tempest %}
         {% elif pirate | float(-99) >= -60 %} {% set dew = pirate %}
@@ -1220,13 +1195,13 @@
         {{ '%0.1f' | format(dew | float) }}
       attributes:
         provider: >
-          {% set tempest = states('sensor.tempest_st_00168451_dew_point') %}
+          {% set tempest = states('sensor.tempest_dew_point') %}
           {% set pirate = states('sensor.pirateweather_dew_point') %}
           {% if is_number(tempest) %} Tempest
           {% elif pirate | float(-99) >= -60 %} Pirate Weather
           {% endif %}
       availability: >
-        {% set tempest = states('sensor.tempest_st_00168451_dew_point') %}
+        {% set tempest = states('sensor.tempest_dew_point') %}
         {% set pirate = states('sensor.pirateweather_dew_point') %}
         {{ is_number(tempest) or pirate | float(-99) >= -60 }}
 
@@ -1359,10 +1334,10 @@
       icon: mdi:weather-fog
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ states('sensor.tempest_st_00168451_fog_probability') }}"
+      state: "{{ states('sensor.tempest_fog_probability') }}"
       attributes:
         provider: "Tempest"
-      availability: "{{ states('sensor.tempest_st_00168451_fog_probability') | int(-1) >= 0 }}" # filter erroneous values
+      availability: "{{ states('sensor.tempest_fog_probability') | int(-1) >= 0 }}" # filter erroneous values
 
     - name: "Precipitation Intensity"
       unique_id: precipitation_intensity
@@ -1545,7 +1520,7 @@
       state: >
         {% set condition = states('sensor.current_condition') %}
         {% if condition | contains('snow') %} snow
-        {% elif states('sensor.tempest_st_00168451_rain_intensity') | float(-1) > 0
+        {% elif states('sensor.tempest_rain_intensity') | float(-1) > 0
               or states('sensor.precipitation_intensity') | float(-1) > 0 %}
           {% if condition | contains('rain')
             or condition | contains('pouring')
@@ -1801,10 +1776,10 @@
       device_class: wind_speed
       state_class: measurement
       unit_of_measurement: km/h
-      state: "{{ states('sensor.tempest_st_00168451_wind_lull') | int }}"
+      state: "{{ states('sensor.tempest_wind_lull') | int }}"
       attributes:
         provider: "Tempest"
-      availability: "{{ states('sensor.tempest_st_00168451_wind_lull') | int(-1) >= 0 }}" # filter erroneous values
+      availability: "{{ states('sensor.tempest_wind_lull') | int(-1) >= 0 }}" # filter erroneous values
 
     - name: "Wind Bearing"
       unique_id: wind_bearing
