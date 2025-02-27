@@ -24,22 +24,48 @@ media_players_mute:
         {% endif %}
       {% endfor %}
       {{ active.entity_id }}
+    dnd_switches: >
+      {{ states.switch | selectattr('entity_id', 'in', integration_entities('google_home'))
+          | selectattr('entity_id', 'contains', '_do_not_disturb')
+          | map(attribute='entity_id') | list }}
   sequence:
-    - if: "{{ media_players == none or media_players | count == 0 }}"
+    - if: "{{ media_players | count > 0 }}"
       then:
-        - action: system_log.write
+        - action: media_player.volume_mute
+          target:
+            entity_id: "{{ media_players }}"
           data:
-            logger: "{{ this.entity_id }}"
-            level: info
-            message: "Stop: No valid entities."
+            is_volume_muted: "{{ mute }}"
 
-        - stop: "No valid entities."
+    - if: "{{ mute and media_players | count > 0 }}"
+      then:
+        - action: timer.start
+          target:
+            entity_id: timer.timed_mute_duration
+          data:
+            duration:
+              minutes: >
+                {% set min = states('input_number.timed_mute_duration') | int %}
+                {{ min if min > 0 else 480 }}
+      else:
+        - action: timer.cancel
+          target:
+            entity_id: timer.timed_mute_duration
 
-    - condition: template
-      value_template: "{{ media_players | count > 0 }}"
+        # reset timer duration value - must be reset for mute on
+        - action: input_number.set_value
+          target:
+            entity_id: input_number.timed_mute_duration
+          data:
+            value: 0 # this is default mute duration time - 0 == inf
 
-    - action: media_player.volume_mute
-      target:
-        entity_id: "{{ media_players }}"
+    - if: "{{ dnd_switches | count > 0 }}"
+      then:
+        - action: "{{ 'switch.turn_' ~ iif(mute, 'on', 'off') }}"
+          target:
+            entity_id: "{{ dnd_switches }}"
+
+    - action: browser_mod.notification
       data:
-        is_volume_muted: "{{ mute }}"
+        duration: 10000
+        message: "Sytem mute has been turned {{ iif(mute, 'on', 'off') }}."

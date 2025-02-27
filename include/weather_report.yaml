@@ -5,23 +5,40 @@
   {%- from 'speech_helpers.jinja' import iarticle %}
   {%- from 'speech_helpers.jinja' import plural %}
   {%- from 'speech_helpers.jinja' import full_cardinal_direction -%}
-  {%- set temp = states('sensor.outdoor_temperature') | int('unknown') %}
-  {%- set app_temp = states('sensor.outdoor_apparent_temperature') | int('unknown') %}
-  {%- set high_temp = states('sensor.outdoor_high_temperature') | int('unknown') %}
-  {%- set app_high_temp = states('sensor.pirateweather_daytime_high_apparent_temperature_0d') | int('unknown') %}
-  {%- set low_temp = states('sensor.outdoor_low_temperature') | int('unknown') %}
-  {%- set app_low_temp = states('sensor.pirateweather_overnight_low_apparent_temperature_0d') | int('unknown') %}
-  {%- set normal_high_diff = states('sensor.outdoor_high_temperature_differential') | int('unknown') %}
-  {%- set normal_low_diff = states('sensor.outdoor_low_temperature_differential') | int('unknown') %}
+  {% from 'weather.jinja' import dew_point_comfort %}
+  {%- set temp = states('sensor.outdoor_temperature') | int(none) %}
+  {%- set app_temp = states('sensor.outdoor_apparent_temperature') | int(none) %}
+  {%- set high_temp = states('sensor.outdoor_high_temperature') | int(none) %}
+  {%- set app_high_temp = states('sensor.pirateweather_daytime_high_apparent_temperature_0d') | int(none) %}
+  {%- set low_temp = states('sensor.outdoor_low_temperature') | int(none) %}
+  {%- set app_low_temp = states('sensor.pirateweather_overnight_low_apparent_temperature_0d') | int(none) %}
+  {%- set normal_high_diff = states('sensor.outdoor_high_temperature_differential') | int(none) %}
+  {%- set normal_low_diff = states('sensor.outdoor_low_temperature_differential') | int(none) %}
   {%- set show_normal_high = is_number(normal_high_diff) and normal_high_diff | abs > 2 %}
   {%- set show_normal_low = is_number(normal_low_diff) and normal_low_diff | abs > 2 %}
-  {%- set humidity_today = states('sensor.outdoor_humidity_today') | int('unknown') %}
+  {%- set dew_today = states('sensor.dew_point_today') | int(none) %}
+  {%- set comfort = dew_point_comfort(dew_today) %}
+  {% if high_temp > 50 %}
+    {%- set humidity_today = none %}
+    {%- if comfort in ['Severely High', 'Oppressive'] %}
+      {%- set humidity_today = 'extremely humid' %}
+    {%- elif comfort == 'Very Humid' %}
+      {%- set humidity_today = 'very humid' %}
+    {%- elif comfort == 'Uncomfortable' %}
+      {%- set humidity_today = 'a little humid' %}
+    {%- elif (high_temp - dew_today) <= 2 -%}
+      {%- set humidity_today = 'rather damp' %}
+    {%- elif (high_temp - dew_today) < 5 -%}
+      {%- set humidity_today = 'rather damp' %}
+    {%- endif %}
+  {%- endif %}
+  {%- set damp_today = (high_temp - dew_today) <= 2 if high_temp < 50 else false -%}
   {%- set fog = states('sensor.fog_probability') | int(-1) %}
   {%- set precip_now = is_state('binary_sensor.precipitation_active', 'on') %}
   {%- set precipitation_today = (is_state('binary_sensor.precipitation_likely_next_24_hours', 'on')
         or is_state('binary_sensor.precipitation_likely_soon', 'on')) %}
   {%- set precip_start = state_attr('sensor.precipitation_start', '12hour') %}
-  {%- set pop = states('sensor.precipitation_probability_today') | int('unknown') %}
+  {%- set pop = states('sensor.precipitation_probability_today') | int(none) %}
   {%- set precip_type = states('sensor.precipitation_type')
         if states('sensor.precipitation_type') != 'none'
           else states('sensor.precipitation_type_expected') %}
@@ -32,8 +49,8 @@
   {%- set snow_unit = state_attr('sensor.pirateweather_snow_accumulation_0d', 'unit_of_measurement') %}
   {%- set ice_exp = states('sensor.pirateweather_ice_accumulation_0d') | float(-1) %}
   {%- set ice_unit = state_attr('sensor.pirateweather_ice_accumulation_0d', 'unit_of_measurement') %}
-  {%- set wind_max = states('sensor.wind_gust_today') | int('unknown') %}
-  {%- set wind_gust = states('sensor.wind_gust') | int('unknown') %}
+  {%- set wind_max = states('sensor.wind_gust_today') | int(none) %}
+  {%- set wind_gust = states('sensor.wind_gust') | int(none) %}
   {%- set wind_dir = full_cardinal_direction(states('sensor.wind_bearing')) %}
   {%- set wind_unit = state_attr('sensor.wind_gust', 'unit_of_measurement') %}
   {%- set current = states('sensor.current_condition') | replace('-night', '') | replace('partlycloudy', 'partly cloudy') %}
@@ -50,29 +67,30 @@
     {%- set until = state_attr('binary_sensor.envcan_weather_alert', 'expires_text') %}
   Environment Canada has issued a {{ state_attr('binary_sensor.envcan_weather_alert', 'title') }} for the immediate area
     {{- ' until ' ~ until if until != none -}}.{% endif %}
-  {%- if high_temp >= states('input_number.outdoor_high_temperature_threshold') | int %}
-  It will be bloody hot {{ iif(humidity_today > 60, 'and humid') }} today with temperatures reaching {{ high_temp }}
+  {%- if app_high_temp >= 85 %}
+  It will be bloody hot {{ 'and ' ~ humidity_today if humidity_today != none }} today with temperatures reaching {{ high_temp }}
     {%- if app_high_temp - high_temp > 2 %}, and a humidex of {{ app_high_temp }}{% endif %} nut sack soakin' degrees
-  {%- if show_normal_high %}, which is {{ plural('degree', normal_high_diff | abs, true) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal{% endif %}.
+    {%- if show_normal_high %}, which is {{ plural('degree', normal_high_diff | abs, true) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal{% endif %}.
   The overnight low will be {{ low_temp }}
-  {%- if show_normal_low %}, which is {{ plural('degree', normal_low_diff | abs, true) }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
-  {%- elif low_temp <= states('input_number.outdoor_low_temperature_threshold') | int %}
-  It's going to be friggin cold{% if humidity_today > 60 %} and damp{% endif %} today.
+    {%- if show_normal_low %}, which is {{ plural('degree', normal_low_diff | abs, true) }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
+  {%- elif app_high_temp <= -5 %}
+  It's going to be friggin cold{% if damp_today %} and damp{% endif %} today, so bundle up!
   The expected high is only {{ plural('degree', high_temp, true) }}
-  {%- if temp - app_temp > 2 %} with a windchill of {{ app_high_temp }} {% endif %}
-  {%- if show_normal_high -%}, which is {{ plural('degree', normal_high_diff | abs, true) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal.
+    {%- if temp - app_temp > 2 %} with a windchill of {{ app_high_temp }} {% endif %}
+    {%- if show_normal_high -%}, which is {{ plural('degree', normal_high_diff | abs, true) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal.
   {%- endif %}.
   The overnight low will be {{ low_temp }}
   {%- if show_normal_low %}, which is {{ plural('degree', normal_low_diff | abs, true) }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
   {%- else %}
   Today's high temperature will be {{ plural('degree', high_temp, true) }}
-  {%- if show_normal_high %}, which is {{ plural('degree', normal_high_diff | abs, true) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal{% endif %}.
+    {%- if show_normal_high %}, which is {{ plural('degree', normal_high_diff | abs, true) }} {{ 'lower' if normal_high_diff < 0 else 'higher' }} than normal{% endif %}.
+    {%- if humidity_today != none %} It will also be {{ humidity_today }}.{% endif %}
+    {%- if damp_today %} It will also be a little damp so dress for it.{% endif %}
   The overnight low will be {{ plural('degree', low_temp, true) }}
-  {%- if show_normal_low %}, which is {{ plural('degree', normal_low_diff | abs, true) }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
+    {%- if show_normal_low %}, which is {{ plural('degree', normal_low_diff | abs, true) }} {{ 'lower' if normal_low_diff < 0 else 'higher' }} than normal{% endif %}.
   {%- endif %}
-  {% if precip_now or precipitation_today %}
-    {%- if precip_now %} It is currently {{ precip_type }}ing.
-    {%- else %}
+  {%- if precip_now or precipitation_today %}
+    {%- if not precip_now %}
       {%- if pop > 0 %}
   There is {{ iarticle(pop) }} percent chance of {{ precip_type }} today{{ iif(precip_start == none, '', ', ') }}
       {%- elif precip_start != none %}
