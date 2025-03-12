@@ -5,18 +5,31 @@
   {%- from 'schedule.jinja' import list_events %}
   {%- from 'speech_helpers.jinja' import iarticle %}
   {%- from 'speech_helpers.jinja' import plural %}
+  {%- from 'speech_helpers.jinja' import array_to_clist %}
   {%- set wake_time = states('sensor.next_waketime') | as_datetime %}
+  {%- set wake_display = state_attr('sensor.next_waketime', '12hour') %}
   {%- set alarm_time = states('sensor.alarm_clock_next_alarm') | as_datetime
     if has_value('sensor.alarm_clock_next_alarm') else none %}
-  {%- set day_reset = today_at(states('input_datetime.day_reset')) %}
-  {%- set wake_display = state_attr('sensor.next_waketime', '12hour') %}
   {%- set source = state_attr('sensor.alarm_clock_next_alarm', 'source') %}
+  {%- set day_reset = today_at(states('input_datetime.day_reset')) %}
+  {%- set waste_types = ['garbage', 'organic_waste', 'recycle', 'yard_waste'] %}
+  {%- set waste = namespace(types=[]) %}
+  {%- for type in waste_types %}
+    {%- if (now() >= day_reset and is_state_attr('sensor.next_' ~ type ~ '_day', 'display', 'Tomorrow')
+            or now() < day_reset and is_state_attr('sensor.next_' ~ type ~ '_day', 'display', 'Today'))
+          and is_state('input_boolean' ~ type ~ '_alert', 'on') %}
+      {%- set waste.types = waste.types + [type] %}
+    {%- endif %}
+  {%- endfor %}
+  {%- if waste.types != [] %}
+    {%- set waste_list = array_to_clist(waste.types) | replace('_', ' ') %}
+  {%- endif %}
   {%- if is_state('input_boolean.bedtime_delayed', 'on') %}
   It's almost bedtime but you've elected to stay up late.
   Turn the bedtime delay off if you're going to bed now.
   {%- else %}
     {%- if warn_time > 0 %}
-  Hey there! Bedtime is in {{ plural('minute', warn_time, true) }}!
+  Hey there! Bedtime is in {{ plural('minute', warn_time) }}!
   Turn on the bedtime delay if you'd like to stay up a bit longer.
     {%- endif -%}
   {%- endif %}
@@ -68,25 +81,10 @@
     states('sensor.condition_tomorrow')) | replace('partlycloudy', 'partly cloudy') %}
   {%- set pop = iif(now() < day_reset, states('sensor.precipitation_probability_today'),
     states('sensor.precipitation_probability_tomorrow')) | int('unknown') %}
-  Tommorow will be {{ condition }} with a high of {{ plural('degree', high, true) }}
+  Tommorow will be {{ condition }} with a high of {{ plural('degree', high) }}
   {%- if not condition is search('rain|pouring|hail|snow') %}
   {{- ' and ' ~ iif(pop == 0, 'no', iarticle(pop) ~ ' percent') }} chance of precipitation
   {%- endif %}.
-  {%- if now() >= day_reset and is_state_attr('sensor.next_garbage_day', 'display', 'Tomorrow')
-      or now() < day_reset and is_state_attr('sensor.next_garbage_day', 'display', 'Today')
-    and is_state('input_boolean.garbage_alert', 'on') %}
-  {%- set waste = 'garbage' %}
-  {%- endif %}
-  {%- if now() >= day_reset and is_state_attr('sensor.next_recycle_day', 'display', 'Tomorrow')
-      or now() < day_reset and is_state_attr('sensor.next_recycle_day', 'display', 'Today')
-    and is_state('input_boolean.recycle_alert', 'on') %}
-  {%- set waste = 'recycle' %}
-  {%- endif %}
-  {%- if now() >= day_reset and is_state_attr('sensor.next_yardwaste_day', 'display', 'Tomorrow')
-      or now() < day_reset and is_state_attr('sensor.next_yardwaste_day', 'display', 'Today')
-    and is_state('input_boolean.yardwaste_alert', 'on') %}
-  {%- set waste = 'yard waste' %}
-  {%- endif %}
-  {%- if waste is defined %}
-  Oh, and one last thing.  Did you remember to take out the {{ waste }} today?
+  {%- if waste_list is defined %}
+  Oh, and one last thing.  Did you remember to take out the {{ waste_list }} today?
   {%- endif %}

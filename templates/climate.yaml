@@ -18,6 +18,86 @@
         - action: script.set_thermostat
 
 - trigger:
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: climate.thermostat
+      attribute: temperature
+      to: ~
+
+    - trigger: state
+      entity_id: climate.thermostat
+      attribute: target_temp_low
+      to: ~
+
+    - trigger: state
+      entity_id: climate.thermostat
+      attribute: target_temp_high
+      to: ~
+  condition:
+    - condition: or
+      conditions:
+        - condition: numeric_state
+          entity_id: climate.thermostat
+          attribute: temperature
+          above: 0
+
+        - condition: and
+          conditions:
+            - condition: numeric_state
+              entity_id: climate.thermostat
+              attribute: target_temp_high
+              above: 0
+
+            - condition: numeric_state
+              entity_id: climate.thermostat
+              attribute: target_temp_low
+              above: 0
+
+    - condition: state
+      entity_id: script.set_thermostat
+      state: "off"
+  action:
+    - variables:
+        temp: >
+          {% set hvac = states('climate.thermostat') %}
+          {% set temp = state_attr('climate.thermostat', 'temperature') %}
+          {% set high = state_attr('climate.thermostat', 'target_temp_high') %}
+          {% set low = state_attr('climate.thermostat', 'target_temp_low') %}
+          {% set stored = states('input_number.thermostat_target_temperature') %}
+          {% set outdoor = states('sensor.outdoor_temperature') %}
+          {% if hvac in ['heat', 'cool'] %}
+            {{ temp if is_number(temp) else stored }}
+          {% elif hvac == 'heat_cool' %}
+            {% if is_number(high) and is_number(low) and is_number(outdoor) %}
+              {# determine if heat or a/c temp #}
+              {% if outdoor | float   > high | float %} {{ high }}
+              {% else %} {{ low }}
+              {% endif %}
+            {# defaults to heat target if no outdoor temp #}
+            {% else %} {{ low }}
+            {% endif %}
+          {# defaults to stored if hvac off #}
+          {% else %} {{ stored }}
+          {% endif %}
+
+    - if: "{{ state_attr('climate.thermostat', 'preset_mode') != 'eco' }}"
+      then:
+        - action: input_number.set_value
+          target:
+            entity_id: input_number.thermostat_target_temperature
+          data:
+            value: "{{ temp }}"
+  sensor:
+    - name: "Indoor Temperature Target"
+      unique_id: indoor_temperature_target
+      device_class: temperature
+      state_class: measurement
+      unit_of_measurement: °C
+      state: "{{ temp }}"
+
+- trigger:
     - trigger: homeassistant
       event: start
 
@@ -191,13 +271,6 @@
         {{ is_number(states('sensor.thermostat_temperature'))
             or is_number(states('sensor.living_room_sensor_temperature'))
             or is_number(states('sensor.bedroom_sensor_temperature')) }}
-
-    - name: "Indoor Temperature Target"
-      unique_id: indoor_temperature_target
-      device_class: temperature
-      state_class: measurement # req for statistics / graphs
-      unit_of_measurement: °C
-      state: "{{ states('input_number.thermostat_target_temperature') }}"
 
     # indoor/outdoor temperature differeance
     - name: "Indoor Temperature Differential"
