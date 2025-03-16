@@ -4,8 +4,16 @@
 input_boolean:
   maddie_mealtime_enabled:
     name: "Maddie Mealtime Enabled"
+    icon: &maddie_icon mdi:dog
   maddie_mealtime_active:
     name: "Maddie Mealtime Active"
+    icon: *maddie_icon
+  maddie_mealtime_paused:
+    name: "Maddie Mealtime Paused"
+    icon: *maddie_icon
+  maddie_mealtime_skipped:
+    name: "Maddie Mealtime Skipped"
+    icon: *maddie_icon
 
 input_number:
   maddie_mealtime_notification_interval:
@@ -53,10 +61,10 @@ template:
   - button:
       - name: "Maddie Mealtime Done"
         unique_id: maddie_mealtime_done
-        icon: mdi:dog
+        icon: *maddie_icon
         press:
           - condition: state
-            entity_id: binary_sensor.maddie_mealtime_reminder
+            entity_id: input_boolean.maddie_mealtime_active
             state: "on"
 
           - action: input_boolean.turn_off
@@ -68,20 +76,36 @@ template:
               message: "Maddie Mealtime reminder has been turned off."
               duration: 10000
 
-          - action: notify.jason
-            data:
-              message: clear_notification
-              data:
-                tag: maddie_mealtime_reminder
+      - name: "Skip Maddie Mealtime"
+        unique_id: skip_maddie_mealtime
+        icon: *maddie_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: binary_sensor.maddie_mealtime_reminder
+                state: "on"
+            then:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.maddie_mealtime_active
+            else:
+              - action: input_boolean.toggle
+                target:
+                  entity_id: input_boolean.maddie_mealtime_skipped
 
   - binary_sensor:
       - name: "Maddie Mealtime Reminder"
         unique_id: maddie_mealtime_reminder
-        icon: mdi:dog
+        icon: *maddie_icon
         picture: >
-          {{ iif(is_state(this.entity_id, 'on'),
-            '/local/images/entity_icons/maddie_mealtime.png',
-            '/local/images/entity_icons/maddie_mealtime_off.png') }}
+          {% if is_state('input_boolean.maddie_mealtime_paused', 'on')
+              or is_state('input_boolean.maddie_mealtime_skipped', 'on') %}
+            /local/images/entity_icons/maddie_mealtime_paused.png
+          {% elif is_state('input_boolean.maddie_mealtime_active', 'on') %}
+            /local/images/entity_icons/maddie_mealtime.png
+          {% else %}
+            /local/images/entity_icons/maddie_mealtime_off.png
+          {% endif %}
         state: >
           {{ is_state('input_boolean.maddie_mealtime_enabled', 'on')
                 and is_state('input_boolean.maddie_mealtime_active', 'on') }}
@@ -108,9 +132,16 @@ automation:
                 or (shift == 'wknd' and time == states('input_datetime.maddie_mealtime_weekends_2')[0:5]) }}
           {% endif %}
     action:
-      - action: input_boolean.turn_on
-        target:
-          entity_id: input_boolean.maddie_mealtime_active
+      - if:
+          - condition: state
+            entity_id:
+              - input_boolean.maddie_mealtime_skipped
+              - input_boolean.maddie_mealtime_paused
+            state: "off"
+        then:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.maddie_mealtime_active
 
   ###################################################################################################
   ## Maddie Mealtime Done
@@ -134,27 +165,106 @@ automation:
           entity_id: button.maddie_mealtime_done
 
   ###################################################################################################
-  ## Reset Maddie Mealtime Active
+  ## Skip Maddie Mealtime
   ###################################################################################################
-  - id: reset_maddie_mealtime_active
-    alias: "Reset Maddie Mealtime Active"
-    description: "Reset Maddie Mealtime Active boolean."
+  - id: skip_maddie_mealtime
+    alias: "Skip Maddie Mealtime"
+    description: "Skip reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: skip_maddie_mealtime
+    action:
+      - action: button.press
+        target:
+          entity_id: button.skip_maddie_mealtime
+
+  ###################################################################################################
+  ## Pause Maddie Mealtime
+  ###################################################################################################
+  - id: pause_maddie_mealtime
+    alias: "Pause Maddie Mealtime"
+    description: "Pause maddie mealtime reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_maddie_mealtime
+    action:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.maddie_mealtime_paused
+
+  ###################################################################################################
+  ## Reset Pause Maddie Mealtime
+  ###################################################################################################
+  - id: reset_pause_maddie_mealtime
+    alias: "Reset Pause Maddie Mealtime"
+    description: "Reset reminder paused boolean."
+    max_exceeded: silent
     trigger:
       - trigger: state
+        entity_id: binary_sensor.maddie_mealtime_reminder
+        to: "off"
+
+      - trigger: state
+        entity_id: input_boolean.maddie_mealtime_paused
+        to: "on"
+        for:
+          hours: 4
+
+      - trigger: state
+        entity_id: binary_sensor.owner_home
+        to: "on"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id:
+          - binary_sensor.owner_home
+          - input_boolean.maddie_mealtime_paused
+        state: "on"
+    action:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.maddie_mealtime_paused
+
+  ###################################################################################################
+  ## Reset Maddie Mealtime Booleans
+  ###################################################################################################
+  - id: reset_maddie_mealtime_booleans
+    alias: "Reset Maddie Mealtime Booleans"
+    description: "Reset reminder booleans."
+    trigger:
+      - trigger: state
+        id: enabled
         entity_id: input_boolean.maddie_mealtime_enabled
         to: "off"
 
       - trigger: state
-        entity_id: input_boolean.maddie_mealtime_active
+        id: entity
+        entity_id: &entities
+          - input_boolean.maddie_mealtime_active
+          - input_boolean.maddie_mealtime_skipped
+          - input_boolean.maddie_mealtime_paused
         to: "on"
     condition:
       - condition: state
         entity_id: input_boolean.maddie_mealtime_enabled
         state: "off"
     action:
-      - action: input_boolean.turn_off
-        target:
-          entity_id: input_boolean.maddie_mealtime_active
+      - if: "{{ trigger.id == 'entity' }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+        else:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: *entities
 
   ###################################################################################################
   ## Maddie Mealtime Notification
@@ -176,53 +286,107 @@ automation:
       - condition: state
         entity_id: binary_sensor.maddie_mealtime_reminder
         state: "on"
+
+      - condition: state
+        entity_id: input_boolean.maddie_mealtime_paused
+        state: "off"
     action:
-      - repeat:
-          sequence:
-            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
-              then:
-                - action: notify.jason
-                  data:
-                    message: "Time to feed the animals!"
-                    data:
-                      tag: maddie_mealtime_reminder
-                      group: Reminder
-                      visibility: public
-                      persistent: true
-                      notification_icon: mdi:dog
-                      icon_url: !secret MADDIE_ICON
-                      actions:
-                        - title: "Done"
-                          action: maddie_mealtime_done
+      - if:
+          - condition: state
+            entity_id: input_boolean.maddie_mealtime_skipped
+            state: "on"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.maddie_mealtime_skipped
+        else:
+          - repeat:
+              sequence:
+                - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+                  then:
+                    - action: notify.jason
+                      data:
+                        message: "Time to feed Maddie!"
+                        data:
+                          tag: maddie_mealtime_reminder
+                          group: Reminder
+                          visibility: public
+                          persistent: true
+                          notification_icon: *maddie_icon
+                          icon_url: !secret MADDIE_ICON
+                          actions:
+                            - title: "Pause"
+                              action: pause_maddie_mealtime
 
-                # wait to see if turned off before tts
-                - wait_template: "{{ is_state('binary_sensor.maddie_mealtime_reminder', 'off') }}"
+                            - title: "Skip"
+                              action: skip_maddie_mealtime
+
+                            - title: "Done"
+                              action: maddie_mealtime_done
+
+                    # wait to see if turned off before tts
+                    - wait_template: >
+                        {{ is_state('binary_sensor.maddie_mealtime_reminder', 'off')
+                            or is_state('input_boolean.maddie_mealtime_paused', 'on') }}
+                      timeout:
+                        minutes: 2
+
+                    - if:
+                        - condition: state
+                          entity_id: binary_sensor.maddie_mealtime_reminder
+                          state: "on"
+
+                        - condition: state
+                          entity_id: input_boolean.maddie_mealtime_paused
+                          state: "off"
+                      then:
+                        - action: script.turn_on
+                          continue_on_error: true
+                          target:
+                            entity_id: script.tts_play
+                          data:
+                            variables:
+                              message: |
+                                Hey Maddie, and Pooie Rooie too!
+                                Are you guys hungry doggies?
+                                It's time to get your food!
+                              quiet_play: true
+                              save_message: true
+
+                - wait_template: >
+                    {{ is_state('binary_sensor.maddie_mealtime_reminder', 'off')
+                        or is_state('input_boolean.maddie_mealtime_paused', 'on') }}
                   timeout:
-                    minutes: 2
-
-                - if:
+                    minutes: "{{ states('input_number.maddie_mealtime_notification_interval') | int }}"
+              until:
+                - or:
                     - condition: state
                       entity_id: binary_sensor.maddie_mealtime_reminder
-                      state: "on"
-                  then:
-                    - action: script.turn_on
-                      continue_on_error: true
-                      target:
-                        entity_id: script.tts_play
-                      data:
-                        variables:
-                          message: |
-                            Hey Maddie!
-                            Maddie!
-                            And Pooie Rooie too!
-                            It's time to get some food!
-                          quiet_play: true
-                          save_message: true
+                      state: "off"
 
-            - wait_template: "{{ is_state('binary_sensor.maddie_mealtime_reminder', 'off') }}"
-              timeout:
-                minutes: "{{ states('input_number.maddie_mealtime_notification_interval') | int }}"
-          until:
-            - condition: state
-              entity_id: binary_sensor.maddie_mealtime_reminder
-              state: "off"
+                    - condition: state
+                      entity_id: input_boolean.maddie_mealtime_paused
+                      state: "on"
+
+  ###################################################################################################
+  ## Clear Maddie Mealtime Notification
+  ###################################################################################################
+  - id: clear_maddie_mealtime_notification
+    alias: "Clear Maddie Mealtime Notification"
+    description: "Clear reminder notification."
+    trigger:
+      - trigger: state
+        entity_id: binary_sensor.maddie_mealtime_reminder
+        to: "off"
+
+      - trigger: state
+        entity_id:
+          - input_boolean.maddie_mealtime_paused
+          - input_boolean.maddie_mealtime_skipped
+        to: "on"
+    action:
+      - action: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: maddie_mealtime_reminder

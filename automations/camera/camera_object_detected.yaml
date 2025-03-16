@@ -11,13 +11,13 @@
     id: "{{ trigger.payload_json['after']['id'] }}"
     camera: "{{ trigger.payload_json['after']['camera'] }}"
     object: "{{ trigger.payload_json['after']['label'] }}"
-    stationary: "{{ trigger.payload_json['after']['stationary'] }}"
     start_time: "{{ trigger.payload_json['after']['start_time'] }}"
-    new: "{{ trigger.payload_json['type'] == 'new' }}"
     entered_zones: "{{ trigger.payload_json['after']['entered_zones'] }}"
   triggers:
     - trigger: mqtt
       topic: frigate/events
+      payload: "new"
+      value_template: "{{ value_json.type }}"
   conditions:
     - condition: state
       entity_id: input_boolean.camera_object_detection
@@ -29,43 +29,19 @@
         {{ true if this.attributes.last_triggered == none or camera in ['front_door', 'side_door']
             else now() - this.attributes.last_triggered > timedelta(seconds=120) }}
 
-    - alias: "Detected object is new"
-      condition: template
-      value_template: "{{ new }}"
-
-    - alias: "Camera not excluded for notifications"
-      condition: template
-      value_template: "{{ camera not in ['front_yard', 'back_yard'] }}"
-
-    - alias: "Detected object is a person or a car"
-      condition: template
-      value_template: "{{ object in ['person', 'car'] }}"
-
-    - alias: "Detected object is moving"
+    - alias: "Detected object is valid and in required zone."
       condition: template
       value_template: >
-        {{ trigger.payload_json['after']['stationary'] == false
-            and 0 <= trigger.payload_json['after']['motionless_count'] | int(-1) < 50 }}
+        {% if object == 'car' and camera == 'front_driveway' %} {{ 'driveway' in entered_zones }}
+        {% elif object == 'person' and camera == 'front_driveway' %} {{ 'near_house' in entered_zones }}
+        {% elif object == 'person' and camera == 'front_door' %} {{ 'porch' in entered_zones }}
+        {% elif object == 'person' and camera == 'front_yard' %} {{ 'near_house' in entered_zones }}
+        {% elif object == 'person' and camera == 'back_door' %} {{ 'back_door_deck' in entered_zones }}
+        {% elif object == 'person' and camera == 'patio_door' %} {{ 'patio_deck' in entered_zones }}
+        {% else %} {{ object in ['person', 'car'] }}
+        {% endif %}
 
-    - alias: "If camera is front drive, object is a car and driveway is in entered zones or object is a person and near house is in entered zones"
-      condition: template
-      value_template: >
-        {{ (object == 'car' and 'driveway' in entered_zones)
-              or (object == 'person' and 'near_house' in entered_zones)
-            if camera == 'front_driveway' else true }}
-
-    - alias: "If camera is front door, object is a person and porch is in entered zones"
-      condition: template
-      value_template: >
-        {{ object == 'person'  and 'porch' in entered_zones
-            if camera == 'front_door' else true }}
-
-    - alias: "If camera is front yard, object is a person and near house is in entered zones"
-      condition: template
-      value_template: >
-        {{ object == 'person' and 'near_house' in entered_zones
-            if camera == 'front_yard' else true }}
-
+    # prevent notification when arriving home
     - alias: "Someone hasn't just arrived home"
       condition: state
       entity_id:
@@ -74,12 +50,14 @@
       attribute: just_arrived
       state: false
 
+    # prevent notification when arriving home
     - alias: "Someone isn't almost home"
       condition: template
       value_template: >
         {{ is_state('input_boolean.jason_almost_home', 'off')
             and now() - states.input_boolean.jason_almost_home.last_changed > timedelta(seconds=120) }}
 
+    # prevent notification when leaving home
     - alias: "Front/Side door was not just locked or unlocked"
       condition: template
       value_template: >
@@ -112,7 +90,7 @@
                           always_play: true
                           save_message: false
                           message: |
-                            Attention!,
+                            Attention!
                             {%- if camera in ['front_door', 'side_door', 'back_door', 'patio_door', 'back_house',
                                 'side_gate_front', 'side_gate_back'] %} {% set prep = 'at' %}
                             {% elif camera in ['side_driveway', 'front_driveway'] %} {% set prep = 'on' %}
@@ -138,7 +116,7 @@
                 - action: notify.jason
                   data:
                     title: "{{ camera | replace('_', ' ') | title }} Camera"
-                    message: "A {{ object }} was detected @ {{ start_time | timestamp_custom('%-I:%M %p') }}."
+                    message: "A {{ object }} was detected at {{ start_time | timestamp_custom('%-I:%M %p') }}."
                     data:
                       tag: "{{ id }}"
                       group: Camera

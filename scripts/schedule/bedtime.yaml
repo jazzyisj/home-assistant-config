@@ -16,59 +16,22 @@ bedtime:
     night_delay: "{{ states('input_number.night_mode_delay') | int }}"
   sequence:
     - if:
-        - or:
+        - condition: not
+          conditions:
             - condition: state
-              entity_id: binary_sensor.someone_home
-              state: "off"
-
-            - not:
-                - condition: state
-                  entity_id: input_select.occupancy_mode
-                  state:
-                    - Home
-                    - Guest
-
-            # bedtime disarms/rearms alarm
-            - condition: state
-              entity_id: input_boolean.alarm_triggered
-              state: "on"
-
-            - condition: and
-              conditions:
-                - condition: state
-                  entity_id: binary_sensor.owner_home
-                  state: "off"
-
-                - condition: state
-                  entity_id: input_boolean.guest_night
-                  state: "off"
-
-            - condition: and
-              conditions:
-                - condition: state
-                  entity_id: binary_sensor.work_tomorrow
-                  state: "on"
-
-                - condition: state
-                  entity_id: input_boolean.workday_night
-                  state: "off"
-
-            - condition: and
-              conditions:
-                - condition: state
-                  entity_id: binary_sensor.work_tomorrow
-                  state: "off"
-
-                - condition: state
-                  entity_id: input_boolean.weekend_night
-                  state: "off"
+              entity_id: input_select.occupancy_mode
+              state:
+                - Home
+                - Guest
       then:
         - action: browser_mod.notification
           data:
             duration: 10000
-            message: "Bedtime routine is not enabled or cannot be run."
+            message: |
+              The house is in {{ states('input_select.occupancy_mode') }} mode.
+              Betime routine cannot run if occupancy mode is not Home or Guest.
 
-        - stop: "Bedtime routine is not enabled or cannot be run."
+        - stop: "Betime routine cannot run if occupancy mode is not Home or Guest."
 
     - action: script.turn_off
       target:
@@ -118,8 +81,10 @@ bedtime:
           message: >
             {% from 'speech_helpers.jinja' import plural %}
             Heads Up! Lights out in {{ plural('minute', night_delay) }}!
+          media_player: media_player.living_area_speakers
+          min_volume: 30
           quiet_play: true
-          # media_player: media_player.dining_room_hub #DISABLED for #MASS resume
+          save_message: false
       continue_on_error: true
 
     - if:
@@ -128,18 +93,16 @@ bedtime:
           state: idle
 
         - condition: template
+          alias: "Dining Room Light is off or low"
           value_template: >
-            {% if is_number(state_attr('light.dining_room_light_rgb', 'brightness'))
-                and is_number(state_attr('switch.adaptive_lighting_rgb_lights', 'brightness_pct')) %}
-              {{ state_attr('light.dining_room_light_rgb', 'brightness') | int
-                  < (state_attr('switch.adaptive_lighting_rgb_lights', 'brightness_pct') | int * 2.55) | int }}
-            {% else %} true
-            {% endif %}
+            {% set brightness = state_attr('light.dining_room_light_rgb', 'brightness') | int(none) %}
+            {% set brightness_pct = state_attr('switch.adaptive_lighting_rgb_lights', 'brightness_pct') | int(none) %}
+            {{ brightness < brightness_pct * 2.55 if brightness != none and brightness_pct != none else true }}
       then:
         - action: script.turn_light_on
           data:
             lights: light.dining_room_light_rgb
-            brightness: 5
+            brightness: 50
             transition: 3
           continue_on_error: true
 
@@ -165,8 +128,9 @@ bedtime:
       data:
         variables:
           message: "Good night!"
+          media_player: media_player.inside_speakers
+          volume: 20
           quiet_play: true
-          # media_player: media_player.dining_room_hub #DISABLED for #MASS resume
           save_message: false
       continue_on_error: true
 

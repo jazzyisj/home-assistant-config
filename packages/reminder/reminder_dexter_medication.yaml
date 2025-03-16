@@ -4,10 +4,16 @@
 input_boolean:
   dexter_medication_enabled:
     name: "Dexter Medication Enabled"
-    icon: mdi:pill-multiple
+    icon: &dexter_icon mdi:pill-multiple
   dexter_medication_active:
     name: "Dexter Medication Active"
-    icon: mdi:pill-multiple
+    icon: *dexter_icon
+  dexter_medication_paused:
+    name: "Dexter Medication Paused"
+    icon: *dexter_icon
+  dexter_medication_skipped:
+    name: "Dexter Medication Skipped"
+    icon: *dexter_icon
 
 input_datetime:
   dexter_medication_days:
@@ -48,10 +54,10 @@ template:
   - button:
       - name: "Dexter Medication Done"
         unique_id: dexter_medication_done
-        icon: mdi:pill-multiple
+        icon: *dexter_icon
         press:
           - condition: state
-            entity_id: binary_sensor.dexter_medication_reminder
+            entity_id: input_boolean.dexter_medication_active
             state: "on"
 
           - action: input_boolean.turn_off
@@ -63,20 +69,36 @@ template:
               message: "Dexter Medication reminder has been turned off."
               duration: 10000
 
-          - action: notify.jason
-            data:
-              message: clear_notification
-              data:
-                tag: dexter_medication_reminder
+      - name: "Skip Dexter Medication"
+        unique_id: skip_dexter_medication
+        icon: *dexter_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: binary_sensor.dexter_medication_reminder
+                state: "on"
+            then:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.dexter_medication_active
+            else:
+              - action: input_boolean.toggle
+                target:
+                  entity_id: input_boolean.dexter_medication_skipped
 
   - binary_sensor:
       - name: "Dexter Medication Reminder"
         unique_id: dexter_medication_reminder
-        icon: mdi:pill-multiple
+        icon: *dexter_icon
         picture: >
-          {{ iif(is_state(this.entity_id, 'on'),
-            '/local/images/entity_icons/dexter_medication.png',
-            '/local/images/entity_icons/dexter_medication_off.png') }}
+          {% if is_state('input_boolean.dexter_medication_paused', 'on')
+              or is_state('input_boolean.dexter_medication_skipped', 'on') %}
+            /local/images/entity_icons/dexter_medication_paused.png
+          {% elif is_state('input_boolean.dexter_medication_active', 'on') %}
+            /local/images/entity_icons/dexter_medication.png
+          {% else %}
+            /local/images/entity_icons/dexter_medication_off.png
+          {% endif %}
         state: >
           {{ is_state('input_boolean.dexter_medication_enabled', 'on')
                 and is_state('input_boolean.dexter_medication_active', 'on') }}
@@ -86,7 +108,7 @@ automation:
   ## Turn Dexter Medication On
   ###################################################################################################
   - id: turn_dexter_medication_on
-    alias: "Turn On Dexter Medication On"
+    alias: "Turn Dexter Medication On"
     description: "Turn on reminder active boolean."
     trigger:
       - trigger: template
@@ -103,9 +125,16 @@ automation:
                   >= states('input_number.dexter_medication_day_interval') | int) }}
           {% endif %}
     action:
-      - action: input_boolean.turn_on
-        target:
-          entity_id: input_boolean.dexter_medication_active
+      - if:
+          - condition: state
+            entity_id:
+              - input_boolean.dexter_medication_skipped
+              - input_boolean.dexter_medication_paused
+            state: "off"
+        then:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.dexter_medication_active
 
   ###################################################################################################
   ## Dexter Medication Done
@@ -129,27 +158,106 @@ automation:
           entity_id: button.dexter_medication_done
 
   ###################################################################################################
-  ## Reset Dexter Medication Active
+  ## Skip Dexter Medication
   ###################################################################################################
-  - id: reset_dexter_medication_active
-    alias: "Reset Dexter Medication Active"
-    description: "Reset Dexter Medication Active boolean."
+  - id: skip_dexter_medication
+    alias: "Skip Dexter Medication"
+    description: "Skip reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: skip_dexter_medication
+    action:
+      - action: button.press
+        target:
+          entity_id: button.skip_dexter_medication
+
+  ###################################################################################################
+  ## Pause Dexter Medication
+  ###################################################################################################
+  - id: pause_dexter_medication
+    alias: "Pause Dexter Medication"
+    description: "Pause Dexter Medication reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_dexter_medication
+    action:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.dexter_medication_paused
+
+  ###################################################################################################
+  ## Reset Pause Dexter Medication
+  ###################################################################################################
+  - id: reset_pause_dexter_medication
+    alias: "Reset Pause Dexter Medication"
+    description: "Reset reminder paused boolean."
+    max_exceeded: silent
     trigger:
       - trigger: state
+        entity_id: binary_sensor.dexter_medication_reminder
+        to: "off"
+
+      - trigger: state
+        entity_id: input_boolean.dexter_medication_paused
+        to: "on"
+        for:
+          hours: 4
+
+      - trigger: state
+        entity_id: binary_sensor.owner_home
+        to: "on"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id:
+          - binary_sensor.owner_home
+          - input_boolean.dexter_medication_paused
+        state: "on"
+    action:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.dexter_medication_paused
+
+  ###################################################################################################
+  ## Reset Dexter Medication Booleans
+  ###################################################################################################
+  - id: reset_dexter_medication_booleans
+    alias: "Reset Dexter Medication Booleans"
+    description: "Reset reminder booleans."
+    trigger:
+      - trigger: state
+        id: enabled
         entity_id: input_boolean.dexter_medication_enabled
         to: "off"
 
       - trigger: state
-        entity_id: input_boolean.dexter_medication_active
+        id: entity
+        entity_id: &entities
+          - input_boolean.dexter_medication_active
+          - input_boolean.dexter_medication_skipped
+          - input_boolean.dexter_medication_paused
         to: "on"
     condition:
       - condition: state
         entity_id: input_boolean.dexter_medication_enabled
         state: "off"
     action:
-      - action: input_boolean.turn_off
-        target:
-          entity_id: input_boolean.dexter_medication_active
+      - if: "{{ trigger.id == 'entity' }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+        else:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: *entities
 
   ###################################################################################################
   ## Dexter Medication Notification
@@ -171,49 +279,104 @@ automation:
       - condition: state
         entity_id: binary_sensor.dexter_medication_reminder
         state: "on"
+
+      - condition: state
+        entity_id: input_boolean.dexter_medication_paused
+        state: "off"
     action:
-      - repeat:
-          sequence:
-            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
-              then:
-                - action: notify.jason
-                  data:
-                    message: "Time for Dexter's medication!"
-                    data:
-                      tag: dexter_medication_reminder
-                      group: Reminder
-                      visibility: public
-                      persistent: true
-                      notification_icon: mdi:pill-multiple
-                      icon_url: !secret DEXTER_ICON
-                      actions:
-                        - title: "Done"
-                          action: dexter_medication_done
+      - if:
+          - condition: state
+            entity_id: input_boolean.dexter_medication_skipped
+            state: "on"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.dexter_medication_skipped
+        else:
+          - repeat:
+              sequence:
+                - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+                  then:
+                    - action: notify.jason
+                      data:
+                        message: "Time for Dexter's Medication!"
+                        data:
+                          tag: dexter_medication_reminder
+                          group: Reminder
+                          visibility: public
+                          persistent: true
+                          notification_icon: *dexter_icon
+                          icon_url: !secret DEXTER_ICON
+                          actions:
+                            - title: "Pause"
+                              action: pause_dexter_medication
 
-                # wait to see if turned off before tts
-                - wait_template: "{{ is_state('binary_sensor.dexter_medication_reminder', 'off') }}"
+                            - title: "Skip"
+                              action: skip_dexter_medication
+
+                            - title: "Done"
+                              action: dexter_medication_done
+
+                    # wait to see if turned off before tts
+                    - wait_template: >
+                        {{ is_state('binary_sensor.dexter_medication_reminder', 'off')
+                            or is_state('input_boolean.dexter_medication_paused', 'on') }}
+                      timeout:
+                        minutes: 2
+
+                    - if:
+                        - condition: state
+                          entity_id: binary_sensor.dexter_medication_reminder
+                          state: "on"
+
+                        - condition: state
+                          entity_id: input_boolean.dexter_medication_paused
+                          state: "off"
+                      then:
+                        - action: script.turn_on
+                          continue_on_error: true
+                          target:
+                            entity_id: script.tts_play
+                          data:
+                            variables:
+                              message: "Time for Dexter's Medication!"
+                              quiet_play: true
+                              save_message: true
+
+                - wait_template: >
+                    {{ is_state('binary_sensor.dexter_medication_reminder', 'off')
+                        or is_state('input_boolean.dexter_medication_paused', 'on') }}
                   timeout:
-                    minutes: 2
-
-                - if:
+                    minutes: "{{ states('input_number.dexter_medication_notification_interval') | int }}"
+              until:
+                - or:
                     - condition: state
                       entity_id: binary_sensor.dexter_medication_reminder
-                      state: "on"
-                  then:
-                    - action: script.turn_on
-                      continue_on_error: true
-                      target:
-                        entity_id: script.tts_play
-                      data:
-                        variables:
-                          message: "The fat bastard needs his 'roids!  Give Dexter his medication."
-                          quiet_play: true
-                          save_message: true
+                      state: "off"
 
-            - wait_template: "{{ is_state('binary_sensor.dexter_medication_reminder', 'off') }}"
-              timeout:
-                minutes: "{{ states('input_number.dexter_medication_notification_interval') | int }}"
-          until:
-            - condition: state
-              entity_id: binary_sensor.dexter_medication_reminder
-              state: "off"
+                    - condition: state
+                      entity_id: input_boolean.dexter_medication_paused
+                      state: "on"
+
+  ###################################################################################################
+  ## Clear Dexter Medication Notification
+  ###################################################################################################
+  - id: clear_dexter_medication_notification
+    alias: "Clear Dexter Medication Notification"
+    description: "Clear reminder notification."
+    trigger:
+      - trigger: state
+        entity_id: binary_sensor.dexter_medication_reminder
+        to: "off"
+
+      - trigger: state
+        entity_id:
+          - input_boolean.dexter_medication_paused
+          - input_boolean.dexter_medication_skipped
+        to: "on"
+    action:
+      - action: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: dexter_medication_reminder
