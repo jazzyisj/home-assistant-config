@@ -1,14 +1,28 @@
 {%- macro list_events(events) -%}
 {%- for event in events %}
   {%- if (event.start is defined) %}
-    {%- if (event.start | as_datetime).day == now().day %}
-      {{ event.start | as_timestamp | timestamp_custom('Today at %-I:%M %p') }}: {% if event.summary is defined %}{{ event.summary }}{% endif %}
-    {%- else %}
-      {{ event.start | as_timestamp | timestamp_custom('%A at %-I:%M %p') }}: {% if event.summary is defined %}{{ event.summary }}{% endif %}
-    {%- endif %}
-  {%- else %}{% if event.summary is defined %}{{ event.summary }}{% endif %}
+    {%- set start = as_datetime(event.start) | as_local %}
+    {%- set end = as_datetime(event.end) | as_local %}
+    {%- set today = now().day %}
+    {%- set tomorrow = (now() + timedelta(days=1)).day %}
+    {% if start.hour == 0 and start.minute == 0 %}
+      {%- set time = 'Starting today, ' if start.day == now().day and end - now() >= timedelta(days=1)
+            else 'Continuing today, ' if now() - start > timedelta(days=1)
+            else 'All day today, ' if start.day == today
+            else 'All day tomorrow, ' if (start + timedelta(days=1)).day == tomorrow
+            else start.strftime('All day %A, ') %}
+    {% else %}
+      {% set time = start.strftime('Today at %-I:%M %p, ') if start.day == today
+          else start.strftime('Tomorrow at %-I:%M %p, ')
+            if (start + timedelta(days=1)).day == tomorrow
+          else start.strftime('%A at %-I:%M %p, ') %}
+    {% endif %}
+    {%- set event = event.summary if event.summary is defined else none %}
+    {{ time }} {{ event }}.
+  {%- else %}
+    {% if event.summary is defined %}{{ event.summary }}{% endif %}.
   {%- endif %}
-{%- endfor %}.
+{%- endfor %}
 {%- endmacro -%}
 
 {%- macro leave_home_time(person) -%}
@@ -58,9 +72,10 @@ Check the clock! Your time to leave for work can not be determined today!
 {%- endif %}
 {%- endmacro -%}
 
+{# day_or_date - return date is today, tomorrow, yesterday else return date #}
 {%- macro day_or_date(date, short=true, dow=true) -%}
 {# check if valid date, as_timestamp to add tz #}
-{#MIDNIGHT add day_reset to prevent alerts night before after midnight #}
+{#MIDNIGHT add day_reset to prevent alerts night before / after midnight #}
 {#NOTE calendar dates "Today" turns off at midnight when calendar date changes to next occurance #}
 {% set date = as_datetime(date, none) %}
 {%- if date != none %}
@@ -78,12 +93,14 @@ Check the clock! Your time to leave for work can not be determined today!
 {%- endif %}
 {%- endmacro -%}
 
+{# rdate - add day_reset timedelta to date #}
 {%- macro rdate(date) -%}
 {# check if valid date, as_timestamp to add tz #}
 {%- set date = as_datetime(date, none) -%}
 {{ as_datetime(as_timestamp(date)) + as_timedelta(states('input_datetime.day_reset')) if date != none else none }}
 {%- endmacro -%}
 
+{# rtoday - check if calendar event is today with day_reset #}
 {%- macro rtoday(cal) -%}
 {# check if valid date, as_timestamp to add tz #}
 {%- set start = as_datetime(state_attr(cal, 'start_time'), none) %}
@@ -93,6 +110,7 @@ Check the clock! Your time to leave for work can not be determined today!
     if start != none and end != none else false }}
 {%- endmacro -%}
 
+{# rtoday - check if calendar event ends today with day_reset #}
 {%- macro ends_rtoday(cal) -%}
 {# check if valid date, as_timestamp to add tz #}
 {%- set end = as_datetime(state_attr(cal, 'end_time'), none) %}
@@ -100,6 +118,7 @@ Check the clock! Your time to leave for work can not be determined today!
     if is_state(cal, 'on') and end != none else false }}
 {%- endmacro -%}
 
+{# rtoday - check if calendar event starts tomorrow with day_reset #}
 {%- macro starts_rtomorrow(cal) -%}
 {# check if valid date, as_timestamp to add tz #}
 {% set start = as_datetime(state_attr(cal, 'start_time'), none) %}

@@ -1,0 +1,398 @@
+###################################################################################################
+## Package - HVAC Filter Reminder
+###################################################################################################
+input_boolean:
+  hvac_filter_enabled:
+    name: "HVAC Filter Enabled"
+    icon: &hvac_icon mdi:air-filter
+  hvac_filter_active:
+    name: "HVAC Filter Active"
+    icon: *hvac_icon
+  hvac_filter_paused:
+    name: "HVAC Filter Paused"
+    icon: *hvac_icon
+  hvac_filter_skipped:
+    name: "HVAC Filter Skipped"
+    icon: *hvac_icon
+
+input_datetime:
+  hvac_filter_days:
+    name: "HVAC Filter Days"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  hvac_filter_afternoons:
+    name: "HVAC Filter Afternoons"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  hvac_filter_weekends:
+    name: "HVAC Filter Weekends"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+input_number:
+  hvac_filter_hours:
+    name: "HVAC Filter Hours"
+    icon: mdi:air-filter
+    unit_of_measurement: hours
+    mode: slider
+    min: 10
+    max: 500
+    step: 10
+  hvac_filter_notification_interval:
+    name: "HVAC Filter Reminder Interval"
+    icon: mdi:calendar-range
+    unit_of_measurement: minutes
+    mode: slider
+    min: 5
+    max: 240
+    step: 5
+
+template:
+  - button:
+      - name: "HVAC Filter Done"
+        unique_id: hvac_filter_done
+        icon: *hvac_icon
+        press:
+          - condition: state
+            entity_id: input_boolean.hvac_filter_active
+            state: "on"
+
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.hvac_filter_active
+
+          - action: browser_mod.notification
+            data:
+              message: "HVAC filter hours have been reset."
+              duration: 10000
+
+      - name: "Skip HVAC Filter"
+        unique_id: skip_hvac_filter
+        icon: *hvac_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: binary_sensor.hvac_filter_reminder
+                state: "on"
+            then:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.hvac_filter_active
+            else:
+              - action: input_boolean.toggle
+                target:
+                  entity_id: input_boolean.hvac_filter_skipped
+
+  - binary_sensor:
+      - name: "HVAC Filter Reminder"
+        unique_id: hvac_filter_reminder
+        icon: *hvac_icon
+        state: >
+          {{ is_state('input_boolean.hvac_filter_enabled', 'on')
+                and is_state('input_boolean.hvac_filter_active', 'on') }}
+
+automation:
+  ###################################################################################################
+  ## Turn HVAC Filter On
+  ###################################################################################################
+  - id: turn_hvac_filter_on
+    alias: "Turn HVAC Filter On"
+    description: "Turn on reminder active boolean."
+    trigger:
+      - trigger: template
+        value_template: >
+          {% if is_state('input_boolean.hvac_filter_enabled', 'on') %}
+            {% set time = states('sensor.time') %}
+            {% set shift = states('sensor.actual_shift_today') %}
+            {% set last_run = states('button.hvac_filter_done') %}
+            {% set filter_hours = states('sensor.hvac_filter_hours') | int(-1) %}
+            {% set limit = states('input_number.hvac_filter_hours') | int(-1) %}
+            {{ filter_hours >= limit
+                and ((shift == 'days' and time == states('input_datetime.hvac_filter_days')[0:5])
+                  or (shift == 'afts' and time == states('input_datetime.hvac_filter_afternoons')[0:5])
+                  or (shift == 'wknd' and time == states('input_datetime.hvac_filter_weekends')[0:5])) }}
+          {% endif %}
+    action:
+      # turn off previous active reminder to retrigger notifications
+      - if: "{{ is_state('input_boolean.hvac_filter_active', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.hvac_filter_active
+
+      # turn off previous paused reminder
+      - if: "{{ is_state('input_boolean.hvac_filter_paused', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.hvac_filter_paused
+
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.hvac_filter_paused
+
+      # turn on active reminder if not skipped else turn of skipped
+      - if: "{{ is_state('input_boolean.hvac_filter_skipped', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.hvac_filter_skipped
+        else:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.hvac_filter_active
+
+  ###################################################################################################
+  ## HVAC Filter Reminder Done
+  ###################################################################################################
+  - id: hvac_filter_reminder_done
+    alias: "HVAC Filter Reminder Done"
+    description: "Mark reminder complete."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: hvac_filter_done
+    condition:
+      - condition: template
+        value_template: "{{ is_state('binary_sensor.hvac_filter_reminder', 'on') }}"
+    action:
+      - action: button.press
+        target:
+          entity_id: button.hvac_filter_done
+
+  ###################################################################################################
+  ## Skip HVAC Filter Reminder
+  ###################################################################################################
+  - id: skip_hvac_filter_reminder
+    alias: "Skip HVAC Filter Reminder"
+    description: "Skip reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: skip_hvac_filter
+    action:
+      - action: button.press
+        target:
+          entity_id: button.skip_hvac_filter
+
+  ###################################################################################################
+  ## Pause HVAC Filter Reminder
+  ###################################################################################################
+  - id: pause_hvac_filter_reminder
+    alias: "Pause HVAC Filter Reminder"
+    description: "Pause reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_hvac_filter
+    action:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.hvac_filter_paused
+
+  ###################################################################################################
+  ## Reset Paused HVAC Filter Reminder
+  ###################################################################################################
+  - id: reset_paused_hvac_filter_reminder
+    alias: "Reset Paused HVAC Filter Reminder"
+    description: "Reset reminder paused boolean."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        entity_id: binary_sensor.hvac_filter_reminder
+        to: "off"
+
+      - trigger: state
+        entity_id: input_boolean.hvac_filter_paused
+        to: "on"
+        for:
+          hours: 24
+
+      - trigger: state
+        entity_id: binary_sensor.owner_home
+        to: "on"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id: input_boolean.hvac_filter_paused
+        state: "on"
+    action:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.hvac_filter_paused
+
+  ###################################################################################################
+  ## Reset HVAC Filter Booleans
+  ###################################################################################################
+  - id: reset_hvac_filter_booleans
+    alias: "Reset HVAC Filter Booleans"
+    description: "Reset reminder booleans."
+    trigger:
+      - trigger: state
+        id: enabled
+        entity_id: input_boolean.hvac_filter_enabled
+        to: "off"
+
+      - trigger: state
+        id: entity
+        entity_id: &entities
+          - input_boolean.hvac_filter_active
+          - input_boolean.hvac_filter_skipped
+          - input_boolean.hvac_filter_paused
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: input_boolean.hvac_filter_enabled
+        state: "off"
+
+      - condition: or
+        conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.entity_id == 'input_boolean.hvac_filter_paused'
+                  and is_state('binary_sensor.hvac_filter_reminder', 'off') }}
+    action:
+      - if: "{{ trigger.id == 'entity' }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+        else:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: *entities
+
+  ###################################################################################################
+  ## HVAC Filter Notification
+  ###################################################################################################
+  - id: hvac_filter_notification
+    alias: "HVAC Filter Notification"
+    description: "Send notification until reminder is off."
+    max_exceeded: silent
+    trigger:
+      - trigger: homeassistant
+        event: start
+
+      - trigger: state
+        entity_id: binary_sensor.hvac_filter_reminder
+        to: "on"
+        not_from:
+          - unknown
+          - unavailable
+
+      - trigger: state
+        entity_id: input_boolean.hvac_filter_paused
+        to: "off"
+    condition:
+      - condition: state
+        entity_id: binary_sensor.hvac_filter_reminder
+        state: "on"
+
+      - condition: state
+        entity_id: input_boolean.hvac_filter_paused
+        state: "off"
+    action:
+      - repeat:
+          sequence:
+            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+              then:
+                - action: notify.jason
+                  data:
+                    title: "HVAC Filter"
+                    message: |
+                      Filter Hours: {{ states('sensor.hvac_filter_hours') | int }}
+                      Last Reset: {{ states('button.hvac_filter_done') | as_timestamp | timestamp_custom('%Y-%m-%d', true, none) }}
+                    data:
+                      subject: "Change the HVAC filter."
+                      tag: hvac_filter_reminder
+                      group: Reminder
+                      visibility: public
+                      persistent: true
+                      notification_icon: *hvac_icon
+                      # icon_url: !secret AIR_FILTER_ICON
+                      ledColor: !secret MINOR_COLOR
+                      color: !secret MINOR_COLOR
+                      vibrationPattern: !secret ALERT_VIBRATION
+                      clickAction: /ui-mobile/climate
+                      actions:
+                        - title: "Pause"
+                          action: pause_hvac_filter
+
+                        - title: "Skip"
+                          action: skip_hvac_filter
+
+                        - title: "Done"
+                          action: hvac_filter_done
+
+                # wait to see if turned off before tts
+                - wait_template: >
+                    {{ is_state('binary_sensor.hvac_filter_reminder', 'off')
+                        or is_state('input_boolean.hvac_filter_paused', 'on') }}
+                  timeout:
+                    minutes: 2
+
+                - if:
+                    - condition: state
+                      entity_id: binary_sensor.hvac_filter_reminder
+                      state: "on"
+
+                    - condition: state
+                      entity_id: input_boolean.hvac_filter_paused
+                      state: "off"
+                  then:
+                    - action: script.turn_on
+                      continue_on_error: true
+                      target:
+                        entity_id: script.tts_play
+                      data:
+                        variables:
+                          message: "Attention! The furnace filter needs to be changed!"
+                          quiet_play: true
+
+            - wait_template: >
+                {{ is_state('binary_sensor.hvac_filter_reminder', 'off')
+                    or is_state('input_boolean.hvac_filter_paused', 'on') }}
+              timeout:
+                minutes: "{{ states('input_number.hvac_filter_notification_interval') | int }}"
+          until:
+            - or:
+                - condition: state
+                  entity_id: binary_sensor.hvac_filter_reminder
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.hvac_filter_paused
+                  state: "on"
+
+  ###################################################################################################
+  ## Clear HVAC Filter Notification
+  ###################################################################################################
+  - id: clear_hvac_filter_notification
+    alias: "Clear HVAC Filter Notification"
+    description: "Clear reminder notification."
+    trigger:
+      - trigger: state
+        entity_id: binary_sensor.hvac_filter_reminder
+        to: "off"
+
+      - trigger: state
+        entity_id:
+          - input_boolean.hvac_filter_paused
+          - input_boolean.hvac_filter_skipped
+        to: "on"
+    action:
+      - action: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: hvac_filter_reminder

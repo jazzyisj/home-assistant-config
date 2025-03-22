@@ -115,10 +115,10 @@ automation:
     trigger:
       - trigger: template
         value_template: >
-          {% set time = states('sensor.time') %}
-          {% set shift = states('sensor.time_trigger_shift') %}
-          {% set last_run = states('button.jason_medication_done') %}
           {% if is_state('input_boolean.jason_medication_enabled', 'on') %}
+            {% set time = states('sensor.time') %}
+            {% set shift = states('sensor.actual_shift_today') %}
+            {% set last_run = states('button.jason_medication_done') %}
             {{ ((shift == 'days' and time == states('input_datetime.jason_medication_days')[0:5])
                   or (shift == 'afts' and time == states('input_datetime.jason_medication_afternoons')[0:5])
                   or (shift == 'wknd' and time == states('input_datetime.jason_medication_weekends')[0:5]))
@@ -126,13 +126,31 @@ automation:
                   >= states('input_number.jason_medication_day_interval') | int) }}
           {% endif %}
     action:
-      - if:
-          - condition: state
-            entity_id:
-              - input_boolean.jason_medication_skipped
-              - input_boolean.jason_medication_paused
-            state: "off"
+      # turn off previous active reminder to retrigger notifications
+      - if: "{{ is_state('input_boolean.jason_medication_active', 'on') }}"
         then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.jason_medication_active
+
+      # turn off previous paused reminder
+      - if: "{{ is_state('input_boolean.jason_medication_paused', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.jason_medication_paused
+
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.jason_medication_paused
+
+      # turn on active reminder if not skipped else turn of skipped
+      - if: "{{ is_state('input_boolean.jason_medication_skipped', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.jason_medication_skipped
+        else:
           - action: input_boolean.turn_on
             target:
               entity_id: input_boolean.jason_medication_active
@@ -208,7 +226,7 @@ automation:
         entity_id: input_boolean.jason_medication_paused
         to: "on"
         for:
-          hours: 4
+          hours: 1
 
       - trigger: state
         entity_id: binary_sensor.jason_home
@@ -217,9 +235,7 @@ automation:
           minutes: 15
     condition:
       - condition: state
-        entity_id:
-          - binary_sensor.owner_home
-          - input_boolean.jason_medication_paused
+        entity_id: input_boolean.jason_medication_paused
         state: "on"
     action:
       - action: input_boolean.turn_off
@@ -249,6 +265,13 @@ automation:
       - condition: state
         entity_id: input_boolean.jason_medication_enabled
         state: "off"
+
+      - condition: or
+        conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.entity_id == 'input_boolean.jason_medication_paused'
+                  and is_state('binary_sensor.jason_medication_reminder', 'off') }}
     action:
       - if: "{{ trigger.id == 'entity' }}"
         then:
@@ -266,6 +289,7 @@ automation:
   - id: jason_medication_notification
     alias: "Jason Medication Notification"
     description: "Send notification until reminder is off."
+    max_exceeded: silent
     trigger:
       - trigger: homeassistant
         event: start
@@ -289,79 +313,69 @@ automation:
         entity_id: input_boolean.jason_medication_paused
         state: "off"
     action:
-      - if:
-          - condition: state
-            entity_id: input_boolean.jason_medication_skipped
-            state: "on"
-        then:
-          - action: input_boolean.turn_off
-            target:
-              entity_id: input_boolean.jason_medication_skipped
-        else:
-          - repeat:
-              sequence:
-                - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
-                  then:
-                    - action: notify.jason
-                      data:
-                        message: "Time to take your medication!"
-                        data:
-                          tag: jason_medication_reminder
-                          group: Reminder
-                          visibility: public
-                          persistent: true
-                          notification_icon: *jason_icon
-                          icon_url: !secret JASON_MEDICATION_ICON
-                          actions:
-                            - title: "Pause"
-                              action: pause_jason_medication
+      - repeat:
+          sequence:
+            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+              then:
+                - action: notify.jason
+                  data:
+                    message: "Time to take your medication!"
+                    data:
+                      tag: jason_medication_reminder
+                      group: Reminder
+                      visibility: public
+                      persistent: true
+                      notification_icon: *jason_icon
+                      icon_url: !secret JASON_MEDICATION_ICON
+                      actions:
+                        - title: "Pause"
+                          action: pause_jason_medication
 
-                            - title: "Skip"
-                              action: skip_jason_medication
+                        - title: "Skip"
+                          action: skip_jason_medication
 
-                            - title: "Done"
-                              action: jason_medication_done
+                        - title: "Done"
+                          action: jason_medication_done
 
-                    # wait to see if turned off before tts
-                    - wait_template: >
-                        {{ is_state('binary_sensor.jason_medication_reminder', 'off')
-                            or is_state('input_boolean.jason_medication_paused', 'on') }}
-                      timeout:
-                        minutes: 2
-
-                    - if:
-                        - condition: state
-                          entity_id: binary_sensor.jason_medication_reminder
-                          state: "on"
-
-                        - condition: state
-                          entity_id: input_boolean.jason_medication_paused
-                          state: "off"
-                      then:
-                        - action: script.turn_on
-                          continue_on_error: true
-                          target:
-                            entity_id: script.tts_play
-                          data:
-                            variables:
-                              message: "Hey Jason!  It's time to do some drugs!  Take your medicine like a man."
-                              quiet_play: true
-                              save_message: true
-
+                # wait to see if turned off before tts
                 - wait_template: >
                     {{ is_state('binary_sensor.jason_medication_reminder', 'off')
                         or is_state('input_boolean.jason_medication_paused', 'on') }}
                   timeout:
-                    minutes: "{{ states('input_number.jason_medication_notification_interval') | int }}"
-              until:
-                - or:
+                    minutes: 2
+
+                - if:
                     - condition: state
                       entity_id: binary_sensor.jason_medication_reminder
-                      state: "off"
+                      state: "on"
 
                     - condition: state
                       entity_id: input_boolean.jason_medication_paused
-                      state: "on"
+                      state: "off"
+                  then:
+                    - action: script.turn_on
+                      continue_on_error: true
+                      target:
+                        entity_id: script.tts_play
+                      data:
+                        variables:
+                          message: "Hey Jason!  It's time to do some drugs!  Take your medicine like a man."
+                          quiet_play: true
+
+            - wait_template: >
+                {{ is_state('binary_sensor.jason_medication_reminder', 'off')
+                    or is_state('input_boolean.jason_medication_paused', 'on') }}
+              timeout:
+                minutes: "{{ states('input_number.jason_medication_notification_interval') | int }}"
+          until:
+            - or:
+                - condition: state
+                  entity_id: binary_sensor.jason_medication_reminder
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.jason_medication_paused
+                  state: "on"
 
   ###################################################################################################
   ## Clear Jason Medication Notification

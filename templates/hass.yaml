@@ -62,8 +62,7 @@
         variables: >
           {% set others = dict(this.attributes.get('variables', {}).items() | rejectattr('0', 'eq', trigger.event.data.key)) %}
           {% if trigger.event.event_type == 'set_variable'
-              and trigger.event.data.get('set_timestamp', this.attributes.get('default_timestamp', false))
-          %}
+              and trigger.event.data.get('set_timestamp', this.attributes.get('default_timestamp', false)) %}
             {% set value  = trigger.event.data.value %}
             {% set value = value.isoformat() if value is datetime else value %}
             {% set new = {trigger.event.data.key: {'value': value, 'timestamp': now().isoformat()}} %}
@@ -251,6 +250,35 @@
       state: >
         {% if is_state('binary_sensor.offline_integrations_alert', 'on') %} severe
         {% elif is_state('binary_sensor.unavailable_entities_alert', 'on') %} minor
+        {% else %} ok
+        {% endif %}
+      attributes:
+        options: >
+          {% from 'hass.jinja' import status_options %}
+          {{ status_options() }}
+
+    - name: "Battery Status"
+      unique_id: battery_status
+      icon: mdi:battery
+      device_class: enum
+      state: >
+        {% set levels = namespace(value=[]) %}
+        {% set thresh = states('input_number.battery_alert_threshold') | int(none) %}
+        {% set batteries = expand(integration_entities('battery_notes'))
+            | selectattr('domain', 'eq', 'sensor')
+            | selectattr('attributes.device_class', 'eq', 'battery')
+            | map(attribute='entity_id') | sort %}
+        {% for item in batteries if states(item) | int(none) != none %}
+          {% set level = states(item) | int(none) %}
+          {% if level != none %}
+            {%- set levels.value = levels.value + [level] %}
+          {% endif %}
+        {% endfor %}
+        {% set low = levels.value | min %}
+        {% if low <= 20 %} critical
+        {% elif low <= 25 %} severe
+        {% elif low <= 30 %} warning
+        {% elif low < 40 %} minor
         {% else %} ok
         {% endif %}
       attributes:

@@ -4,18 +4,18 @@
 - id: reload_google_home #BUGFIX
   alias: "Reload Google Home"
   description: "Reload google home integration when device unavailable."
-  max_exceeded: silent
+  mode: parallel
   triggers:
     - platform: homeassistant
       id: startup
       event: start
 
-    - trigger: state # devices occassionally go offline
+    - trigger: state #BUG device sensors occassionally go unknown
       id: sensor
       entity_id:
         - sensor.bathroom_speaker_device
         - sensor.kitchen_hub_device
-        - sensor.deck_chromecast_device
+        - sensor.bedroom_chromecast_device
         - sensor.dining_room_hub_device
         - sensor.bedroom_hub_device
         - sensor.office_speaker_device
@@ -28,7 +28,7 @@
         - unavailable
       for: 120
 
-    - trigger: state #BUG Google Home integration doesn't always reload when switch goes offline
+    - trigger: state #BUG device switches occassionally go unknown
       id: switch
       entity_id:
         - switch.bathroom_speaker_do_not_disturb
@@ -38,6 +38,14 @@
         - switch.office_speaker_do_not_disturb
         - switch.laundry_room_speaker_do_not_disturb
         - switch.living_room_speaker_do_not_disturb
+      to:
+        - unknown
+        - unavailable
+      for: 120
+
+    - trigger: state
+      id: player
+      entity_id: !include /config/include/media_player_entities_single.yaml
       to:
         - unknown
         - unavailable
@@ -55,11 +63,12 @@
             minutes: 5
           continue_on_timeout: true
 
+        # check if integration has now loaded properly
         - condition: state
           entity_id:
             - sensor.bathroom_speaker_device
             - sensor.kitchen_hub_device
-            - sensor.deck_chromecast_device
+            - sensor.bedroom_chromecast_device
             - sensor.dining_room_hub_device
             - sensor.bedroom_hub_device
             - sensor.office_speaker_device
@@ -84,12 +93,35 @@
             device_id: 8e0b83d7aa6f1662268d07aafbf58c67 # google home
           continue_on_error: true
       else:
+        - variables:
+            media_player: >
+              {% if trigger.id == 'sensor' %}
+                media_player.{{ states[trigger.entity_id].object_id | replace('_device', '') }}
+              {% elif trigger.id == 'switch' %}
+                media_player.{{ states[trigger.entity_id].object_id | replace('_do_not_disturb', '') }}
+              {% elif trigger.id == 'player' %}
+                {{ trigger.entity_id }}
+              {% endif %}
+            sensor: "sensor.{{ media_player.split('.')[1] }}_device"
+            switch: "switch.{{ media_player.split('.')[1] }}_do_not_disturb"
+
+        - wait_template: "{{ states(media_player) not in ['unknown', 'unavailable'] }}"
+          timeout:
+            hours: 24
+          continue_on_timeout: false
+
+        - delay: 30 # allow media player to load
+
+        - condition: template # prevent reloading multiple times
+          alias: "Google home entity still unknown or unavailable"
+          value_template: >
+            {{ states(sensor) in ['unknown', 'unavailable']
+                or states(switch) in ['unknown', 'unavailable'] }}
+
         - action: homeassistant.reload_config_entry
           target:
             device_id: 8e0b83d7aa6f1662268d07aafbf58c67 # google home
           continue_on_error: true
-
-        - delay: 60 # allow integration to reload
 
         - action: persistent_notification.create
           data:

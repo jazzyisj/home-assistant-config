@@ -138,22 +138,7 @@
 
     - name: "Daily Envcan"
       unique_id: daily_envcan
-      state: >
-        {% set condition = states('sensor.windsor_current_condition') %}
-        {% if condition | lower == 'clear' and is_state('sun.sun', 'above_horizon') %} sunny
-        {% elif condition | lower == 'clear' and is_state('sun.sun', 'below_horizon') %} clear-night
-        {% elif condition | lower in ['mainly clear', 'mainly sunny', 'clear-day'] %} sunny
-        {% elif condition | lower == 'mist' %} fog
-        {% elif condition | lower in ['haze', 'partly cloudy', 'partly-cloudy-day', 'partly-cloudy-night'] %} partlycloudy
-        {% elif condition | lower == 'mostly cloudy' %} cloudy
-        {% elif condition | lower in ['light rain', 'rain'] %} rainy
-        {% elif condition | lower in ['light snow', 'snow'] %} snowy
-        {% elif condition | lower == 'thunderstorm' %} lightning-rainy
-        {% elif condition | lower == 'heavy rain' %} pouring
-        {% elif condition | lower == 'precipitation' %} rainy
-        {% elif condition | lower == 'wind' %} windy
-        {% else %} {{ condition | lower }}
-        {% endif %}
+      state: "{{ states('weather.windsor_forecast') }}"
       attributes:
         temperature: "{{ states('sensor.windsor_temperature') }}"
         dew_point: "{{ states('sensor.windsor_dew_point') }}"
@@ -177,7 +162,7 @@
 
     - name: "Hourly Envcan"
       unique_id: hourly_envcan
-      state: "{{ states('sensor.windsor_current_condition') }}"
+      state: "{{ states('weather.windsor_forecast') }}"
       attributes:
         temperature: "{{ states('sensor.windsor_temperature') }}"
         dew_point: "{{ states('sensor.windsor_dew_point') }}"
@@ -350,22 +335,22 @@
       unit_of_measurement: °C
       state: >
         {% set tempest = states('sensor.tempest_feels_like_temperature') | float(none) %}
-        {% set pirate = states('sensor.pirateweather_apparent_temperature') | float(none) %}
+        {% set weatherflow = states('sensor.home_sensors_apparent_temperature') | float(none) %}
         {% if  tempest != none %} {% set temp = tempest %}
-        {% elif pirate != none %} {% set temp = pirate %}
+        {% elif weatherflow != none %} {% set temp = weatherflow %}
         {% endif %}
         {{ '%0.1f' | format(temp) }}
       attributes:
         provider: >
           {% set tempest = states('sensor.tempest_feels_like_temperature') | float(none) %}
-          {% set pirate = states('sensor.pirateweather_apparent_temperature') | float(none) %}
+          {% set weatherflow = states('sensor.home_sensors_apparent_temperature') | float(none) %}
           {% if tempest != none %} Tempest
-          {% elif pirate != none %} Pirate Weather
+          {% elif weatherflow != none %} Weatherflow
           {% endif %}
       availability: >
         {% set tempest = states('sensor.tempest_feels_like_temperature') | float(none) %}
-        {% set pirate = states('sensor.pirateweather_apparent_temperature') | float(none) %}
-        {{ tempest != none or pirate != none }}
+        {% set weatherflow = states('sensor.home_sensors_apparent_temperature') | float(none) %}
+        {{ tempest != none or weatherflow != none }}
 
 ###################################################################################################
 ## Lightning Trigger Sensors
@@ -614,22 +599,28 @@
     - trigger: numeric_state
       id: temp
       entity_id: sensor.outdoor_temperature
-      above: 0
+      above: -1
       below: 1
+
+    - trigger: state
+      id: trend
+      entity_id: sensor.outdoor_temperature_trend
+      to:
   binary_sensor:
     - name: "Precipitation Type Change Alert"
-      unique_id: precipitation_type_change_alert
+      unique_id: precipitation_type_change_alert #VERIFY
       icon: mdi:weather-snowy-rainy
-      state: > #NOTE always false after startup and template reload if not temp
-        {{ (trigger.id == 'change' and states.sensor.precipitation_type.state != 'none'
-                and now() - states.sensor.precipitation_type.last_changed < timedelta(minutes=30)
-              or ((is_state('sensor.precipitation_type', 'rain')
-                    and states('sensor.outdoor_temperature') | int(none) != none
-                    and states('sensor.outdoor_temperature_trend') != 'falling')
-                or (is_state('sensor.precipitation_type', 'snow')
-                    and states('sensor.outdoor_temperature') | int(none) != none)
-                    and states('sensor.outdoor_temperature_trend') != 'rising')) }}
-      availability: "{{ has_value('sensor.precipitation_type') }}"
+      state: >
+        {% set temp = states('sensor.outdoor_temperature') | int(none) %}
+        {{ (trigger.id == 'change'
+              and now() - states.sensor.precipitation_type.last_changed < timedelta(minutes=60))
+            or (is_state('sensor.precipitation_type', 'snow') and temp >= -1
+              and states('sensor.outdoor_temperature_trend') != 'falling')
+            or (is_state('sensor.precipitation_type', 'rain') and temp <= 1
+              and states('sensor.outdoor_temperature_trend') != 'rising') }}
+      availability: >
+        {{ has_value('sensor.precipitation_type')
+            and is_number(states('sensor.outdoor_temperature')) }}
 
 - binary_sensor:
     ###################################################################################################
@@ -846,26 +837,26 @@
       icon: >
         {% from 'weather.jinja' import condition_icon %}
         {{ condition_icon(states(this.entity_id)) }}
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].condition }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[0]['condition'] }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
-            and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].condition is defined }}
+        {{ state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[0]['condition'] is defined }}
 
     - name: "Condition Tomorrow"
       unique_id: condition_tomorrow
       icon: >
         {% from 'weather.jinja' import condition_icon %}
         {{ condition_icon(states(this.entity_id)) }}
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].condition }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[1]['condition'] }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
-            and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].condition is defined }}
+        {{ state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[1] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[1]['condition'] is defined }}
 
     ###################################################################################################
     ## Temperature
@@ -938,14 +929,35 @@
       device_class: temperature
       state_class: measurement
       unit_of_measurement: °C
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].temperature | float(none) }}"
+      state: >
+        {% if state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[0]['temperature'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['temperature']) %}
+          {% set temp = state_attr('sensor.daily_envcan', 'forecast')[0]['temperature'] | float(none) %}
+        {% else %}
+          {% set temp = state_attr('sensor.daily_weather', 'forecast')[0]['temperature'] | float(none) %}
+        {% endif %}
+        {{ '%0.1f' | format(temp) }}
       attributes:
-        provider: "Daily Weather"
+        provider: >
+          {% if state_attr('sensor.daily_envcan', 'forecast') != none
+              and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+              and state_attr('sensor.daily_envcan', 'forecast')[0]['temperature'] is defined
+              and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['temperature']) %}
+            Environment Canada
+          {% else %}
+            Daily Forecast
+          {% endif %}
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
+        {{ (state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[0]['temperature'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['temperature']))
+          or (state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].temperature is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].temperature) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['temperature'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['temperature'])) }}
 
     - name: "Outdoor High Temperature Time"
       unique_id: outdoor_high_temperature_time
@@ -963,14 +975,14 @@
       icon: mdi:sun-thermometer
       device_class: temperature
       unit_of_measurement: °C
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].temperature | float(none) }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[1]['temperature'] | float(none) }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
-            and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].temperature is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].temperature) }}
+        {{ state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[1] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[1]['temperature'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[1]['temperature']) }}
 
     - name: "Outdoor High Temperature Time Tomorrow"
       unique_id: outdoor_high_temperature_time_tomorrow
@@ -1008,19 +1020,40 @@
             and is_number(states('sensor.outdoor_high_temperature')) }}
 
     - name: "Outdoor Low Temperature"
-      unique_id: outdoor_low_temperature
+      unique_id: outdoor_low__temperature
       icon: mdi:snowflake-thermometer
       device_class: temperature
       state_class: measurement
       unit_of_measurement: °C
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].templow | float(none) }}"
+      state: >
+        {% if state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[0]['templow'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['templow']) %}
+          {% set temp = state_attr('sensor.daily_envcan', 'forecast')[0]['templow'] | float(none) %}
+        {% else %}
+          {% set temp = state_attr('sensor.daily_weather', 'forecast')[1]['templow'] | float(none) %}
+        {% endif %}
+        {{ '%0.1f' | format(temp) }}
       attributes:
-        provider: "Daily Weather"
+        provider: >
+          {% if state_attr('sensor.daily_envcan', 'forecast') != none
+              and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+              and state_attr('sensor.daily_envcan', 'forecast')[0]['templow'] is defined
+              and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['templow']) %}
+            Environment Canada
+          {% else %}
+            Daily Forecast
+          {% endif %}
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
+        {{ (state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[0]['templow'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['templow']))
+          or (state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].templow is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].templow) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['templow'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['templow'])) }}
 
     - name: "Outdoor Low Temperature Time"
       unique_id: outdoor_low_temperature_time
@@ -1038,14 +1071,14 @@
       icon: mdi:snowflake-thermometer
       device_class: temperature
       unit_of_measurement: °C
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].templow | float(none) }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[1]['templow'] | float(none) }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
-        {{ state_attr('sensor.daily_weather', 'forecast') != none
-            and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].templow is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].templow) }}
+        {{ state_attr('sensor.daily_envcan', 'forecast') != none
+            and state_attr('sensor.daily_envcan', 'forecast')[1] is defined
+            and state_attr('sensor.daily_envcan', 'forecast')[1]['templow'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[1]['templow']) }}
 
     - name: "Outdoor Low Temperature Time Tomorrow"
       unique_id: outdoor_low_temperature_time_tomorrow
@@ -1059,7 +1092,7 @@
       availability: "{{ has_value('sensor.pirateweather_daily_low_temperature_time_1d') }}"
 
     - name: "Outdoor Normal Low Temperature"
-      unique_id: outdoor_normal_low_temperature # req envcan no state class for statistics for apex graphs
+      unique_id: outdoor_normal_low_temperature
       icon: mdi:snowflake-thermometer
       device_class: temperature
       state_class: measurement
@@ -1114,28 +1147,28 @@
       device_class: humidity
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].humidity | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0]['humidity'] | int(none) }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Daily Forecast"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].humidity is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].humidity) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['humidity'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['humidity']) }}
 
     - name: "Outdoor Humidity Tomorrow"
       unique_id: outdoor_humidity_tomorrow
       device_class: humidity
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].humidity | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1]['humidity'] | int(none) }}"
       attributes:
-        provider: "Daily Weather"
+        provider: "Daily Forecast"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].humidity is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].humidity) }}
+            and state_attr('sensor.daily_weather', 'forecast')[1]['humidity'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[1]['humidity']) }}
 
     ###################################################################################################
     ## Dew Point
@@ -1183,8 +1216,8 @@
       availability: >
         {{ state_attr('sensor.hourly_weather', 'forecast') != none
             and state_attr('sensor.hourly_weather', 'forecast')[0] is defined
-            and state_attr('sensor.hourly_weather', 'forecast')[0].dew_point is defined
-            and is_number(state_attr('sensor.hourly_weather', 'forecast')[0].dew_point) }}
+            and state_attr('sensor.hourly_weather', 'forecast')[0]['dew_point'] is defined
+            and is_number(state_attr('sensor.hourly_weather', 'forecast')[0]['dew_point']) }}
 
     - name: "Dew Point Tomorrow"
       unique_id: dew_point_tomorrow
@@ -1209,8 +1242,8 @@
       availability: >
         {{ state_attr('sensor.hourly_weather', 'forecast') != none
             and state_attr('sensor.hourly_weather', 'forecast')[1] is defined
-            and state_attr('sensor.hourly_weather', 'forecast')[1].dew_point is defined
-            and is_number(state_attr('sensor.hourly_weather', 'forecast')[1].dew_point) }}
+            and state_attr('sensor.hourly_weather', 'forecast')[1]['dew_point'] is defined
+            and is_number(state_attr('sensor.hourly_weather', 'forecast')[1]['dew_point']) }}
 
     - name: "Dew Point Comfort Level"
       unique_id: dew_point_comfort_level
@@ -1268,21 +1301,21 @@
       availability: >
         {{ state_attr('sensor.hourly_envcan', 'forecast') != none
             and state_attr('sensor.hourly_envcan', 'forecast')[0] is defined
-            and state_attr('sensor.hourly_envcan', 'forecast')[0].precipitation_probability is defined
+            and state_attr('sensor.hourly_envcan', 'forecast')[0]['precipitation_probability'] is defined
             and is_number(state_attr('sensor.hourly_envcan', 'forecast')[0]['precipitation_probability']) }}
 
     - name: "Precipitation Probability Today"
       unique_id: precipitation_probability_today
       icon: mdi:weather-rainy
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[0].precipitation_probability | int(none) }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[0]['precipitation_probability'] | int(none) }}"
       attributes:
         provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
         {{ state_attr('sensor.daily_envcan', 'forecast') != none
             and state_attr('sensor.daily_envcan', 'forecast')[0] is defined
-            and state_attr('sensor.daily_envcan', 'forecast')[0].precipitation_probability is defined
-            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0].precipitation_probability) }}
+            and state_attr('sensor.daily_envcan', 'forecast')[0]['precipitation_probability'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[0]['precipitation_probability']) }}
 
     - name: "Precipitation Probability Next 24 Hours"
       unique_id: precipitation_probability_next_24_hours
@@ -1308,14 +1341,14 @@
       unique_id: precipitation_probability_tomorrow
       icon: mdi:weather-rainy
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[1].precipitation_probability | int(none) }}"
+      state: "{{ state_attr('sensor.daily_envcan', 'forecast')[1]['precipitation_probability'] | int(none) }}"
       attributes:
         provider: "Environment Canada" # more accurate that pirate, not synced with forecast sensor
       availability: >
         {{ state_attr('sensor.daily_envcan', 'forecast') != none
             and state_attr('sensor.daily_envcan', 'forecast')[1] is defined
-            and state_attr('sensor.daily_envcan', 'forecast')[1].precipitation_probability is defined
-            and is_number(state_attr('sensor.daily_envcan', 'forecast')[1].precipitation_probability) }}
+            and state_attr('sensor.daily_envcan', 'forecast')[1]['precipitation_probability'] is defined
+            and is_number(state_attr('sensor.daily_envcan', 'forecast')[1]['precipitation_probability']) }}
 
     - name: "Fog Probability"
       unique_id: fog_probability
@@ -1402,28 +1435,28 @@
       icon: mdi:weather-pouring
       device_class: precipitation
       unit_of_measurement: mm
-      state: "{{ '%0.1f' | format(state_attr('sensor.daily_weather', 'forecast')[0].precipitation | float(-1)) }}"
+      state: "{{ '%0.1f' | format(state_attr('sensor.daily_weather', 'forecast')[0]['precipitation'] | float(-1)) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].precipitation is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].precipitation) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['precipitation'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['precipitation']) }}
 
     - name: "Precipitation Expected Tomorrow"
       unique_id: precipitation_expected_tomorrow
       icon: mdi:weather-pouring
       device_class: precipitation
       unit_of_measurement: mm
-      state: "{{ '%0.1f' | format(state_attr('sensor.daily_weather', 'forecast')[1].precipitation | float(-1)) }}"
+      state: "{{ '%0.1f' | format(state_attr('sensor.daily_weather', 'forecast')[1]['precipitation'] | float(-1)) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].precipitation is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].precipitation) }}
+            and state_attr('sensor.daily_weather', 'forecast')[1]['precipitation'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[1]['precipitation']) }}
 
     - name: "Max Precipitation Intensity Tomorrow"
       unique_id: max_precipitation_intensity_tomorrow
@@ -1721,14 +1754,14 @@
       device_class: wind_speed
       state_class: measurement
       unit_of_measurement: km/h
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].wind_speed | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0]['wind_speed'] | int(none) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].wind_speed is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].wind_speed) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['wind_speed'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['wind_speed']) }}
 
     - name: "Wind Speed Tomorrow"
       unique_id: wind_speed_tomorrow
@@ -1736,14 +1769,14 @@
       device_class: wind_speed
       state_class: measurement
       unit_of_measurement: km/h
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].wind_speed | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1]['wind_speed'] | int(none) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].wind_speed is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].wind_speed) }}
+            and state_attr('sensor.daily_weather', 'forecast')[1]['wind_speed'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[1]['wind_speed']) }}
 
     - name: "Wind Gust"
       unique_id: wind_gust # filter erroneous pirate values
@@ -1776,14 +1809,14 @@
       device_class: wind_speed
       state_class: measurement
       unit_of_measurement: km/h
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].wind_gust_speed | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0]['wind_gust_speed'] | int(none) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].wind_gust_speed is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].wind_gust_speed) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['wind_gust_speed'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['wind_gust_speed']) }}
 
     - name: "Wind Gust Tomorrow"
       unique_id: wind_gust_tomorrow
@@ -1791,14 +1824,14 @@
       device_class: wind_speed
       state_class: measurement
       unit_of_measurement: km/h
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].wind_gust_speed | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1]['wind_gust_speed'] | int(none) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].wind_gust_speed is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].wind_gust_speed) }}
+            and state_attr('sensor.daily_weather', 'forecast')[1]['wind_gust_speed'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[1]['wind_gust_speed']) }}
 
     - name: "Wind Lull"
       unique_id: wind_lull
@@ -1929,14 +1962,14 @@
         {{ cloud_icon(states(this.entity_id)) }}
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0].cloud_coverage | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[0]['cloud_coverage'] | int(none) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[0] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[0].cloud_coverage is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[0].cloud_coverage) }}
+            and state_attr('sensor.daily_weather', 'forecast')[0]['cloud_coverage'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[0]['cloud_coverage']) }}
 
     - name: "Cloud Coverage Tomorrow"
       unique_id: cloud_coverage_tomorrow
@@ -1945,14 +1978,14 @@
         {{ cloud_icon(states(this.entity_id)) }}
       state_class: measurement
       unit_of_measurement: "%"
-      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1].cloud_coverage | int(none) }}"
+      state: "{{ state_attr('sensor.daily_weather', 'forecast')[1]['cloud_coverage'] | int(none) }}"
       attributes:
         provider: "Daily Weather"
       availability: >
         {{ state_attr('sensor.daily_weather', 'forecast') != none
             and state_attr('sensor.daily_weather', 'forecast')[1] is defined
-            and state_attr('sensor.daily_weather', 'forecast')[1].cloud_coverage is defined
-            and is_number(state_attr('sensor.daily_weather', 'forecast')[1].cloud_coverage) }}
+            and state_attr('sensor.daily_weather', 'forecast')[1]['cloud_coverage'] is defined
+            and is_number(state_attr('sensor.daily_weather', 'forecast')[1]['cloud_coverage']) }}
 
     ###################################################################################################
     ## Visibility

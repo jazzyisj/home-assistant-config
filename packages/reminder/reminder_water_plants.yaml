@@ -113,11 +113,11 @@ automation:
     trigger:
       - trigger: template
         value_template: >
-          {% set time = states('sensor.time') %}
-          {% set shift = states('sensor.time_trigger_shift') %}
-          {% set last_run = states('button.water_plants_done') %}
           {% if is_state('input_boolean.water_plants_enabled', 'on')
               and not is_state('input_select.occupancy_mode','Vacation') %}
+            {% set time = states('sensor.time') %}
+            {% set shift = states('sensor.actual_shift_today') %}
+            {% set last_run = states('button.water_plants_done') %}
             {{ ((shift == 'days' and time == states('input_datetime.water_plants_days')[0:5])
                   or (shift == 'afts' and time == states('input_datetime.water_plants_afternoons')[0:5])
                   or (shift == 'wknd' and time == states('input_datetime.water_plants_weekends')[0:5]))
@@ -125,13 +125,31 @@ automation:
                   >= states('input_number.water_plants_day_interval') | int) }}
           {% endif %}
     action:
-      - if:
-          - condition: state
-            entity_id:
-              - input_boolean.water_plants_skipped
-              - input_boolean.water_plants_paused
-            state: "off"
+      # turn off previous active reminder to retrigger notifications
+      - if: "{{ is_state('input_boolean.water_plants_active', 'on') }}"
         then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.water_plants_active
+
+      # turn off previous paused reminder
+      - if: "{{ is_state('input_boolean.water_plants_paused', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.water_plants_paused
+
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.water_plants_paused
+
+      # turn on active reminder if not skipped else turn of skipped
+      - if: "{{ is_state('input_boolean.water_plants_skipped', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.water_plants_skipped
+        else:
           - action: input_boolean.turn_on
             target:
               entity_id: input_boolean.water_plants_active
@@ -207,7 +225,7 @@ automation:
         entity_id: input_boolean.water_plants_paused
         to: "on"
         for:
-          hours: 4
+          hours: 24
 
       - trigger: state
         entity_id: binary_sensor.owner_home
@@ -216,9 +234,7 @@ automation:
           minutes: 15
     condition:
       - condition: state
-        entity_id:
-          - binary_sensor.owner_home
-          - input_boolean.water_plants_paused
+        entity_id: input_boolean.water_plants_paused
         state: "on"
     action:
       - action: input_boolean.turn_off
@@ -248,6 +264,13 @@ automation:
       - condition: state
         entity_id: input_boolean.water_plants_enabled
         state: "off"
+
+      - condition: or
+        conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.entity_id == 'input_boolean.water_plants_paused'
+                  and is_state('binary_sensor.water_plants_reminder', 'off') }}
     action:
       - if: "{{ trigger.id == 'entity' }}"
         then:
@@ -265,6 +288,7 @@ automation:
   - id: water_plants_notification
     alias: "Water Plants Notification"
     description: "Send notification until reminder is off."
+    max_exceeded: silent
     trigger:
       - trigger: homeassistant
         event: start
@@ -275,6 +299,10 @@ automation:
         not_from:
           - unknown
           - unavailable
+
+      - trigger: state
+        entity_id: input_boolean.water_plants_paused
+        to: "off"
     condition:
       - condition: state
         entity_id: binary_sensor.water_plants_reminder
@@ -284,79 +312,69 @@ automation:
         entity_id: input_boolean.water_plants_paused
         state: "off"
     action:
-      - if:
-          - condition: state
-            entity_id: input_boolean.water_plants_skipped
-            state: "on"
-        then:
-          - action: input_boolean.turn_off
-            target:
-              entity_id: input_boolean.water_plants_skipped
-        else:
-          - repeat:
-              sequence:
-                - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
-                  then:
-                    - action: notify.jason
-                      data:
-                        message: "Water the Plants!"
-                        data:
-                          tag: water_plants_reminder
-                          group: Reminder
-                          visibility: public
-                          persistent: true
-                          notification_icon: *plant_icon
-                          icon_url: !secret PLANT_ICON
-                          actions:
-                            - title: "Pause"
-                              action: pause_water_plants
+      - repeat:
+          sequence:
+            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+              then:
+                - action: notify.jason
+                  data:
+                    message: "Water the Plants!"
+                    data:
+                      tag: water_plants_reminder
+                      group: Reminder
+                      visibility: public
+                      persistent: true
+                      notification_icon: *plant_icon
+                      icon_url: !secret PLANT_ICON
+                      actions:
+                        - title: "Pause"
+                          action: pause_water_plants
 
-                            - title: "Skip"
-                              action: skip_water_plants
+                        - title: "Skip"
+                          action: skip_water_plants
 
-                            - title: "Done"
-                              action: water_plants_done
+                        - title: "Done"
+                          action: water_plants_done
 
-                    # wait to see if turned off before tts
-                    - wait_template: >
-                        {{ is_state('binary_sensor.water_plants_reminder', 'off')
-                            or is_state('input_boolean.water_plants_paused', 'on') }}
-                      timeout:
-                        minutes: 2
-
-                    - if:
-                        - condition: state
-                          entity_id: binary_sensor.water_plants_reminder
-                          state: "on"
-
-                        - condition: state
-                          entity_id: input_boolean.water_plants_paused
-                          state: "off"
-                      then:
-                        - action: script.turn_on
-                          continue_on_error: true
-                          target:
-                            entity_id: script.tts_play
-                          data:
-                            variables:
-                              message: "Your plants need to be watered!"
-                              quiet_play: true
-                              save_message: true
-
+                # wait to see if turned off before tts
                 - wait_template: >
                     {{ is_state('binary_sensor.water_plants_reminder', 'off')
                         or is_state('input_boolean.water_plants_paused', 'on') }}
                   timeout:
-                    minutes: "{{ states('input_number.water_plants_notification_interval') | int }}"
-              until:
-                - or:
+                    minutes: 2
+
+                - if:
                     - condition: state
                       entity_id: binary_sensor.water_plants_reminder
-                      state: "off"
+                      state: "on"
 
                     - condition: state
                       entity_id: input_boolean.water_plants_paused
-                      state: "on"
+                      state: "off"
+                  then:
+                    - action: script.turn_on
+                      continue_on_error: true
+                      target:
+                        entity_id: script.tts_play
+                      data:
+                        variables:
+                          message: "Your plants need to be watered!"
+                          quiet_play: true
+
+            - wait_template: >
+                {{ is_state('binary_sensor.water_plants_reminder', 'off')
+                    or is_state('input_boolean.water_plants_paused', 'on') }}
+              timeout:
+                minutes: "{{ states('input_number.water_plants_notification_interval') | int }}"
+          until:
+            - or:
+                - condition: state
+                  entity_id: binary_sensor.water_plants_reminder
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.water_plants_paused
+                  state: "on"
 
   ###################################################################################################
   ## Clear Water Plants Notification
