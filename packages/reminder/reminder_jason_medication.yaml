@@ -4,18 +4,16 @@
 input_boolean:
   jason_medication_enabled:
     name: "Jason Medication Enabled"
-    icon: &jason_icon mdi:pill-multiple
+    icon: &spa_icon mdi:pill-multiple
   jason_medication_active:
     name: "Jason Medication Active"
-    icon: *jason_icon
+    icon: *spa_icon
   jason_medication_paused:
     name: "Jason Medication Paused"
-    icon: *jason_icon
-    initial: false
+    icon: *spa_icon
   jason_medication_skipped:
     name: "Jason Medication Skipped"
-    icon: *jason_icon
-    initial: false
+    icon: *spa_icon
 
 input_datetime:
   jason_medication_days:
@@ -24,25 +22,17 @@ input_datetime:
     has_date: false
     has_time: true
   jason_medication_afternoons:
-    icon: mdi:clock
-    has_date: false
-    has_time: true
     name: "Jason Medication Afternoons"
-  jason_medication_weekends:
     icon: mdi:clock
     has_date: false
     has_time: true
+  jason_medication_weekends:
     name: "Jason Medication Weekends"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
 
 input_number:
-  jason_medication_day_interval:
-    name: "Jason Medication Day Interval"
-    icon: mdi:calendar-range
-    unit_of_measurement: days
-    mode: slider
-    min: 1
-    max: 7
-    step: 1
   jason_medication_notification_interval:
     name: "Jason Medication Reminder Interval"
     icon: mdi:calendar-range
@@ -56,54 +46,130 @@ template:
   - button:
       - name: "Jason Medication Done"
         unique_id: jason_medication_done
-        icon: *jason_icon
-        press:
-          - condition: state
-            entity_id: binary_sensor.jason_medication_reminder
-            state: "on"
-
-          - action: input_boolean.turn_off
-            target:
-              entity_id: input_boolean.jason_medication_active
-
-          - action: browser_mod.notification
-            data:
-              message: "Jason Medication reminder has been turned off."
-              duration: 10000
-
-      - name: "Skip Jason Medication"
-        unique_id: skip_jason_medication
-        icon: *jason_icon
+        icon: *spa_icon
         press:
           - if:
               - condition: state
-                entity_id: binary_sensor.jason_medication_reminder
-                state: "on"
+                entity_id: input_boolean.jason_medication_enabled
+                state: "off"
             then:
-              - action: input_boolean.turn_off
-                target:
-                  entity_id: input_boolean.jason_medication_active
+              - action: browser_mod.notification
+                data:
+                  message: "Jason Medication reminder is not enabled."
+                  duration: 10000
             else:
-              - action: input_boolean.toggle
-                target:
-                  entity_id: input_boolean.jason_medication_skipped
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.jason_medication_active
+                    state: "off"
+                then:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.jason_medication_skipped
 
-  - binary_sensor:
+                  - action: browser_mod.notification
+                    data:
+                      message: "Jason's Medication reminder has been marked completed and the next reminder time will be skipped."
+                      duration: 10000
+                else:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: &entities
+                        - input_boolean.jason_medication_active
+                        - input_boolean.jason_medication_paused
+                        - input_boolean.jason_medication_skipped
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Jason Medication reminder has been marked completed."
+                      duration: 10000
+
+      - name: "Skip Jason Medication"
+        unique_id: skip_jason_medication
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.jason_medication_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Jason Medication reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.jason_medication_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id:
+                        - input_boolean.jason_medication_active
+                        - input_boolean.jason_medication_skipped
+                else:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.jason_medication_skipped
+
+              - action: browser_mod.notification
+                data:
+                  message: "Jason Medication skip reminder is now {{ states('input_boolean.jason_medication_skipped') }}."
+                  duration: 10000
+
+      - name: "Pause Jason Medication"
+        unique_id: pause_jason_medication
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.jason_medication_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Jason Medication reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.jason_medication_reminder
+                    state:
+                      - Active
+                      - Paused
+                then:
+                  - action: input_boolean.toggle
+                    target:
+                      entity_id: input_boolean.jason_medication_paused
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Jason Medication pause reminder is now {{ states('input_boolean.jason_medication_paused') }}."
+                      duration: 10000
+                else:
+                  - action: browser_mod.notification
+                    data:
+                      message: "Jason Medication reminder is not active."
+                      duration: 10000
+
+  - sensor:
       - name: "Jason Medication Reminder"
         unique_id: jason_medication_reminder
-        icon: *jason_icon
-        picture: >
-          {% if is_state('input_boolean.jason_medication_paused', 'on')
-              or is_state('input_boolean.jason_medication_skipped', 'on') %}
-            /local/images/entity_icons/jason_medication_paused.png
-          {% elif is_state('input_boolean.jason_medication_active', 'on') %}
-            /local/images/entity_icons/jason_medication.png
-          {% else %}
-            /local/images/entity_icons/jason_medication_off.png
-          {% endif %}
+        icon: *spa_icon
+        device_class: enum
         state: >
-          {{ is_state('input_boolean.jason_medication_enabled', 'on')
-                and is_state('input_boolean.jason_medication_active', 'on') }}
+          {% if is_state('input_boolean.jason_medication_enabled', 'off') %} Disabled
+          {% elif is_state('input_boolean.jason_medication_paused', 'on') %} Paused
+          {% elif is_state('input_boolean.jason_medication_skipped', 'on') %} Skipped
+          {% elif is_state('input_boolean.jason_medication_active', 'on') %} Active
+          {% else %} Off
+          {% endif %}
+        attributes:
+          options: "['Disabled', 'Paused', 'Skipped', 'Active', 'Off']"
 
 automation:
   ###################################################################################################
@@ -119,11 +185,9 @@ automation:
             {% set time = states('sensor.time') %}
             {% set shift = states('sensor.actual_shift_today') %}
             {% set last_run = states('button.jason_medication_done') %}
-            {{ ((shift == 'days' and time == states('input_datetime.jason_medication_days')[0:5])
-                  or (shift == 'afts' and time == states('input_datetime.jason_medication_afternoons')[0:5])
-                  or (shift == 'wknd' and time == states('input_datetime.jason_medication_weekends')[0:5]))
-                and (last_run == 'unknown' or (now().date()- (last_run | as_datetime).date()).days
-                  >= states('input_number.jason_medication_day_interval') | int) }}
+            {{ ((shift == 'Days' and time == states('input_datetime.jason_medication_days')[0:5])
+                  or (shift == 'Afternoons' and time == states('input_datetime.jason_medication_afternoons')[0:5])
+                  or (shift == 'Off' and time == states('input_datetime.jason_medication_weekends')[0:5])) }}
           {% endif %}
     action:
       # turn off previous active reminder to retrigger notifications
@@ -160,7 +224,7 @@ automation:
   ###################################################################################################
   - id: jason_medication_done
     alias: "Jason Medication Done"
-    description: "Reset Jason Medication."
+    description: "Mark reminder completed."
     max_exceeded: silent
     trigger:
       - trigger: event
@@ -169,7 +233,7 @@ automation:
           action: jason_medication_done
     condition:
       - condition: state
-        entity_id: binary_sensor.jason_medication_reminder
+        entity_id: input_boolean.jason_medication_active
         state: "on"
     action:
       - action: button.press
@@ -198,7 +262,7 @@ automation:
   ###################################################################################################
   - id: pause_jason_medication
     alias: "Pause Jason Medication"
-    description: "Pause jason medication reminder."
+    description: "Pause reminder."
     max_exceeded: silent
     trigger:
       - trigger: event
@@ -211,25 +275,25 @@ automation:
           entity_id: input_boolean.jason_medication_paused
 
   ###################################################################################################
-  ## Reset Jason Medication Paused
+  ## Reset Pause Jason Medication
   ###################################################################################################
-  - id: reset_pause_jason_medication_paused
-    alias: "Reset Jason Medication Paused"
-    description: "Reset jason medication reminder paused."
+  - id: reset_pause_jason_medication
+    alias: "Reset Pause Jason Medication"
+    description: "Reset reminder paused boolean."
     max_exceeded: silent
     trigger:
       - trigger: state
-        entity_id: binary_sensor.jason_medication_reminder
-        to: "off"
+        entity_id: input_boolean.jason_medication_skipped
+        to: "on"
 
       - trigger: state
         entity_id: input_boolean.jason_medication_paused
         to: "on"
         for:
-          hours: 1
+          hours: 24
 
       - trigger: state
-        entity_id: binary_sensor.jason_home
+        entity_id: binary_sensor.owner_home
         to: "on"
         for:
           minutes: 15
@@ -247,7 +311,8 @@ automation:
   ###################################################################################################
   - id: reset_jason_medication_booleans
     alias: "Reset Jason Medication Booleans"
-    description: "Reset reminder booleans."
+    description: "Reset reminder booleans if reminder disabled, completed, or not active."
+    max_exceeded: silent
     trigger:
       - trigger: state
         id: enabled
@@ -255,23 +320,31 @@ automation:
         to: "off"
 
       - trigger: state
+        id: done
+        entity_id: input_boolean.jason_medication_active
+        to: "off"
+
+      - trigger: state
         id: entity
-        entity_id: &entities
-          - input_boolean.jason_medication_active
-          - input_boolean.jason_medication_skipped
-          - input_boolean.jason_medication_paused
+        entity_id: *entities
         to: "on"
     condition:
-      - condition: state
-        entity_id: input_boolean.jason_medication_enabled
-        state: "off"
-
       - condition: or
         conditions:
+          - condition: state
+            entity_id: input_boolean.jason_medication_enabled
+            state: "off"
+
           - condition: template
+            alias: "Pause boolean turned on when reminder is skipped or isn't active"
             value_template: >
               {{ trigger.entity_id == 'input_boolean.jason_medication_paused'
-                  and is_state('binary_sensor.jason_medication_reminder', 'off') }}
+                  and (is_state('input_boolean.jason_medication_active', 'off')
+                    or is_state('input_boolean.jason_medication_skipped', 'on')) }}
+
+          - condition: template
+            alias: "Reminder completed"
+            value_template: "{{ trigger.id == 'done' }}"
     action:
       - if: "{{ trigger.id == 'entity' }}"
         then:
@@ -295,18 +368,15 @@ automation:
         event: start
 
       - trigger: state
-        entity_id: binary_sensor.jason_medication_reminder
+        entity_id: input_boolean.jason_medication_active
         to: "on"
-        not_from:
-          - unknown
-          - unavailable
 
       - trigger: state
         entity_id: input_boolean.jason_medication_paused
         to: "off"
     condition:
       - condition: state
-        entity_id: binary_sensor.jason_medication_reminder
+        entity_id: input_boolean.jason_medication_active
         state: "on"
 
       - condition: state
@@ -325,8 +395,8 @@ automation:
                       group: Reminder
                       visibility: public
                       persistent: true
-                      notification_icon: *jason_icon
-                      icon_url: !secret JASON_MEDICATION_ICON
+                      notification_icon: *spa_icon
+                      icon_url: !secret SPA_ICON
                       actions:
                         - title: "Pause"
                           action: pause_jason_medication
@@ -339,14 +409,14 @@ automation:
 
                 # wait to see if turned off before tts
                 - wait_template: >
-                    {{ is_state('binary_sensor.jason_medication_reminder', 'off')
+                    {{ is_state('input_boolean.jason_medication_active', 'off')
                         or is_state('input_boolean.jason_medication_paused', 'on') }}
                   timeout:
                     minutes: 2
 
                 - if:
                     - condition: state
-                      entity_id: binary_sensor.jason_medication_reminder
+                      entity_id: input_boolean.jason_medication_active
                       state: "on"
 
                     - condition: state
@@ -359,18 +429,18 @@ automation:
                         entity_id: script.tts_play
                       data:
                         variables:
-                          message: "Hey Jason!  It's time to do some drugs!  Take your medicine like a man."
+                          message: "Hey J!  It's time to do some drugs!  Take your medicine like a man."
                           quiet_play: true
 
             - wait_template: >
-                {{ is_state('binary_sensor.jason_medication_reminder', 'off')
+                {{ is_state('input_boolean.jason_medication_active', 'off')
                     or is_state('input_boolean.jason_medication_paused', 'on') }}
               timeout:
                 minutes: "{{ states('input_number.jason_medication_notification_interval') | int }}"
           until:
             - or:
                 - condition: state
-                  entity_id: binary_sensor.jason_medication_reminder
+                  entity_id: input_boolean.jason_medication_active
                   state: "off"
 
                 - condition: state
@@ -383,9 +453,10 @@ automation:
   - id: clear_jason_medication_notification
     alias: "Clear Jason Medication Notification"
     description: "Clear reminder notification."
+    max_exceeded: silent
     trigger:
       - trigger: state
-        entity_id: binary_sensor.jason_medication_reminder
+        entity_id: input_boolean.jason_medication_active
         to: "off"
 
       - trigger: state

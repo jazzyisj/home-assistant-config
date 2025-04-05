@@ -56,18 +56,35 @@ template:
         unique_id: spa_maintenance_done
         icon: *spa_icon
         press:
-          - condition: state
-            entity_id: input_boolean.spa_maintenance_active
-            state: "on"
+          - if:
+              - condition: state
+                entity_id: input_boolean.spa_maintenance_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Maintenance reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.spa_maintenance_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: &entities
+                        - input_boolean.spa_maintenance_active
+                        - input_boolean.spa_maintenance_paused
+                        - input_boolean.spa_maintenance_skipped
 
-          - action: input_boolean.turn_off
-            target:
-              entity_id: input_boolean.spa_maintenance_active
-
-          - action: browser_mod.notification
-            data:
-              message: "Spa Maintenance reminder has been turned off."
-              duration: 10000
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Maintenance reminder has been marked completed."
+                  duration: 10000
 
       - name: "Skip Spa Maintenance"
         unique_id: skip_spa_maintenance
@@ -75,33 +92,86 @@ template:
         press:
           - if:
               - condition: state
-                entity_id: binary_sensor.spa_maintenance_reminder
-                state: "on"
+                entity_id: input_boolean.spa_maintenance_enabled
+                state: "off"
             then:
-              - action: input_boolean.turn_off
-                target:
-                  entity_id: input_boolean.spa_maintenance_active
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Maintenance reminder is not enabled."
+                  duration: 10000
             else:
-              - action: input_boolean.toggle
-                target:
-                  entity_id: input_boolean.spa_maintenance_skipped
+              - if:
+                  - condition: state
+                    entity_id: sensor.spa_maintenance_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id:
+                        - input_boolean.spa_maintenance_active
+                        - input_boolean.spa_maintenance_skipped
+                else:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.spa_maintenance_skipped
 
-  - binary_sensor:
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Maintenance skip reminder is now {{ states('input_boolean.spa_maintenance_skipped') }}."
+                  duration: 10000
+
+      - name: "Pause Spa Maintenance"
+        unique_id: pause_spa_maintenance
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.spa_maintenance_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Maintenance reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.spa_maintenance_reminder
+                    state:
+                      - Active
+                      - Paused
+                then:
+                  - action: input_boolean.toggle
+                    target:
+                      entity_id: input_boolean.spa_maintenance_paused
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Spa Maintenance pause reminder is now {{ states('input_boolean.spa_maintenance_paused') }}."
+                      duration: 10000
+                else:
+                  - action: browser_mod.notification
+                    data:
+                      message: "Spa Maintenance reminder is not active."
+                      duration: 10000
+
+  - sensor:
       - name: "Spa Maintenance Reminder"
         unique_id: spa_maintenance_reminder
         icon: *spa_icon
-        picture: >
-          {% if is_state('input_boolean.spa_maintenance_paused', 'on')
-              or is_state('input_boolean.spa_maintenance_skipped', 'on') %}
-            /local/images/entity_icons/spa_maintenance_paused.png
-          {% elif is_state('input_boolean.spa_maintenance_active', 'on') %}
-            /local/images/entity_icons/spa_maintenance.png
-          {% else %}
-            /local/images/entity_icons/spa_maintenance_off.png
-          {% endif %}
+        device_class: enum
         state: >
-          {{ is_state('input_boolean.spa_maintenance_enabled', 'on')
-                and is_state('input_boolean.spa_maintenance_active', 'on') }}
+          {% if is_state('input_boolean.spa_maintenance_enabled', 'off') %} Disabled
+          {% elif is_state('input_boolean.spa_maintenance_paused', 'on') %} Paused
+          {% elif is_state('input_boolean.spa_maintenance_skipped', 'on') %} Skipped
+          {% elif is_state('input_boolean.spa_maintenance_active', 'on') %} Active
+          {% else %} Off
+          {% endif %}
+        attributes:
+          options: "['Disabled', 'Paused', 'Skipped', 'Active', 'Off']"
 
 automation:
   ###################################################################################################
@@ -118,9 +188,9 @@ automation:
             {% set time = states('sensor.time') %}
             {% set shift = states('sensor.actual_shift_today') %}
             {% set last_run = states('button.spa_maintenance_done') %}
-            {{ ((shift == 'days' and time == states('input_datetime.spa_maintenance_days')[0:5])
-                  or (shift == 'afts' and time == states('input_datetime.spa_maintenance_afternoons')[0:5])
-                  or (shift == 'wknd' and time == states('input_datetime.spa_maintenance_weekends')[0:5]))
+            {{ ((shift == 'Days' and time == states('input_datetime.spa_maintenance_days')[0:5])
+                  or (shift == 'Afternoons' and time == states('input_datetime.spa_maintenance_afternoons')[0:5])
+                  or (shift == 'Off' and time == states('input_datetime.spa_maintenance_weekends')[0:5]))
                 and (last_run == 'unknown' or (now().date()- (last_run | as_datetime).date()).days
                   >= states('input_number.spa_maintenance_day_interval') | int) }}
           {% endif %}
@@ -159,7 +229,7 @@ automation:
   ###################################################################################################
   - id: spa_maintenance_done
     alias: "Spa Maintenance Done"
-    description: "Reset Spa Maintenance."
+    description: "Mark reminder completed."
     max_exceeded: silent
     trigger:
       - trigger: event
@@ -168,7 +238,7 @@ automation:
           action: spa_maintenance_done
     condition:
       - condition: state
-        entity_id: binary_sensor.spa_maintenance_reminder
+        entity_id: input_boolean.spa_maintenance_active
         state: "on"
     action:
       - action: button.press
@@ -197,7 +267,7 @@ automation:
   ###################################################################################################
   - id: pause_spa_maintenance
     alias: "Pause Spa Maintenance"
-    description: "Pause Spa Maintenance reminder."
+    description: "Pause reminder."
     max_exceeded: silent
     trigger:
       - trigger: event
@@ -218,8 +288,8 @@ automation:
     max_exceeded: silent
     trigger:
       - trigger: state
-        entity_id: binary_sensor.spa_maintenance_reminder
-        to: "off"
+        entity_id: input_boolean.spa_maintenance_skipped
+        to: "on"
 
       - trigger: state
         entity_id: input_boolean.spa_maintenance_paused
@@ -246,7 +316,8 @@ automation:
   ###################################################################################################
   - id: reset_spa_maintenance_booleans
     alias: "Reset Spa Maintenance Booleans"
-    description: "Reset reminder booleans."
+    description: "Reset reminder booleans if reminder disabled, completed, or not active."
+    max_exceeded: silent
     trigger:
       - trigger: state
         id: enabled
@@ -254,23 +325,31 @@ automation:
         to: "off"
 
       - trigger: state
+        id: done
+        entity_id: input_boolean.spa_maintenance_active
+        to: "off"
+
+      - trigger: state
         id: entity
-        entity_id: &entities
-          - input_boolean.spa_maintenance_active
-          - input_boolean.spa_maintenance_skipped
-          - input_boolean.spa_maintenance_paused
+        entity_id: *entities
         to: "on"
     condition:
-      - condition: state
-        entity_id: input_boolean.spa_maintenance_enabled
-        state: "off"
-
       - condition: or
         conditions:
+          - condition: state
+            entity_id: input_boolean.spa_maintenance_enabled
+            state: "off"
+
           - condition: template
+            alias: "Pause boolean turned on when reminder is skipped or isn't active"
             value_template: >
               {{ trigger.entity_id == 'input_boolean.spa_maintenance_paused'
-                  and is_state('binary_sensor.spa_maintenance_reminder', 'off') }}
+                  and (is_state('input_boolean.spa_maintenance_active', 'off')
+                    or is_state('input_boolean.spa_maintenance_skipped', 'on')) }}
+
+          - condition: template
+            alias: "Reminder completed"
+            value_template: "{{ trigger.id == 'done' }}"
     action:
       - if: "{{ trigger.id == 'entity' }}"
         then:
@@ -294,18 +373,15 @@ automation:
         event: start
 
       - trigger: state
-        entity_id: binary_sensor.spa_maintenance_reminder
+        entity_id: input_boolean.spa_maintenance_active
         to: "on"
-        not_from:
-          - unknown
-          - unavailable
 
       - trigger: state
         entity_id: input_boolean.spa_maintenance_paused
         to: "off"
     condition:
       - condition: state
-        entity_id: binary_sensor.spa_maintenance_reminder
+        entity_id: input_boolean.spa_maintenance_active
         state: "on"
 
       - condition: state
@@ -338,14 +414,14 @@ automation:
 
                 # wait to see if turned off before tts
                 - wait_template: >
-                    {{ is_state('binary_sensor.spa_maintenance_reminder', 'off')
+                    {{ is_state('input_boolean.spa_maintenance_active', 'off')
                         or is_state('input_boolean.spa_maintenance_paused', 'on') }}
                   timeout:
                     minutes: 2
 
                 - if:
                     - condition: state
-                      entity_id: binary_sensor.spa_maintenance_reminder
+                      entity_id: input_boolean.spa_maintenance_active
                       state: "on"
 
                     - condition: state
@@ -362,14 +438,14 @@ automation:
                           quiet_play: true
 
             - wait_template: >
-                {{ is_state('binary_sensor.spa_maintenance_reminder', 'off')
+                {{ is_state('input_boolean.spa_maintenance_active', 'off')
                     or is_state('input_boolean.spa_maintenance_paused', 'on') }}
               timeout:
                 minutes: "{{ states('input_number.spa_maintenance_notification_interval') | int }}"
           until:
             - or:
                 - condition: state
-                  entity_id: binary_sensor.spa_maintenance_reminder
+                  entity_id: input_boolean.spa_maintenance_active
                   state: "off"
 
                 - condition: state
@@ -382,9 +458,10 @@ automation:
   - id: clear_spa_maintenance_notification
     alias: "Clear Spa Maintenance Notification"
     description: "Clear reminder notification."
+    max_exceeded: silent
     trigger:
       - trigger: state
-        entity_id: binary_sensor.spa_maintenance_reminder
+        entity_id: input_boolean.spa_maintenance_active
         to: "off"
 
       - trigger: state

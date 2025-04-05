@@ -4,7 +4,7 @@
 input_boolean:
   spa_water_enabled:
     name: "Spa Water Enabled"
-    icon: &spa_icon mdi:hot-tub
+    icon: &spa_icon mdi:spa
   spa_water_active:
     name: "Spa Water Active"
     icon: *spa_icon
@@ -56,18 +56,35 @@ template:
         unique_id: spa_water_done
         icon: *spa_icon
         press:
-          - condition: state
-            entity_id: input_boolean.spa_water_active
-            state: "on"
+          - if:
+              - condition: state
+                entity_id: input_boolean.spa_water_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Water reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.spa_water_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: &entities
+                        - input_boolean.spa_water_active
+                        - input_boolean.spa_water_paused
+                        - input_boolean.spa_water_skipped
 
-          - action: input_boolean.turn_off
-            target:
-              entity_id: input_boolean.spa_water_active
-
-          - action: browser_mod.notification
-            data:
-              message: "Spa Water change has been reset."
-              duration: 10000
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Water reminder has been marked completed."
+                  duration: 10000
 
       - name: "Skip Spa Water"
         unique_id: skip_spa_water
@@ -75,24 +92,86 @@ template:
         press:
           - if:
               - condition: state
-                entity_id: binary_sensor.spa_water_reminder
-                state: "on"
+                entity_id: input_boolean.spa_water_enabled
+                state: "off"
             then:
-              - action: input_boolean.turn_off
-                target:
-                  entity_id: input_boolean.spa_water_active
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Water reminder is not enabled."
+                  duration: 10000
             else:
-              - action: input_boolean.toggle
-                target:
-                  entity_id: input_boolean.spa_water_skipped
+              - if:
+                  - condition: state
+                    entity_id: sensor.spa_water_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id:
+                        - input_boolean.spa_water_active
+                        - input_boolean.spa_water_skipped
+                else:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.spa_water_skipped
 
-  - binary_sensor:
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Water skip reminder is now {{ states('input_boolean.spa_water_skipped') }}."
+                  duration: 10000
+
+      - name: "Pause Spa Water"
+        unique_id: pause_spa_water
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.spa_water_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Spa Water reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.spa_water_reminder
+                    state:
+                      - Active
+                      - Paused
+                then:
+                  - action: input_boolean.toggle
+                    target:
+                      entity_id: input_boolean.spa_water_paused
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Spa Water pause reminder is now {{ states('input_boolean.spa_water_paused') }}."
+                      duration: 10000
+                else:
+                  - action: browser_mod.notification
+                    data:
+                      message: "Spa Water reminder is not active."
+                      duration: 10000
+
+  - sensor:
       - name: "Spa Water Reminder"
         unique_id: spa_water_reminder
         icon: *spa_icon
+        device_class: enum
         state: >
-          {{ is_state('input_boolean.spa_water_enabled', 'on')
-                and is_state('input_boolean.spa_water_active', 'on') }}
+          {% if is_state('input_boolean.spa_water_enabled', 'off') %} Disabled
+          {% elif is_state('input_boolean.spa_water_paused', 'on') %} Paused
+          {% elif is_state('input_boolean.spa_water_skipped', 'on') %} Skipped
+          {% elif is_state('input_boolean.spa_water_active', 'on') %} Active
+          {% else %} Off
+          {% endif %}
+        attributes:
+          options: "['Disabled', 'Paused', 'Skipped', 'Active', 'Off']"
 
 automation:
   ###################################################################################################
@@ -110,9 +189,9 @@ automation:
             {% set last_run = states('button.spa_water_done') | as_datetime(now()) %}
             {% set day_limit = states('input_number.spa_water_day_interval') | int(-1) %}
             {{ now() - last_run  > timedelta(days=day_limit)
-                and ((shift == 'days' and time == states('input_datetime.spa_water_days')[0:5])
-                  or (shift == 'afts' and time == states('input_datetime.spa_water_afternoons')[0:5])
-                  or (shift == 'wknd' and time == states('input_datetime.spa_water_weekends')[0:5])) }}
+                and ((shift == 'Days' and time == states('input_datetime.spa_water_days')[0:5])
+                  or (shift == 'Afternoons' and time == states('input_datetime.spa_water_afternoons')[0:5])
+                  or (shift == 'Off' and time == states('input_datetime.spa_water_weekends')[0:5])) }}
           {% endif %}
     action:
       # turn off previous active reminder to retrigger notifications
@@ -145,11 +224,11 @@ automation:
               entity_id: input_boolean.spa_water_active
 
   ###################################################################################################
-  ## Spa Water Reminder Done
+  ## Spa Water Done
   ###################################################################################################
-  - id: spa_water_reminder_done
-    alias: "Spa Water Reminder Done"
-    description: "Mark reminder complete."
+  - id: spa_water_done
+    alias: "Spa Water Done"
+    description: "Mark reminder completed."
     max_exceeded: silent
     trigger:
       - trigger: event
@@ -157,18 +236,19 @@ automation:
         event_data:
           action: spa_water_done
     condition:
-      - condition: template
-        value_template: "{{ is_state('binary_sensor.spa_water_reminder', 'on') }}"
+      - condition: state
+        entity_id: input_boolean.spa_water_active
+        state: "on"
     action:
       - action: button.press
         target:
           entity_id: button.spa_water_done
 
   ###################################################################################################
-  ## Skip Spa Water Reminder
+  ## Skip Spa Water
   ###################################################################################################
-  - id: skip_spa_water_reminder
-    alias: "Skip Spa Water Reminder"
+  - id: skip_spa_water
+    alias: "Skip Spa Water"
     description: "Skip reminder."
     max_exceeded: silent
     trigger:
@@ -182,10 +262,10 @@ automation:
           entity_id: button.skip_spa_water
 
   ###################################################################################################
-  ## Pause Spa Water Reminder
+  ## Pause Spa Water
   ###################################################################################################
-  - id: pause_spa_water_reminder
-    alias: "Pause Spa Water Reminder"
+  - id: pause_spa_water
+    alias: "Pause Spa Water"
     description: "Pause reminder."
     max_exceeded: silent
     trigger:
@@ -199,16 +279,16 @@ automation:
           entity_id: input_boolean.spa_water_paused
 
   ###################################################################################################
-  ## Reset Paused Spa Water Reminder
+  ## Reset Pause Spa Water
   ###################################################################################################
-  - id: reset_paused_spa_water_reminder
-    alias: "Reset Paused Spa Water Reminder"
+  - id: reset_pause_spa_water
+    alias: "Reset Pause Spa Water"
     description: "Reset reminder paused boolean."
     max_exceeded: silent
     trigger:
       - trigger: state
-        entity_id: binary_sensor.spa_water_reminder
-        to: "off"
+        entity_id: input_boolean.spa_water_skipped
+        to: "on"
 
       - trigger: state
         entity_id: input_boolean.spa_water_paused
@@ -235,7 +315,8 @@ automation:
   ###################################################################################################
   - id: reset_spa_water_booleans
     alias: "Reset Spa Water Booleans"
-    description: "Reset reminder booleans."
+    description: "Reset reminder booleans if reminder disabled, completed, or not active."
+    max_exceeded: silent
     trigger:
       - trigger: state
         id: enabled
@@ -243,23 +324,31 @@ automation:
         to: "off"
 
       - trigger: state
+        id: done
+        entity_id: input_boolean.spa_water_active
+        to: "off"
+
+      - trigger: state
         id: entity
-        entity_id: &entities
-          - input_boolean.spa_water_active
-          - input_boolean.spa_water_skipped
-          - input_boolean.spa_water_paused
+        entity_id: *entities
         to: "on"
     condition:
-      - condition: state
-        entity_id: input_boolean.spa_water_enabled
-        state: "off"
-
       - condition: or
         conditions:
+          - condition: state
+            entity_id: input_boolean.spa_water_enabled
+            state: "off"
+
           - condition: template
+            alias: "Pause boolean turned on when reminder is skipped or isn't active"
             value_template: >
               {{ trigger.entity_id == 'input_boolean.spa_water_paused'
-                  and is_state('binary_sensor.spa_water_reminder', 'off') }}
+                  and (is_state('input_boolean.spa_water_active', 'off')
+                    or is_state('input_boolean.spa_water_skipped', 'on')) }}
+
+          - condition: template
+            alias: "Reminder completed"
+            value_template: "{{ trigger.id == 'done' }}"
     action:
       - if: "{{ trigger.id == 'entity' }}"
         then:
@@ -277,24 +366,21 @@ automation:
   - id: spa_water_notification
     alias: "Spa Water Notification"
     description: "Send notification until reminder is off."
-    max_exceeded: silent 
+    max_exceeded: silent
     trigger:
       - trigger: homeassistant
         event: start
 
       - trigger: state
-        entity_id: binary_sensor.spa_water_reminder
+        entity_id: input_boolean.spa_water_active
         to: "on"
-        not_from:
-          - unknown
-          - unavailable
 
       - trigger: state
         entity_id: input_boolean.spa_water_paused
         to: "off"
     condition:
       - condition: state
-        entity_id: binary_sensor.spa_water_reminder
+        entity_id: input_boolean.spa_water_active
         state: "on"
 
       - condition: state
@@ -307,11 +393,8 @@ automation:
               then:
                 - action: notify.jason
                   data:
-                    title: "Spa Water"
                     message: |
-                      {%- from 'speech_helpers.jinja' import plural -%}
-                      {%- set days = ((now() | as_timestamp - states('button.spa_water_done') | as_timestamp) / 86400) | int %}
-                      Time to change the spa water.  It was last changed {{ plural('day', days) }} ago.
+                      Time to change the spa water.  It was last changed {{ time_since(as_datetime(states('button.spa_water_done'), none)) }} ago.
                     data:
                       tag: spa_water_reminder
                       group: Reminder
@@ -319,10 +402,6 @@ automation:
                       persistent: true
                       notification_icon: *spa_icon
                       icon_url: !secret SPA_ICON
-                      ledColor: !secret MINOR_COLOR
-                      color: !secret MINOR_COLOR
-                      vibrationPattern: !secret ALERT_VIBRATION
-                      clickAction: /ui-mobile/spa
                       actions:
                         - title: "Pause"
                           action: pause_spa_water
@@ -335,14 +414,14 @@ automation:
 
                 # wait to see if turned off before tts
                 - wait_template: >
-                    {{ is_state('binary_sensor.spa_water_reminder', 'off')
+                    {{ is_state('input_boolean.spa_water_active', 'off')
                         or is_state('input_boolean.spa_water_paused', 'on') }}
                   timeout:
                     minutes: 2
 
                 - if:
                     - condition: state
-                      entity_id: binary_sensor.spa_water_reminder
+                      entity_id: input_boolean.spa_water_active
                       state: "on"
 
                     - condition: state
@@ -355,18 +434,18 @@ automation:
                         entity_id: script.tts_play
                       data:
                         variables:
-                          message: "Attention! The hot tub water needs to be changed!"
+                          message: "Hey Jason, it's time to change the spa water!"
                           quiet_play: true
 
             - wait_template: >
-                {{ is_state('binary_sensor.spa_water_reminder', 'off')
+                {{ is_state('input_boolean.spa_water_active', 'off')
                     or is_state('input_boolean.spa_water_paused', 'on') }}
               timeout:
                 minutes: "{{ states('input_number.spa_water_notification_interval') | int }}"
           until:
             - or:
                 - condition: state
-                  entity_id: binary_sensor.spa_water_reminder
+                  entity_id: input_boolean.spa_water_active
                   state: "off"
 
                 - condition: state
@@ -379,9 +458,10 @@ automation:
   - id: clear_spa_water_notification
     alias: "Clear Spa Water Notification"
     description: "Clear reminder notification."
+    max_exceeded: silent
     trigger:
       - trigger: state
-        entity_id: binary_sensor.spa_water_reminder
+        entity_id: input_boolean.spa_water_active
         to: "off"
 
       - trigger: state

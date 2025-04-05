@@ -49,6 +49,7 @@ Check the clock! Your time to leave for work can not be determined today!
 {{- states(entity) | as_timestamp(none) | timestamp_custom('%-I:%M %p', true, none) -}}
 {%- endmacro -%}
 
+{# day_and_time - return today, tomorrow, yesterday, day of week or date plus the time #}
 {%- macro day_and_time(date) -%}
 {# check if valid date, as_local to compare day() #}
 {%- set date = as_datetime(date, none) %}
@@ -72,24 +73,27 @@ Check the clock! Your time to leave for work can not be determined today!
 {%- endif %}
 {%- endmacro -%}
 
-{# day_or_date - return date is today, tomorrow, yesterday else return date #}
-{%- macro day_or_date(date, short=true, dow=true) -%}
+{# day_or_date - return today, tomorrow, yesterday else return date #}
+{# date - valid datetime #}
+{# short - display short date #}
+{# dow - display day of week #}
+{# time - display day of week #}
+{%- macro day_or_date(date, short=true, dow=true, time=false) -%}
 {# check if valid date, as_timestamp to add tz #}
-{#MIDNIGHT add day_reset to prevent alerts night before / after midnight #}
-{#NOTE calendar dates "Today" turns off at midnight when calendar date changes to next occurance #}
 {% set date = as_datetime(date, none) %}
 {%- if date != none %}
-  {%- set reset = as_timedelta(states('input_datetime.day_reset')) %}
-  {%- set cdate = as_local(date).replace(hour=0,minute=0,second=0,microsecond=0) + reset %}
-  {%- set today = now().replace(hour=0,minute=0,second=0,microsecond=0) + reset %}
   {%- if dow %}{% set format = '%a, %b %d' if short else '%A, %B %d %Y' %}
   {%- else %}{% set format = '%b %d' if short else '%B %d, %Y' %}
   {%- endif %}
-  {%- if today == cdate %}Today
-  {%- elif cdate - today == timedelta(days=1) %}Tomorrow
-  {%- elif cdate - today == timedelta(days=-1) %}Yesterday
+  {%- set date = as_local(date) %}
+  {%- set reset = today_at(states('input_datetime.day_reset')) %}
+  {%- if date < reset and  date > reset - timedelta(hours=24) -%}Yesterday
+  {%- elif date >= reset and date <= reset + timedelta(days=1) %}Today
+  {%- elif date >= reset + timedelta(days=1) and date <= reset + timedelta(days=2) %}Tomorrow
+  {%- elif date > reset and date <= reset + timedelta(days=6) -%} {{ date.strftime('%A') }}
   {%- else %}{{ date.strftime(format) }}
   {%- endif %}
+  {%- if time %}{{ as_local(date).strftime(' at %-I:%M %p') }}{%- endif %}
 {%- endif %}
 {%- endmacro -%}
 
@@ -126,13 +130,9 @@ Check the clock! Your time to leave for work can not be determined today!
       if is_state(cal, 'off') and start != none else false }}
 {%- endmacro -%}
 
-{%- macro reminder_done(reminder) -%}
-{%- set entity = 'button.' ~ reminder ~ '_done' %}
-{%- set last_done = as_datetime(states(entity)) | as_local if has_value(entity) else none %}
-{%- if last_done != none -%}
-Last completed {{ last_done.strftime('today at %-I:%M %p')
-  if now().day == last_done.day else last_done.strftime('%A at %-I:%M %p') }}
-{%- endif -%}
+{%- macro updated(date) -%}
+{%- set updated = as_datetime(date,none) %}
+  {{- time_since(updated) ~ ' ago' if updated != none }}
 {%- endmacro -%}
 
 {%- macro schedule_switch_style() -%}
