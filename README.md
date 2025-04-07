@@ -6,7 +6,7 @@
 
 [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-##### <font color='cyan'>Updated 25-02-20</font>
+##### <font color='cyan'>Updated 2025-04-07</font>
 
 ## HARDWARE
 
@@ -85,15 +85,18 @@
 - LG WebOS TV
 - HiSense Roku TV
 
-## INSTALLED ADDONS (20)
+## INSTALLED ADDONS (24)
 
 - Advanced SSH & Web Terminal
+- Assist Microphone
 - Chrony
 - Docker Wyze Bridge
+- ESP Home Device Builder
 - File editor
 - Frigate NVR
 - Glances
 - Log Viewer
+- Matter Server
 - Mosquitto broker
 - MQTT Explorer
 - Music Assistant
@@ -101,9 +104,11 @@
 - Samba Share
 - SQite Web
 - Studio Code Server
+- UniFi Network Application
 - VLC
 - VNC Viewer
 - WeatherFlow to MQTT
+- YT Music PO Token Generator
 - Z-Wave JS
 - Z-Wave JS UI
 
@@ -112,23 +117,23 @@
 - Adaptive Lighting
 - Alarmo
 - Asus Router
+- Battery Notes
 - Blitzortung
 - Browser Mod
 - Composite Device Tracker
 - Dew Point
-- Fontawesome
 - Frigate
 - Google Home
 - HACS
 - Import Statistics
-- Music Assistant
 - Navien Water Heater Custom Integration
 - Nest Protect
 - Ontario Energy Board
+- Pi-hole V6 Integration
 - Pirate Weather
-- Pyscript
 - Smart ThinQ Sensors
 - Spook
+- Thermal Comfort
 - Variables+History
 - Virtual Devices
 - Watchman
@@ -144,6 +149,7 @@
 - Card Mod
 - Card Tools
 - Digital Clock
+- Flex Table
 - Fold Entity Row
 - Frigate Card
 - Github Flexi Card
@@ -169,48 +175,49 @@
 - Weather Chart Card
 - Wind Rose Card
 
-## ENTITY COUNTS (43 Domains, 4090 Entities)
+## ENTITY COUNTS (44 Domains, 4659 Entities)
 
 - alarm_control_panel: 1
-- alert: 101
-- automation: 313
-- binary_sensor: 526
-- button: 114
-- calendar: 12
-- camera: 33
+- alert: 102
+- automation: 328
+- binary_sensor: 572
+- button: 153
+- calendar: 13
+- camera: 34
 - climate: 5
 - conversation: 1
 - counter: 1
-- device_tracker: 53
-- event: 2
+- device_tracker: 112
+- event: 4
 - fan: 9
 - group: 87
-- image: 36
-- input_boolean: 199
+- image: 46
+- input_boolean: 204
 - input_button: 2
-- input_datetime: 40
-- input_number: 194
+- input_datetime: 37
+- input_number: 195
 - input_select: 55
-- input_text: 131
+- input_text: 140
 - light: 59
 - lock: 4
-- media_player: 37
+- media_player: 40
 - notify: 1
-- number: 55
+- number: 59
 - person: 2
 - remote: 1
-- scene: 8
-- script: 68
-- select: 163
-- sensor: 1320
+- scene: 10
+- script: 66
+- select: 164
+- sensor: 1689
 - siren: 2
 - stt: 2
 - sun: 1
-- switch: 250
+- switch: 247
+- time: 4
 - timer: 41
 - todo: 3
 - tts: 4
-- update: 133
+- update: 138
 - valve: 12
 - weather: 4
 - zone: 5
@@ -226,18 +233,19 @@
 - #IDEA - idea for feature/option/function
 - #ISSUE - unresolved issue
 - #TEMP - temporary option/code
-- #STYLE - css styling note/needs work
+- #STYLE - css styling issues/notes
 - #IMAGE - new image required
-- #QUESTION - question I need to answer
-- #DELETE - code tagged for deletion
+- #QUESTION - question to answer
+- #DELETE - code to be deleted
 - #DISABLED - disabled code
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug
 - #LOCK_USER - lock user code
-- #MIDNIGHT - fix for afternoon shift > midnight/tomorrow conflicts
-- #TV - TV notes
+- #MIDNIGHT - shift day change to day reset time
+- #TV - TV issues/notes
 - #ALARMO - alarmo issues/notes
 - #MASS - music assistant issues/notes
+- #ZWAVE - zwave issues / notes
 - #INFO - info level log tag
 - #WARNING - warning level log tag
 - #ERROR - error level log tag
