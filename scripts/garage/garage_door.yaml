@@ -1,0 +1,158 @@
+###############################################################################
+## Garage Door
+###############################################################################
+garage_door:
+  alias: "Garage Door "
+  description: "Open or close the garage door."
+  icon: mdi:garage
+  mode: restart
+  fields:
+    state:
+      description: "Desired state for garage door."
+      example: "open"
+    person:
+      description: "Script called by this person."
+      example: "jason"
+  variables:
+    state_desc: "{{ iif(state == 'open', 'opened', 'closed') }}"
+    notify: "{{ person | default('jason') }}" #TEMP
+  sequence:
+    - choose:
+        - conditions:
+            - condition: state
+              entity_id: binary_sensor.gdo_connected
+              state: "off"
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.garage_door_alert
+
+            - action: script.garage_door_notification
+              data:
+                message: "The garage door service is not connected and cannot be {{ state_desc }}."
+                notify: "{{ notify }}"
+              continue_on_error: true
+
+        - conditions:
+            - condition: state
+              entity_id: lock.garage_door_lock
+              state: locked
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.garage_door_alert
+
+            - action: script.garage_door_notification
+              data:
+                message: |
+                  The garage door is currently locked out.
+                  Unlock the garage door in Home assistant and try again.
+                notify: "{{ notify }}"
+              continue_on_error: true
+
+        - conditions:
+            - condition: template
+              alias: "Garage door was opened"
+              value_template: "{{ state == 'open' }}"
+
+            - not:
+                - condition: state
+                  entity_id: alarm_control_panel.house
+                  state: disarmed
+          sequence:
+            - service: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.garage_door_alert
+
+            - action: script.garage_door_notification
+              data:
+                message: "Disarm the alarm to open the garage door."
+                notify: "{{ notify }}"
+              continue_on_error: true
+
+            - wait_template: "{{ is_state('alarm_control_panel.house','disarmed') }}"
+              timeout: 60
+
+            - if: "{{ wait.completed }}"
+              then:
+                - action: cover.open_cover
+                  target:
+                    entity_id: cover.garage_door
+              else:
+                - action: script.garage_door_notification
+                  data:
+                    message: "The house alarm was not disarmed.  The garage door cannot be opened."
+                    notify: "{{ notify }}"
+                  continue_on_error: true
+      default:
+        - action: "cover.{{ iif(state == 'open', 'open', 'close') }}_cover"
+          target:
+            entity_id: cover.garage_door
+
+###############################################################################
+# Toggle Garage Door
+###############################################################################
+toggle_garage_door:
+  alias: "Toggle Garage Door"
+  description: "Toggle garage door."
+  icon: mdi:garage
+  mode: restart # wait for garage door open/close to finish
+  variables: # unknown/unavailable to trigger tts warning
+    state: "{{ iif(is_state('cover.garage_door', ['closed', 'closing', 'unknown', 'unavailable']), 'open', 'closed') }}"
+  sequence:
+    - action: script.garage_door
+      data:
+        state: "{{ state }}"
+
+###############################################################################
+## Garage Door Check
+###############################################################################
+garage_door_check:
+  alias: "Garage Door Check"
+  description: "Check garage door state after opening or closing."
+  icon: mdi:garage-alert
+  mode: restart
+  fields:
+    check_state:
+      description: "State to check."
+      example: "open"
+  variables:
+    postion: "{{ iif(check_state == 'open',100,0) }}"
+    state_desc: "{{ iif(check_state == 'open', 'open', 'close') }}"
+  sequence:
+    - wait_template: "{{ is_state_attr('cover.garage_door', 'current_position', postion) }}"
+      timeout:
+        minutes: 2
+
+    - if: "{{ not wait.completed }}"
+      then:
+        - service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.garage_door_alert
+
+        - repeat:
+            while: >
+              {{ is_state('input_boolean.garage_door_alert', 'on')
+                  and not is_state_attr('cover.garage_door', 'current_position', postion) }}
+            sequence:
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.garage_door_announcements
+                    state: "on"
+                then:
+                  - action: script.garage_door_notification
+                    data:
+                      message: "Attention! The garage door did not {{ state_desc }}!"
+                    continue_on_error: true
+
+              - wait_template: >
+                  {{ is_state('input_boolean.garage_door_alert', 'off')
+                      or is_state_attr('cover.garage_door', 'current_position', postion) }}
+                timeout:
+                  minutes: 2
+
+    - if: "{{ is_state_attr('cover.garage_door', 'current_position', postion) }}"
+      then:
+        - service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.garage_door_alert

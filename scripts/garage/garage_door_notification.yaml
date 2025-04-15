@@ -1,0 +1,84 @@
+###############################################################################
+## Garage Door Notification
+###############################################################################
+garage_door_notification:
+  alias: "Garage Door Notification"
+  description: "Send garage door alert notification."
+  icon: mdi:garage-alert
+  fields:
+    message:
+      description: "Garage door alert message."
+      example: "Garage door open"
+    notify:
+      description: "Notification group/person for notification."
+      example: "jason"
+  variables:
+    notify: "{{ notify | default(none) }}"
+  sequence:
+    - parallel:
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.garage_door_announcements
+                  state: "on"
+              then:
+                - service: script.turn_on
+                  target:
+                    entity_id: script.tts_play
+                  data:
+                    variables:
+                      message: "{{ message }}"
+                      quiet_play: true
+                      night_play: true
+                  continue_on_error: true
+
+        - sequence:
+            - if:
+                - condition: state
+                  entity_id: input_boolean.garage_door_notifications
+                  state: "on"
+
+                - condition: template
+                  alias: "Notification destination is valid"
+                  value_template: "{{ notify != none }}"
+              then:
+                - variables:
+                    file1: "alarm_snapshots/{% from 'camera.jinja'import snapshot_filename %}{{ snapshot_filename('side_door') }}"
+
+                - service: camera.snapshot
+                  target:
+                    entity_id: camera.side_door #TEMP garage_inside camera
+                  data:
+                    filename: "/config/www/{{ file1 }}"
+
+                - service: "notify.{{ notify }}"
+                  data:
+                    title: Garage Door
+                    message: "{{ message }}"
+                    data:
+                      tag: garage_door_alert
+                      group: Alert
+                      channel: Alert
+                      importance: max
+                      ttl: 0
+                      priority: high
+                      persistent: true
+                      sticky: true
+                      notification_icon: mdi:garage-alert
+                      icon_url: !secret HASS_ICON
+                      image: "/local/{{ file1 }}"
+                      ledColor: !secret WARNING_COLOR
+                      color: !secret WARNING_COLOR
+                      vibrationPattern: !secret ALERT_VIBRATION
+                      clickAction: /lovelace/garage
+                      actions:
+                        - title: "Alert Off"
+                          action: turn_off_garage_door_alert
+
+                        - title: "GDO"
+                          action: URI
+                          uri: !secret GDO_URI
+
+                        - title: "Cameras"
+                          action: URI
+                          uri: !secret LOREX_URI

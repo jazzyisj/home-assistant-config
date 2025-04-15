@@ -50,70 +50,67 @@
       unique_id: sprinkler_active
       icon: mdi:sprinkler-variant
       device_class: running
-      state: "{{ states('sensor.current_watering_zone') != 'not_watering' }}"
+      state: "{{ states('sensor.current_watering_zone') != 'Not Watering' }}"
       availability: "{{ is_state('binary_sensor.hydrawise_integration_connected', 'on') }}"
 
 - sensor:
-    # only one enity in group can ever be on at once
     - name: "Current Watering Zone"
       unique_id: current_watering_zone
       icon: mdi:sprinkler-variant
+      #NOTE only one zone in group be on at once
       state: >
-        {% set sensor = expand('group.sprinkler_current_cycle')
-            | selectattr('state', 'eq', 'on') | map(attribute='attributes.zone_name') | join %}
-        {{ sensor if sensor | count > 0 else 'not_watering' }}
+        {% set zone = state_attr(this.entity_id, 'zone') %}
+        {{ zone if zone != none else 'Not Watering' }}
       attributes:
+        zone: >
+          {% set zone = expand('group.sprinkler_current_cycle')
+              | selectattr('state', 'eq', 'on') | map(attribute='attributes.zone_name') | list %}
+          {{ zone | join if zone | count == 1 else none }}
         start_time: >
-          {% set sensor = expand('group.sprinkler_current_cycle')
-              | selectattr('state', 'eq', 'on') | map(attribute='last_changed') | join %}
-          {{ sensor if sensor | count > 0 }}
-        minutes_left: >
-          {% set sensor = expand('group.sprinkler_current_cycle')
-              | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | join%}
-          {{ states('sensor.' ~ sensor[14:-9] ~ '_daily_active_watering_time') if sensor | count > 0 }}
+          {% set time = expand('group.sprinkler_current_cycle')
+              | selectattr('state', 'eq', 'on') | map(attribute='last_changed') | list %}
+          {{ time | join if time | count == 1 else none }}
+        remaining: >
+          {% set remain = expand('group.sprinkler_remaining_time')
+            | selectattr('state', 'gt', '0') | map(attribute='state') | list %}
+          {{ remain | join ~ ' minutes' if remain | count == 1 else none }}
       availability: "{{ is_state('binary_sensor.hydrawise_integration_connected', 'on') }}"
 
-    # reject current watering zone to get next zone
     - name: "Next Watering Zone"
       unique_id: next_watering_zone
       icon: mdi:sprinkler-variant
       state: >
+        {% set next_zone = namespace(name='None Scheduled') %}
         {% set sensors = expand('group.sprinkler_next_cycle') %}
-        {% if sensors | count > 0 %}
-            {% set zone_on = state_attr(expand('group.sprinkler_current_cycle')
-                | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | join, 'identifier') %}
-            {% if zone_on not in ['', none] %}
-              {% set next_time = sensors | rejectattr('attributes.identifier', 'eq', zone_on) | map(attribute='state') | list %}
-              {% if next_time != none and next_time != '' and next_time != [] and next_time | count > 0 %}
-                {% set next_time = next_time | min | as_datetime %}
-                {% if next_time - now() < timedelta(days=365) %}
-                  {% set next_zone = namespace(name='') %}
-                  {% for item in sensors %}
-                    {% if item.state == next_time.isoformat() %}
-                        {% set next_zone.name = item.attributes.zone_name %}
-                        {% break %}
-                    {% endif %}
-                  {% endfor %}
-                  {{ next_zone.name }}
-                {% else %} suspended
-                {% endif %}
-              {% else %} none
-              {% endif %}
-            {% else %} none
+        {% set next_time = as_datetime(states('sensor.next_watering_time'), none) %}
+        {% if next_time != none %}
+          {% for item in sensors %}
+            {% if item.state == next_time.isoformat() %}
+              {% set next_zone.name = item.attributes.zone_name %}
+              {% break %}
             {% endif %}
+          {% endfor %}
         {% endif %}
-      attributes:
-        start_time: >
-          {% set sensors = expand('group.sprinkler_next_cycle') | default([]) %}
-          {% if sensors | count > 0 %}
-              {% set zone_on = state_attr(expand('group.sprinkler_current_cycle')
-                  | selectattr('state', 'eq', 'on') | map(attribute='entity_id') | join, 'identifier') %}
-              {% if zone_on not in ['', none] %}
-                {% set next_time = (sensors | rejectattr('attributes.identifier', 'eq', zone_on) | map(attribute='state') | list) | default(none) %}
-                {% if next_time != none and next_time != '' and next_time != [] and next_time | count > 0 %}
-                  {% set next_time = next_time | min | as_datetime %}
-                  {{ iif(next_time - now() < timedelta(days=365), next_time | as_timestamp | timestamp_custom('%a %b %-d,%Y %-H:%M %p', true, none), '') }}
-                {% endif %}
-              {% endif %}
-          {% endif %}
+        {{ next_zone.name }}
       availability: "{{ is_state('binary_sensor.hydrawise_integration_connected', 'on') }}"
+
+    - name: "Next Watering Time"
+      unique_id: next_watering_time
+      device_class: timestamp
+      #NOTE reject current watering zone to get next zone
+      state: >
+        {% set next_time = none %}
+        {% set sensors = expand('group.sprinkler_next_cycle') %}
+        {% set zone_on = state_attr('sensor.current_watering_zone', 'zone') %}
+        {% set time_list = sensors | rejectattr('attributes.zone', 'eq', zone_on) | map(attribute='state') | list %}
+        {% if time_list | count > 0 %}
+          {% set min_time = as_datetime(time_list | min, none) %}
+          {% if min_time != none %}
+            {% set next_time = iif(min_time - now() < timedelta(days=365), next_time , none) %}
+          {% endif %}
+        {% endif %}
+        {{ next_time }}
+      attributes:
+        display: >
+          {% from 'schedule.jinja' import day_or_date %}
+          {{ day_or_date(states(this.entity_id), true, true, true) }}

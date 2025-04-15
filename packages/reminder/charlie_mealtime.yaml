@@ -1,0 +1,497 @@
+###################################################################################################
+## Package - Charlie Mealtime Reminder
+###################################################################################################
+input_boolean:
+  charlie_mealtime_enabled:
+    name: "Charlie Mealtime Enabled"
+    icon: &spa_icon mdi:dog
+  charlie_mealtime_active:
+    name: "Charlie Mealtime Active"
+    icon: *spa_icon
+  charlie_mealtime_paused:
+    name: "Charlie Mealtime Paused"
+    icon: *spa_icon
+  charlie_mealtime_skipped:
+    name: "Charlie Mealtime Skipped"
+    icon: *spa_icon
+
+input_datetime:
+  charlie_mealtime_days_1:
+    name: "Charlie Mealtime Days 1"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_days_2:
+    name: "Charlie Mealtime Days 2"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_afternoons_1:
+    name: "Charlie Mealtime Afternoons 1"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_afternoons_2:
+    name: "Charlie Mealtime Afternoons 2"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_weekends_1:
+    name: "Charlie Mealtime Weekends 1"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  charlie_mealtime_weekends_2:
+    name: "Charlie Mealtime Weekends 2"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+input_number:
+  charlie_mealtime_notification_interval:
+    name: "Charlie Mealtime Notification Interval"
+    icon: mdi:calendar-range
+    unit_of_measurement: minutes
+    mode: slider
+    min: 5
+    max: 60
+    step: 5
+
+template:
+  - button:
+      - name: "Charlie Mealtime Done"
+        unique_id: charlie_mealtime_done
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.charlie_mealtime_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Charlie Mealtime reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.charlie_mealtime_active
+                    state: "off"
+                then:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.charlie_mealtime_skipped
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Charlie Mealtime reminder has been marked completed and the next reminder time will be skipped."
+                      duration: 10000
+                else:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: &entities
+                        - input_boolean.charlie_mealtime_active
+                        - input_boolean.charlie_mealtime_paused
+                        - input_boolean.charlie_mealtime_skipped
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Charlie Mealtime reminder has been marked completed."
+                      duration: 10000
+
+      - name: "Skip Charlie Mealtime"
+        unique_id: skip_charlie_mealtime
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.charlie_mealtime_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Charlie Mealtime reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.charlie_mealtime_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id:
+                        - input_boolean.charlie_mealtime_active
+                        - input_boolean.charlie_mealtime_skipped
+                else:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.charlie_mealtime_skipped
+
+              - action: browser_mod.notification
+                data:
+                  message: "Charlie Mealtime skip reminder is now {{ states('input_boolean.charlie_mealtime_skipped') }}."
+                  duration: 10000
+
+      - name: "Pause Charlie Mealtime"
+        unique_id: pause_charlie_mealtime
+        icon: *spa_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.charlie_mealtime_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Charlie Mealtime reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.charlie_mealtime_reminder
+                    state:
+                      - Active
+                      - Paused
+                then:
+                  - action: input_boolean.toggle
+                    target:
+                      entity_id: input_boolean.charlie_mealtime_paused
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Charlie Mealtime pause reminder is now {{ states('input_boolean.charlie_mealtime_paused') }}."
+                      duration: 10000
+                else:
+                  - action: browser_mod.notification
+                    data:
+                      message: "Charlie Mealtime reminder is not active."
+                      duration: 10000
+
+  - sensor:
+      - name: "Charlie Mealtime Reminder"
+        unique_id: charlie_mealtime_reminder
+        icon: *spa_icon
+        device_class: enum
+        state: >
+          {% if is_state('input_boolean.charlie_mealtime_enabled', 'off') %} Disabled
+          {% elif is_state('input_boolean.charlie_mealtime_paused', 'on') %} Paused
+          {% elif is_state('input_boolean.charlie_mealtime_skipped', 'on') %} Skipped
+          {% elif is_state('input_boolean.charlie_mealtime_active', 'on') %} Active
+          {% else %} Off
+          {% endif %}
+        attributes:
+          options: "['Disabled', 'Paused', 'Skipped', 'Active', 'Off']"
+          last_done: >
+            {% from 'reminder.jinja' import reminder_last_done %}
+            {{ reminder_last_done('charlie_mealtime') }}
+
+automation:
+  ###################################################################################################
+  ## Turn Charlie Mealtime On
+  ###################################################################################################
+  - id: turn_charlie_mealtime_on
+    alias: "Turn Charlie Mealtime On"
+    description: "Turn on reminder active boolean."
+    trigger:
+      - trigger: template
+        value_template: >
+          {% if is_state('input_boolean.charlie_mealtime_enabled', 'on')
+              and not is_state('input_select.occupancy_mode','Vacation') %}
+            {% set time = states('sensor.time') %}
+            {% set shift = state_attr('sensor.work_status', 'shift') %}
+            {{ (shift == 'Days' and time == states('input_datetime.charlie_mealtime_days_1')[0:5])
+                or (shift == 'Days' and time == states('input_datetime.charlie_mealtime_days_2')[0:5])
+                or (shift == 'Afternoons' and time == states('input_datetime.charlie_mealtime_afternoons_1')[0:5])
+                or (shift == 'Afternoons' and time == states('input_datetime.charlie_mealtime_afternoons_2')[0:5])
+                or (shift == 'Off' and time == states('input_datetime.charlie_mealtime_weekends_1')[0:5])
+                or (shift == 'Off' and time == states('input_datetime.charlie_mealtime_weekends_2')[0:5]) }}
+          {% endif %}
+    action:
+      # turn off previous active reminder to retrigger notifications
+      - if: "{{ is_state('input_boolean.charlie_mealtime_active', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.charlie_mealtime_active
+
+      # turn off previous paused reminder
+      - if: "{{ is_state('input_boolean.charlie_mealtime_paused', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.charlie_mealtime_paused
+
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.charlie_mealtime_paused
+
+      # turn on active reminder if not skipped else turn of skipped
+      - if: "{{ is_state('input_boolean.charlie_mealtime_skipped', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.charlie_mealtime_skipped
+        else:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.charlie_mealtime_active
+
+  ###################################################################################################
+  ## Charlie Mealtime Done
+  ###################################################################################################
+  - id: charlie_mealtime_done
+    alias: "Charlie Mealtime Done"
+    description: "Mark reminder completed."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: charlie_mealtime_done
+    condition:
+      - condition: state
+        entity_id: input_boolean.charlie_mealtime_active
+        state: "on"
+    action:
+      - action: button.press
+        target:
+          entity_id: button.charlie_mealtime_done
+
+  ###################################################################################################
+  ## Skip Charlie Mealtime
+  ###################################################################################################
+  - id: skip_charlie_mealtime
+    alias: "Skip Charlie Mealtime"
+    description: "Skip reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: skip_charlie_mealtime
+    action:
+      - action: button.press
+        target:
+          entity_id: button.skip_charlie_mealtime
+
+  ###################################################################################################
+  ## Pause Charlie Mealtime
+  ###################################################################################################
+  - id: pause_charlie_mealtime
+    alias: "Pause Charlie Mealtime"
+    description: "Pause reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_charlie_mealtime
+    action:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.charlie_mealtime_paused
+
+  ###################################################################################################
+  ## Reset Pause Charlie Mealtime
+  ###################################################################################################
+  - id: reset_pause_charlie_mealtime
+    alias: "Reset Pause Charlie Mealtime"
+    description: "Reset reminder paused boolean."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        entity_id: input_boolean.charlie_mealtime_skipped
+        to: "on"
+
+      - trigger: state
+        entity_id: input_boolean.charlie_mealtime_paused
+        to: "on"
+        for:
+          hours: 24
+
+      - trigger: state
+        entity_id: binary_sensor.owner_home
+        to: "on"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id: input_boolean.charlie_mealtime_paused
+        state: "on"
+    action:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.charlie_mealtime_paused
+
+  ###################################################################################################
+  ## Reset Charlie Mealtime Booleans
+  ###################################################################################################
+  - id: reset_charlie_mealtime_booleans
+    alias: "Reset Charlie Mealtime Booleans"
+    description: "Reset reminder booleans if reminder disabled, completed, or not active."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        id: enabled
+        entity_id: input_boolean.charlie_mealtime_enabled
+        to: "off"
+
+      - trigger: state
+        id: done
+        entity_id: input_boolean.charlie_mealtime_active
+        to: "off"
+
+      - trigger: state
+        id: entity
+        entity_id: *entities
+        to: "on"
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.charlie_mealtime_enabled
+            state: "off"
+
+          - condition: template
+            alias: "Pause boolean turned on when reminder is skipped or isn't active"
+            value_template: >
+              {{ trigger.entity_id == 'input_boolean.charlie_mealtime_paused'
+                  and (is_state('input_boolean.charlie_mealtime_active', 'off')
+                    or is_state('input_boolean.charlie_mealtime_skipped', 'on')) }}
+
+          - condition: template
+            alias: "Reminder completed"
+            value_template: "{{ trigger.id == 'done' }}"
+    action:
+      - if: "{{ trigger.id == 'entity' }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+        else:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: *entities
+
+  ###################################################################################################
+  ## Charlie Mealtime Notification
+  ###################################################################################################
+  - id: charlie_mealtime_notification
+    alias: "Charlie Mealtime Notification"
+    description: "Send notification until reminder is off."
+    max_exceeded: silent
+    trigger:
+      - trigger: homeassistant
+        event: start
+
+      - trigger: state
+        entity_id: input_boolean.charlie_mealtime_active
+        to: "on"
+
+      - trigger: state
+        entity_id: input_boolean.charlie_mealtime_paused
+        to: "off"
+    condition:
+      - condition: state
+        entity_id: input_boolean.charlie_mealtime_active
+        state: "on"
+
+      - condition: state
+        entity_id: input_boolean.charlie_mealtime_paused
+        state: "off"
+    action:
+      - repeat:
+          sequence:
+            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+              then:
+                - action: notify.jason
+                  data:
+                    message: "Time to feed Charlie!"
+                    data:
+                      tag: charlie_mealtime_reminder
+                      group: Reminder
+                      visibility: public
+                      persistent: true
+                      notification_icon: *spa_icon
+                      icon_url: !secret SPA_ICON
+                      actions:
+                        - title: "Pause"
+                          action: pause_charlie_mealtime
+
+                        - title: "Skip"
+                          action: skip_charlie_mealtime
+
+                        - title: "Done"
+                          action: charlie_mealtime_done
+
+                # wait to see if turned off before tts
+                - wait_template: >
+                    {{ is_state('input_boolean.charlie_mealtime_active', 'off')
+                        or is_state('input_boolean.charlie_mealtime_paused', 'on') }}
+                  timeout:
+                    minutes: 2
+
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.charlie_mealtime_active
+                      state: "on"
+
+                    - condition: state
+                      entity_id: input_boolean.charlie_mealtime_paused
+                      state: "off"
+                  then:
+                    - action: script.turn_on
+                      continue_on_error: true
+                      target:
+                        entity_id: script.tts_play
+                      data:
+                        variables:
+                          message: |
+                            Hey Charlie!
+                            Charlie! Pay attention!
+                            Are you a hungry doggie?
+                            It's time to get your food!
+                          quiet_play: true
+
+            - wait_template: >
+                {{ is_state('input_boolean.charlie_mealtime_active', 'off')
+                    or is_state('input_boolean.charlie_mealtime_paused', 'on') }}
+              timeout:
+                minutes: "{{ states('input_number.charlie_mealtime_notification_interval') | int }}"
+          until:
+            - or:
+                - condition: state
+                  entity_id: input_boolean.charlie_mealtime_active
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.charlie_mealtime_paused
+                  state: "on"
+
+  ###################################################################################################
+  ## Clear Charlie Mealtime Notification
+  ###################################################################################################
+  - id: clear_charlie_mealtime_notification
+    alias: "Clear Charlie Mealtime Notification"
+    description: "Clear reminder notification."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        entity_id: input_boolean.charlie_mealtime_active
+        to: "off"
+
+      - trigger: state
+        entity_id:
+          - input_boolean.charlie_mealtime_paused
+          - input_boolean.charlie_mealtime_skipped
+        to: "on"
+    action:
+      - action: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: charlie_mealtime_reminder

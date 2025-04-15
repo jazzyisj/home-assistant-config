@@ -9,21 +9,30 @@ alarm_clock_play:
   max_exceeded: silent
   variables:
     alarm_type: "{{ states('input_select.alarm_clock_type') }}"
+    media_type: "{{ states('select.alarm_clock_media_' ~ alarm_type) | lower }}"
+    media_id: >
+      {% set media_path = states('sensor.hass_base_url') ~ '/local/alarm_clock_sounds/' %}
+      {% if media_type in ['artist', 'album', 'playlist', 'radio', 'track'] %}
+        {{ states('select.alarm_clock_' ~ media_type ~ '_' ~ alarm_type) }}
+      {% elif media_type | title in state_attr('sensor.alarm_clock_soundlist', 'soundlist') %}
+        {{ media_path ~ media_type | lower ~ '.mp3' }}
+      {% else %} {{ media_path ~ 'digital.mp3' }}
+      {% endif %}
+    volume: "{{ states('input_number.alarm_clock_volume_' ~ alarm_type) | int }}"
     media_player: "{{ states('sensor.alarm_clock_active_media_player') }}"
-    #MASS use mass player for media play, default to hass player
+    #MASS use mass player for media play, default to ha player
     mass_player: >
       {% set mass = expand('group.mass_media_players')
-          | selectattr('name', 'eq', states('select.alarm_clock_media_player_' ~ alarm_type))
+          | selectattr('name', 'eq', states('select.alarm_clock_speaker_' ~ alarm_type))
           | map(attribute='entity_id') | join %}
       {{ media_player if mass == '' else mass }}
-    playlist: "{{ states('select.alarm_clock_sound_' ~ alarm_type) }}"
-    volume: "{{ states('input_number.alarm_clock_volume_' ~ alarm_type) | float(-1) }}"
-    media_url: >
-      {% set playlist_path = states('sensor.hass_base_url') ~ '/local/alarm_clock_sounds/' %}
-      {% if playlist == 'Media' %} {{ states('select.alarm_clock_media_' ~ alarm_type) }}
-      {% elif playlist in state_attr('sensor.alarm_clock_soundlist', 'soundlist') %}
-        {{ playlist_path ~ playlist | lower ~ '.mp3' }}
-      {% else %} {{ playlist_path ~ 'digital.mp3' }}
+    media_players: >
+      {% if media_player != '' %}
+        {% if is_state_attr(media_player, 'type', 'group') %}
+          {{ state_attr('sensor.' ~ states[media_player].object_id, 'entity_id') }}
+        {% else %} {{ [media_player] }}
+        {% endif %}
+      {% else %} {{ none }}
       {% endif %}
   sequence:
     # wait until any announcements are done playing
@@ -117,46 +126,94 @@ alarm_clock_play:
 
         - delay: 1 # allow volumes to set
 
-        - if: "{{ mass_player in state_attr('group.mass_media_players', 'entity_id') }}"
+        - if: "{{ media_type == 'video' }}"
           then:
-            - action: music_assistant.play_media
-              target:
-                entity_id: "{{ mass_player }}"
-              data:
-                media_id: "{{ media_url }}"
-                media_type: playlists
-                enqueue: play
-              continue_on_error: true
+            - if: "{{ media_player in state_attr('group.cast_media_players', 'entity_id') }}"
+              then:
+                - variables:
+                    link: !include /config/include/media_preset_video_link.yaml
 
-            - action: media_player.repeat_set
-              target:
-                entity_id: "{{ mass_player }}"
-              data:
-                repeat: one
-              continue_on_error: true
+                - action: media_player.play_media
+                  target:
+                    entity_id: "{{ media_player }}"
+                  data:
+                    media_content_type: cast
+                    media_content_id: '{{ ''{"app_name": "youtube","media_id": "'' ~ link ~ ''"}'' }}'
+                    enqueue: replace
+                    extra:
+                      autoplay: true
           else:
-            # default to local media file
-            - action: media_player.play_media
-              target:
-                entity_id: "{{ media_player }}"
-              data:
-                media_content_id: "{{ states('sensor.hass_base_url') ~ '/local/alarm_clock_sounds/digital.mp3' }}"
-                media_content_type: music
-                enqueue: replace
+            - if: "{{ mass_player in state_attr('group.mass_media_players', 'entity_id') }}"
+              then:
+                - if: "{{ not is_state('input_select.alarm_clock_media_' ~ alarm_type, 'Radio') }}"
+                  then:
+                    - action: media_player.shuffle_set
+                      target:
+                        entity_id: "{{ mass_player }}"
+                      data:
+                        shuffle: false #NEXT
+                      continue_on_error: true
+
+                    - action: media_player.repeat_set
+                      target:
+                        entity_id: "{{ mass_player }}"
+                      data:
+                        repeat: all # always repeat for alarm clock
+                      continue_on_error: true
+
+                - action: music_assistant.play_media
+                  target:
+                    entity_id: "{{ mass_player }}"
+                  data:
+                    media_id: "{{ media_id }}"
+                    media_type: "{{ media_type }}"
+                    enqueue: replace
+                    radio_mode: false #NEXT
+                  continue_on_error: true
+              else:
+                - action: system_log.write
+                  data:
+                    logger: "{{ this.entity_id }}"
+                    level: critical
+                    message: |-
+                      Music Assistant media player is not available.
+                      Playing default media on Home Assistant media player.
+
+                # default to local media file
+                - action: media_player.play_media
+                  target:
+                    entity_id: "{{ media_player }}"
+                  data:
+                    media_content_id: "{{ states('sensor.hass_base_url') ~ '/local/alarm_clock_sounds/digital.mp3' }}"
+                    media_content_type: music
+                    enqueue: replace
+                  continue_on_error: true
 
         - wait_template: "{{ is_state(media_player, 'playing') }}"
           timeout: 15
 
-        - if: "{{ not wait.completed }}"
+        #BLOOP set volume after play starts to avoid google bloop
+        - action: script.turn_on
+          target:
+            entity_id: script.media_player_set_volumes
+          data:
+            variables:
+              entity_id: "{{ media_player }}"
+              source: alarm_clock
+          continue_on_error: true
+
+        #MASS media can play temporarily then quit
+        - delay: 5
+
+        - if: "{{ not is_state(media_player, 'playing') }}"
           then:
             - action: input_boolean.turn_on
               entity_id: input_boolean.alarm_clock_failed
-          else:
-            #BLOOP set volume after play starts to avoid google bloop
+
             - action: script.turn_on
               target:
                 entity_id: script.media_player_set_volumes
               data:
                 variables:
                   entity_id: "{{ media_player }}"
-                  source: alarm_clock
+                  force_reset: true

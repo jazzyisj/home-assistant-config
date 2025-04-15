@@ -1,35 +1,9 @@
 ###################################################################################################
-## Phone Disconnected Presence Override
+## Presense Override
 ###################################################################################################
-- id: phone_disconnected_presence_override
-  alias: "Phone Disconnected Presence Override"
-  description: ""
-  mode: single
-  variables:
-    person: >
-      {% from 'presence.jinja' import trigger_person %}
-      {{ trigger_person(trigger) }}
-  triggers:
-    - trigger: state
-      entity_id: binary_sensor.jason_phone_connected
-      to: "off"
-      from: "on"
-  conditions: "{{ is_state('person.' ~ person, 'home') }}"
-  actions:
-    - action: input_boolean.turn_on
-      target:
-        entity_id: "input_boolean.home_override_{{ person }}"
-
-    - action: input_boolean.turn_on
-      target:
-        entity_id: "input_boolean.{{ person }}_home"
-
-###################################################################################################
-## Lock Status Presense Override
-###################################################################################################
-- id: lock_status_presense_override
-  alias: "Lock Status Presense Override"
-  description: "Toggle override boolean when required if door unlocked by code."
+- id: presense_override
+  alias: "Presense Override"
+  description: "Override person presence."
   mode: parallel
   variables:
     person: >
@@ -37,14 +11,21 @@
       {{ trigger_person(trigger) }}
   triggers:
     - trigger: state
+      id: phone
+      entity_id: binary_sensor.jason_phone_connected
+      to: "off"
+      from: "on"
+
+    - trigger: state
       id: unlocked
       entity_id:
         - sensor.side_door_lock_status
         - sensor.front_door_lock_status
         - sensor.back_door_lock_status
-        - sensor.garage_door_lock_status
+        - sensor.garage_side_door_lock_status
       to:
         - Unlocked (Jason)
+        - Unlocked (Guest)
       not_from:
         - unknown
         - unavailable
@@ -57,39 +38,42 @@
         - sensor.back_door_lock_status
       to:
         - Locked (Jason)
+        - Locked (Guest)
       not_from:
         - unknown
         - unavailable
+
+    - trigger: event
+      id: guest_alert
+      event_type: mobile_app_notification_action
+      event_data:
+        action: guest_off
+  conditions:
+    - condition: state
+      entity_id: input_boolean.occupancy_automation
+      state: "on"
+
+    - "{{ is_state('person.' ~ person, 'home') if trigger.id == 'phone' else true }}"
   actions:
-    - if: "{{ trigger.id == 'unlocked' }}"
+    - if: "{{ trigger.id in ['phone', 'unlocked'] }}"
       then:
-        - wait_template: "{{ is_state('person.jason', 'home') }}"
-          timeout: 15
-
-        - if: >
-            {{ is_state('person.' ~ person , 'home')
-                and is_state('binary_sensor.' ~ person ~ '_phone_connected', 'on') }}
-          then:
-            - action: input_boolean.turn_off
-              target:
-                entity_id: "input_boolean.home_override_{{ person }}"
-          else:
-            - action: input_boolean.turn_on
-              target:
-                entity_id: "input_boolean.home_override_{{ person }}"
-
-            - action: input_boolean.turn_on
-              target:
-                entity_id: "input_boolean.{{ person }}_home"
-
+        - action: script.presence_override
+          data:
+            people: "{{ person }}"
+            home: turn_on
       else:
-        - action: input_boolean.turn_on
-          target:
-            entity_id: "input_boolean.home_override_{{ person }}"
+        - action: script.presence_override
+          data:
+            people: "{{ person }}"
+            home: turn_off
 
-        - action: input_boolean.turn_off
-          target:
-            entity_id: "input_boolean.{{ person }}_home"
+        - if: "{{ trigger.id == 'guest_alert' }}"
+          then:
+            - action: notify.jason
+              data:
+                message: clear_notification
+                data:
+                  tag: guest_alert
 
 ###################################################################################################
 ## Reset Presence Override
@@ -116,19 +100,7 @@
       not_to:
         - unknown
         - unavailable
-      for: 30
-
-    - trigger: state
-      id: lock
-      entity_id:
-        - sensor.side_door_lock_status
-        - sensor.front_door_lock_status
-        - sensor.back_door_lock_status
-      to:
-        - Unlocked (Jason)
-      not_from:
-        - unknown
-        - unavailable
+      for: 60
 
     - trigger: event
       id: action
@@ -142,6 +114,10 @@
       to: "on"
       from: "off"
   conditions:
+    - condition: state
+      entity_id: input_boolean.occupancy_automation
+      state: "on"
+
     - "{{ is_state('input_boolean.home_override_' ~ person, 'on') }}"
     - "{{ is_state('binary_sensor.' ~ person ~ '_phone_connected', 'on') }}"
   actions:
@@ -180,12 +156,6 @@
     - condition: state
       entity_id: input_boolean.home_override_jason
       state: "on"
-
-    - condition: template
-      alias: "Occupancy override is off if occupancy trigger"
-      value_template: >
-        {{ iif(trigger.id == 'occupancy',
-            is_state('input_boolean.occupancy_override', 'off'), true) }}
   actions:
     - action: script.tts_play
       data:

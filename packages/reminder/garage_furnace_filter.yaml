@@ -1,0 +1,483 @@
+###################################################################################################
+## Package - Garage Furnace Filter Reminder
+###################################################################################################
+input_boolean:
+  garage_furnace_filter_enabled:
+    name: "Garage Furnace Filter Enabled"
+    icon: &hvac_icon mdi:air-filter
+  garage_furnace_filter_active:
+    name: "Garage Furnace Filter Active"
+    icon: *hvac_icon
+  garage_furnace_filter_paused:
+    name: "Garage Furnace Filter Paused"
+    icon: *hvac_icon
+  garage_furnace_filter_skipped:
+    name: "Garage Furnace Filter Skipped"
+    icon: *hvac_icon
+
+input_datetime:
+  garage_furnace_filter_days:
+    name: "Garage Furnace Filter Days"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  garage_furnace_filter_afternoons:
+    name: "Garage Furnace Filter Afternoons"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+  garage_furnace_filter_weekends:
+    name: "Garage Furnace Filter Weekends"
+    icon: mdi:clock
+    has_date: false
+    has_time: true
+
+input_number:
+  garage_furnace_filter_hours:
+    name: "Garage Furnace Filter Hours"
+    icon: mdi:air-filter
+    unit_of_measurement: hours
+    mode: slider
+    min: 10
+    max: 500
+    step: 10
+  garage_furnace_filter_notification_interval:
+    name: "Garage Furnace Filter Reminder Interval"
+    icon: mdi:calendar-range
+    unit_of_measurement: minutes
+    mode: slider
+    min: 5
+    max: 240
+    step: 5
+
+template:
+  - button:
+      - name: "Garage Furnace Filter Done"
+        unique_id: garage_furnace_filter_done
+        icon: *hvac_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.garage_furnace_filter_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Garage Furnace Filter reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.garage_furnace_filter_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: &entities
+                        - input_boolean.garage_furnace_filter_active
+                        - input_boolean.garage_furnace_filter_paused
+                        - input_boolean.garage_furnace_filter_skipped
+
+              - action: browser_mod.notification
+                data:
+                  message: "Garage Furnace Filter hours have been reset."
+                  duration: 10000
+
+      - name: "Skip Garage Furnace Filter"
+        unique_id: skip_garage_furnace_filter
+        icon: *hvac_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.garage_furnace_filter_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Garage Furnace Filter reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.garage_furnace_filter_reminder
+                    state:
+                      - Active
+                      - Paused
+                      - Skipped
+                then:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id:
+                        - input_boolean.garage_furnace_filter_active
+                        - input_boolean.garage_furnace_filter_skipped
+                else:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.garage_furnace_filter_skipped
+
+              - action: browser_mod.notification
+                data:
+                  message: "Garage Furnace Filter skip reminder is now {{ states('input_boolean.garage_furnace_filter_skipped') }}."
+                  duration: 10000
+
+      - name: "Pause Garage Furnace Filter"
+        unique_id: pause_garage_furnace_filter
+        icon: *hvac_icon
+        press:
+          - if:
+              - condition: state
+                entity_id: input_boolean.garage_furnace_filter_enabled
+                state: "off"
+            then:
+              - action: browser_mod.notification
+                data:
+                  message: "Garage Furnace Filter reminder is not enabled."
+                  duration: 10000
+            else:
+              - if:
+                  - condition: state
+                    entity_id: sensor.garage_furnace_filter_reminder
+                    state:
+                      - Active
+                      - Paused
+                then:
+                  - action: input_boolean.toggle
+                    target:
+                      entity_id: input_boolean.garage_furnace_filter_paused
+
+                  - action: browser_mod.notification
+                    data:
+                      message: "Garage Furnace Filter pause reminder is now {{ states('input_boolean.garage_furnace_filter_paused') }}."
+                      duration: 10000
+                else:
+                  - action: browser_mod.notification
+                    data:
+                      message: "Garage Furnace Filter reminder is not active."
+                      duration: 10000
+
+  - sensor:
+      - name: "Garage Furnace Filter Reminder"
+        unique_id: garage_furnace_filter_reminder
+        icon: *hvac_icon
+        device_class: enum
+        state: >
+          {% if is_state('input_boolean.garage_furnace_filter_enabled', 'off') %} Disabled
+          {% elif is_state('input_boolean.garage_furnace_filter_paused', 'on') %} Paused
+          {% elif is_state('input_boolean.garage_furnace_filter_skipped', 'on') %} Skipped
+          {% elif is_state('input_boolean.garage_furnace_filter_active', 'on') %} Active
+          {% else %} Off
+          {% endif %}
+        attributes:
+          options: "['Disabled', 'Paused', 'Skipped', 'Active', 'Off']"
+          hours: "{{ '%0.1f' | format(states('sensor.garage_furnace_filter_hours') | float(-1)) }} hours"
+          last_done: >
+            {% from 'reminder.jinja' import reminder_last_done %}
+            {{ reminder_last_done('garage_furnace_filter') }}
+
+automation:
+  ###################################################################################################
+  ## Turn Garage Furnace Filter On
+  ###################################################################################################
+  - id: turn_garage_furnace_filter_on
+    alias: "Turn Garage Furnace Filter On"
+    description: "Turn on reminder active boolean."
+    trigger:
+      - trigger: template
+        value_template: >
+          {% if is_state('input_boolean.garage_furnace_filter_enabled', 'on') %}
+            {% set time = states('sensor.time') %}
+            {% set shift = state_attr('sensor.work_status', 'shift') %}
+            {% set last_run = states('button.garage_furnace_filter_done') %}
+            {% set filter_hours = states('sensor.garage_furnace_filter_hours') | int(-1) %}
+            {% set limit = states('input_number.garage_furnace_filter_hours') | int(-1) %}
+            {{ filter_hours >= limit
+                and ((shift == 'Days' and time == states('input_datetime.garage_furnace_filter_days')[0:5])
+                  or (shift == 'Afternoons' and time == states('input_datetime.garage_furnace_filter_afternoons')[0:5])
+                  or (shift == 'Off' and time == states('input_datetime.garage_furnace_filter_weekends')[0:5])) }}
+          {% endif %}
+    action:
+      # turn off previous active reminder to retrigger notifications
+      - if: "{{ is_state('input_boolean.garage_furnace_filter_active', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.garage_furnace_filter_active
+
+      # turn off previous paused reminder
+      - if: "{{ is_state('input_boolean.garage_furnace_filter_paused', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.garage_furnace_filter_paused
+
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.garage_furnace_filter_paused
+
+      # turn on active reminder if not skipped else turn of skipped
+      - if: "{{ is_state('input_boolean.garage_furnace_filter_skipped', 'on') }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.garage_furnace_filter_skipped
+        else:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.garage_furnace_filter_active
+
+  ###################################################################################################
+  ## Garage Furnace Filter Done
+  ###################################################################################################
+  - id: garage_furnace_filter_done
+    alias: "Garage Furnace Filter Done"
+    description: "Mark reminder completed."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: garage_furnace_filter_done
+    condition:
+      - condition: state
+        entity_id: input_boolean.garage_furnace_filter_active
+        state: "on"
+    action:
+      - action: button.press
+        target:
+          entity_id: button.garage_furnace_filter_done
+
+  ###################################################################################################
+  ## Skip Garage Furnace Filter
+  ###################################################################################################
+  - id: skip_garage_furnace_filter
+    alias: "Skip Garage Furnace Filter"
+    description: "Skip reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: skip_garage_furnace_filter
+    action:
+      - action: button.press
+        target:
+          entity_id: button.skip_garage_furnace_filter
+
+  ###################################################################################################
+  ## Pause Garage Furnace Filter
+  ###################################################################################################
+  - id: pause_garage_furnace_filter
+    alias: "Pause Garage Furnace Filter"
+    description: "Pause reminder."
+    max_exceeded: silent
+    trigger:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: pause_garage_furnace_filter
+    action:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.garage_furnace_filter_paused
+
+  ###################################################################################################
+  ## Reset Pause Garage Furnace Filter
+  ###################################################################################################
+  - id: reset_pause_garage_furnace_filter
+    alias: "Reset Pause Garage Furnace Filter"
+    description: "Reset reminder paused boolean."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        entity_id: input_boolean.garage_furnace_filter_skipped
+        to: "on"
+
+      - trigger: state
+        entity_id: input_boolean.garage_furnace_filter_paused
+        to: "on"
+        for:
+          hours: 24
+
+      - trigger: state
+        entity_id: binary_sensor.owner_home
+        to: "on"
+        for:
+          minutes: 15
+    condition:
+      - condition: state
+        entity_id: input_boolean.garage_furnace_filter_paused
+        state: "on"
+    action:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.garage_furnace_filter_paused
+
+  ###################################################################################################
+  ## Reset Garage Furnace Filter Booleans
+  ###################################################################################################
+  - id: reset_garage_furnace_filter_booleans
+    alias: "Reset Garage Furnace Filter Booleans"
+    description: "Reset reminder booleans if reminder disabled, completed, or not active."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        id: enabled
+        entity_id: input_boolean.garage_furnace_filter_enabled
+        to: "off"
+
+      - trigger: state
+        id: done
+        entity_id: input_boolean.garage_furnace_filter_active
+        to: "off"
+
+      - trigger: state
+        id: entity
+        entity_id: *entities
+        to: "on"
+    condition:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.garage_furnace_filter_enabled
+            state: "off"
+
+          - condition: template
+            alias: "Pause boolean turned on when reminder is skipped or isn't active"
+            value_template: >
+              {{ trigger.entity_id == 'input_boolean.garage_furnace_filter_paused'
+                  and (is_state('input_boolean.garage_furnace_filter_active', 'off')
+                    or is_state('input_boolean.garage_furnace_filter_skipped', 'on')) }}
+
+          - condition: template
+            alias: "Reminder completed"
+            value_template: "{{ trigger.id == 'done' }}"
+    action:
+      - if: "{{ trigger.id == 'entity' }}"
+        then:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ trigger.entity_id }}"
+        else:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: *entities
+
+  ###################################################################################################
+  ## Garage Furnace Filter Notification
+  ###################################################################################################
+  - id: garage_furnace_filter_notification
+    alias: "Garage Furnace Filter Notification"
+    description: "Send notification until reminder is off."
+    max_exceeded: silent
+    trigger:
+      - trigger: homeassistant
+        event: start
+
+      - trigger: state
+        entity_id: input_boolean.garage_furnace_filter_active
+        to: "on"
+
+      - trigger: state
+        entity_id: input_boolean.garage_furnace_filter_paused
+        to: "off"
+    condition:
+      - condition: state
+        entity_id: input_boolean.garage_furnace_filter_active
+        state: "on"
+
+      - condition: state
+        entity_id: input_boolean.garage_furnace_filter_paused
+        state: "off"
+    action:
+      - repeat:
+          sequence:
+            - if: "{{ not is_state('input_select.occupancy_mode', 'Night') }}"
+              then:
+                - action: notify.jason
+                  data:
+                    message: >
+                      Change the Garage Furnace Filter.
+                      Hours: {{ '%0.01f' | format(states('sensor.furnace_filter_hours') | float(-1)) }}
+                    data:
+                      tag: garage_furnace_filter_reminder
+                      group: Reminder
+                      visibility: public
+                      persistent: true
+                      notification_icon: *hvac_icon
+                      icon_url: !secret AIR_FILTER_ICON
+                      actions:
+                        - title: "Pause"
+                          action: pause_garage_furnace_filter
+
+                        - title: "Skip"
+                          action: skip_garage_furnace_filter
+
+                        - title: "Done"
+                          action: garage_furnace_filter_done
+
+                # wait to see if turned off before tts
+                - wait_template: >
+                    {{ is_state('input_boolean.garage_furnace_filter_active', 'off')
+                        or is_state('input_boolean.garage_furnace_filter_paused', 'on') }}
+                  timeout:
+                    minutes: 2
+
+                - if:
+                    - condition: state
+                      entity_id: input_boolean.garage_furnace_filter_active
+                      state: "on"
+
+                    - condition: state
+                      entity_id: input_boolean.garage_furnace_filter_paused
+                      state: "off"
+                  then:
+                    - action: script.turn_on
+                      continue_on_error: true
+                      target:
+                        entity_id: script.tts_play
+                      data:
+                        variables:
+                          message: "Hey J! The furnace filter needs to be changed!"
+                          quiet_play: true
+
+            - wait_template: >
+                {{ is_state('input_boolean.garage_furnace_filter_active', 'off')
+                    or is_state('input_boolean.garage_furnace_filter_paused', 'on') }}
+              timeout:
+                minutes: "{{ states('input_number.garage_furnace_filter_notification_interval') | int }}"
+          until:
+            - or:
+                - condition: state
+                  entity_id: input_boolean.garage_furnace_filter_active
+                  state: "off"
+
+                - condition: state
+                  entity_id: input_boolean.garage_furnace_filter_paused
+                  state: "on"
+
+  ###################################################################################################
+  ## Clear Garage Furnace Filter Notification
+  ###################################################################################################
+  - id: clear_garage_furnace_filter_notification
+    alias: "Clear Garage Furnace Filter Notification"
+    description: "Clear reminder notification."
+    max_exceeded: silent
+    trigger:
+      - trigger: state
+        entity_id: input_boolean.garage_furnace_filter_active
+        to: "off"
+
+      - trigger: state
+        entity_id:
+          - input_boolean.garage_furnace_filter_paused
+          - input_boolean.garage_furnace_filter_skipped
+        to: "on"
+    action:
+      - action: notify.jason
+        data:
+          message: clear_notification
+          data:
+            tag: garage_furnace_filter_reminder

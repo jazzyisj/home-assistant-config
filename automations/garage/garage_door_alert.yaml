@@ -1,0 +1,91 @@
+###############################################################################
+## Garage Door Check
+###############################################################################
+- id: garage_door_check
+  alias: "Garage Door Check"
+  description: "Send notification, play announcement."
+  mode: restart
+  trigger:
+    - platform: state
+      id: open
+      entity_id: cover.garage_door
+      to: opening
+
+    - platform: state
+      id: closed
+      entity_id: cover.garage_door
+      to: closing
+  action:
+    - action: script.garage_door_check
+      data:
+        check_state: "{{ trigger.id }}"
+
+###############################################################################
+## Garage Door Open Alert
+###############################################################################
+- id: garage_door_extended_open_alert
+  alias: "Garage Door Extended Open Alert"
+  description: "Send notification, play announcement."
+  trigger:
+    - platform: state
+      entity_id: binary_sensor.garage_door
+      to: "on"
+      for:
+        minutes: 15
+  action:
+    - service: input_boolean.turn_on
+      target:
+        entity_id: input_boolean.garage_door_alert
+
+    - repeat:
+        sequence:
+          - variables:
+              open_time: "{{ as_local(states.binary_sensor.garage_door.last_changed).strftime('%-I:%M %p') }}"
+              open_duration: "{{ time_since(states.binary_sensor.garage_door.last_changed,2) }}"
+
+          - service: script.garage_door_notification
+            data:
+              message: >
+                Garage door has been open for {{ open_duration }}.
+                Opened at: {{ open_time }}
+              person: jason
+
+          - wait_template: >
+              {{ is_state('input_boolean.garage_door_alert','off')
+                  or is_state('binary_sensor.garage_door','off') }}
+            timeout:
+              minutes: 15 # delay before repeat
+        until: >
+          {{ is_state('input_boolean.garage_door_alert','off')
+              or is_state('binary_sensor.garage_door','off') }}
+
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.garage_door_alert
+
+###############################################################################
+## Clear Garage Door Alert Notification
+###############################################################################
+- id: clear_garage_doo_alert_notification
+  alias: "Clear Garage Door Alert Notification"
+  description: "Turn off alert, clear notification."
+  max_exceeded: silent
+  trigger:
+    - platform: state
+      entity_id: input_boolean.garage_door_alert
+      to: "off"
+
+    - platform: event
+      event_type: mobile_app_notification_action
+      event_data:
+        action: turn_off_garage_door_alert
+  action:
+    - service: input_boolean.turn_off
+      target:
+        entity_id: input_boolean.garage_door_alert
+
+    - service: notify.jason
+      data:
+        message: clear_notification
+        data:
+          tag: garage_door_alert

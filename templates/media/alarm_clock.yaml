@@ -2,11 +2,8 @@
 ## Templates - Alarm Clock
 ###################################################################################################
 - switch:
-    ###################################################################################################
-    ## Switch - Alarm Clock Wake
-    ###################################################################################################
-    - name: "Wake Alarm Clock"
-      unique_id: alarm_clock_wake
+    - name: "Alarm Clock Daily"
+      unique_id: alarm_clock_daily
       icon: mdi:alarm
       turn_on:
         - if:
@@ -18,7 +15,7 @@
               target:
                 entity_id: input_select.alarm_clock_type
               data:
-                option: wake
+                option: daily
 
             - delay: 1 # allow sensor.alarm_clock_active_media_player to calculate
 
@@ -27,16 +24,13 @@
                 entity_id: script.alarm_clock_play
       turn_off:
         # allow reset to turn other alarm clock switches off
-        - if: "{{ is_state('input_select.alarm_clock_type', 'wake') }}"
+        - if: "{{ is_state('input_select.alarm_clock_type', 'daily') }}"
           then:
             - action: script.turn_on
               target:
                 entity_id: script.alarm_clock_stop
 
-    ###################################################################################################
-    ## Switch - Alarm Clock Manual
-    ###################################################################################################
-    - name: "Alarm Clock: Manual"
+    - name: "Alarm Clock Manual"
       unique_id: alarm_clock_manual
       icon: mdi:alarm
       turn_on:
@@ -74,10 +68,7 @@
               target:
                 entity_id: script.alarm_clock_stop
 
-    ###################################################################################################
-    ## Switch - Alarm Clock Nap
-    ###################################################################################################
-    - name: "Alarm Clock: Nap"
+    - name: "Alarm Clock Nap"
       unique_id: alarm_clock_nap
       icon: mdi:alarm
       turn_on:
@@ -113,10 +104,7 @@
           target:
             entity_id: timer.alarm_clock_nap
 
-    ###################################################################################################
-    ## Switch - Alarm Clock Snooze
-    ###################################################################################################
-    - name: "Alarm Clock: Snooze"
+    - name: "Alarm Clock Snooze"
       unique_id: alarm_clock_snooze
       icon: mdi:sleep
       turn_on:
@@ -125,32 +113,33 @@
               entity_id: binary_sensor.alarm_clock
               state: "on"
           then:
-            # allows snooze from notification/table switch before alarm starts
+            # this allows snooze from notification or external button before alarm starts playing
             - if: "{{ is_state(states('sensor.alarm_clock_active_media_player'), ['playing', 'buffering', 'on']) }}"
               then:
                 - action: media_player.media_pause
                   target:
                     entity_id: "{{ states('sensor.alarm_clock_active_media_player') }}"
 
-            - action: timer.start
-              target:
-                entity_id: timer.alarm_clock_snooze
+            - if:
+                - condition: state
+                  entity_id: timer.alarm_clock_snooze
+                  state:
+                    - idle
+                    - paused
+              then:
+                - action: timer.start
+                  target:
+                    entity_id: timer.alarm_clock_snooze
+                  data:
+                    duration:
+                      minutes: "{{ states('input_number.alarm_clock_snooze_time') | int(0) }}"
+          else:
+            - action: browser_mod.notification
               data:
-                duration:
-                  minutes: "{{ states('input_number.alarm_clock_snooze_time') | int(0) }}"
+                duration: 10000
+                message: "Cannot snooze alarm.  Alarm clock is not active."
       turn_off:
         - if:
-            - condition: state
-              entity_id: binary_sensor.alarm_clock
-              state: "on"
-          then:
-            - if: "{{ is_state(states('sensor.alarm_clock_active_media_player'), 'paused') }}"
-              then:
-                - action: media_player.media_play
-                  target:
-                    entity_id: "{{ states('sensor.alarm_clock_active_media_player') }}"
-
-        - if: # switch turned off during alarm - cancel timer to turn off alarm
             - condition: state
               entity_id: timer.alarm_clock_snooze
               state:
@@ -160,7 +149,25 @@
             - action: timer.cancel
               target:
                 entity_id: timer.alarm_clock_snooze
+          else:
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.alarm_clock
+                  state: "on"
 
+                - condition: template
+                  alias: "Alarm clock media player is snoozed / paused"
+                  value_template: "{{ is_state(states('sensor.alarm_clock_active_media_player'), 'paused') }}"
+              then:
+                - delay: 1 # allow alarm clock to turn off if timer cancelled / paused
+
+                - action: media_player.media_play_pause
+                  target:
+                    entity_id: "{{ states('sensor.alarm_clock_active_media_player') }}"
+
+###################################################################################################
+## Soundlist
+###################################################################################################
 - trigger:
     - trigger: homeassistant
       event: start
@@ -194,6 +201,9 @@
           {% endif %}
           {{ files.value }}
 
+###################################################################################################
+## Speaker
+###################################################################################################
 - trigger:
     - trigger: homeassistant
       event: start
@@ -208,19 +218,19 @@
       for: 30
 
     - trigger: state
-      entity_id: input_text.alarm_clock_media_player_wake
+      entity_id: input_text.alarm_clock_speaker_daily
       to:
   select:
-    - name: "Alarm Clock Media Player Wake"
-      unique_id: alarm_clock_media_player_wake
-      state: "{{ states('input_text.alarm_clock_media_player_wake') }}"
+    - name: "Alarm Clock Speaker Daily"
+      unique_id: alarm_clock_speaker_daily
+      state: "{{ states('input_text.alarm_clock_speaker_daily') }}"
       select_option:
         - condition: template
           value_template: "{{ option not in ['', none] }}"
 
         - action: input_text.set_value
           target:
-            entity_id: input_text.alarm_clock_media_player_wake
+            entity_id: input_text.alarm_clock_speaker_daily
           data:
             value: "{{ option }}"
       options: &alarm_players >
@@ -243,19 +253,19 @@
       for: 30
 
     - trigger: state
-      entity_id: input_text.alarm_clock_media_player_manual
+      entity_id: input_text.alarm_clock_speaker_manual
       to:
   select:
-    - name: "Alarm Clock Media Player Manual"
-      unique_id: alarm_clock_media_player_manual
-      state: "{{ states('input_text.alarm_clock_media_player_manual') }}"
+    - name: "Alarm Clock Speaker Manual"
+      unique_id: alarm_clock_speaker_manual
+      state: "{{ states('input_text.alarm_clock_speaker_manual') }}"
       select_option:
         - condition: template
           value_template: "{{ option not in ['', none] }}"
 
         - action: input_text.set_value
           target:
-            entity_id: input_text.alarm_clock_media_player_manual
+            entity_id: input_text.alarm_clock_speaker_manual
           data:
             value: "{{ option }}"
       options: *alarm_players
@@ -274,23 +284,26 @@
       for: 30
 
     - trigger: state
-      entity_id: input_text.alarm_clock_media_player_nap
+      entity_id: input_text.alarm_clock_speaker_nap
       to:
   select:
-    - name: "Alarm Clock Media Player Nap"
-      unique_id: alarm_clock_media_player_nap
-      state: "{{ states('input_text.alarm_clock_media_player_nap') }}"
+    - name: "Alarm Clock Speaker Nap"
+      unique_id: alarm_clock_speaker_nap
+      state: "{{ states('input_text.alarm_clock_speaker_nap') }}"
       select_option:
         - condition: template
           value_template: "{{ option not in ['', none] }}"
 
         - action: input_text.set_value
           target:
-            entity_id: input_text.alarm_clock_media_player_nap
+            entity_id: input_text.alarm_clock_speaker_nap
           data:
             value: "{{ option }}"
       options: *alarm_players
 
+###################################################################################################
+## Media
+###################################################################################################
 - trigger:
     - trigger: homeassistant
       event: start
@@ -305,25 +318,25 @@
       for: 30
 
     - trigger: state
-      entity_id: input_text.alarm_clock_sound_wake
+      entity_id: input_text.alarm_clock_media_daily
       to:
   select:
-    - name: "Alarm Clock Sound Wake"
-      unique_id: alarm_clock_sound_wake
-      state: "{{ states('input_text.alarm_clock_sound_wake') }}"
+    - name: "Alarm Clock Media Daily"
+      unique_id: alarm_clock_media_daily
+      state: "{{ states('input_text.alarm_clock_media_daily') }}"
       select_option:
         - condition: template
           value_template: "{{ option not in ['', none] }}"
 
         - action: input_text.set_value
           target:
-            entity_id: input_text.alarm_clock_sound_wake
+            entity_id: input_text.alarm_clock_media_daily
           data:
             value: "{{ option }}"
       options: &alarm_sounds >
         {% set sounds = state_attr('sensor.alarm_clock_soundlist', 'soundlist') %}
         {% set sounds = iif(sounds != none, sounds, []) %}
-        {{ ['Media'] + sounds }}
+        {{ state_attr('input_select.media_type_play', 'options') + sounds }}
 
 - trigger:
     - trigger: homeassistant
@@ -337,127 +350,10 @@
       attribute: soundlist
       to:
       for: 30
-
-    - trigger: state
-      entity_id: input_text.alarm_clock_sound_manual
-      to:
-  select:
-    - name: "Alarm Clock Sound Manual"
-      unique_id: alarm_clock_sound_manual
-      state: "{{ states('input_text.alarm_clock_sound_manual') }}"
-      select_option:
-        - condition: template
-          value_template: "{{ option not in ['', none] }}"
-
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.alarm_clock_sound_manual
-          data:
-            value: "{{ option }}"
-      options: *alarm_sounds
-
-- trigger:
-    - trigger: homeassistant
-      event: start
-
-    - trigger: event
-      event_type: event_template_reloaded
-
-    - trigger: state
-      entity_id: sensor.alarm_clock_soundlist
-      attribute: soundlist
-      to:
-      for: 30
-
-    - trigger: state
-      entity_id: input_text.alarm_clock_sound_nap
-      to:
-  select:
-    - name: "Alarm Clock Sound Nap"
-      unique_id: alarm_clock_sound_nap
-      state: "{{ states('input_text.alarm_clock_sound_nap') }}"
-      select_option:
-        - condition: template
-          value_template: "{{ option not in ['', none] }}"
-
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.alarm_clock_sound_nap
-          data:
-            value: "{{ option }}"
-      options: *alarm_sounds
-
-- trigger:
-    - trigger: homeassistant
-      event: start
-
-    - trigger: event
-      event_type: event_template_reloaded
-
-    - trigger: state
-      entity_id: input_text.alarm_clock_media_wake
-      to:
-  action:
-    - action: music_assistant.get_library
-      data:
-        config_entry_id: 01JG86QY33GS4K1FFQJ18SREYP
-        media_type: playlist
-        favorite: true
-        limit: 100
-      response_variable: mass_playlists
-
-    - variables:
-        playlists: >
-          {% set playlist_list = namespace(names=[]) %}
-          {% for playlist in mass_playlists['items'] %}
-            {% set playlist_list.names = playlist_list.names + [playlist.name] %}
-          {% endfor %}
-          {{ playlist_list.names | unique | list }}
-  select:
-    - name: "Alarm Clock Media Wake"
-      unique_id: alarm_clock_media_wake
-      state: "{{ states('input_text.alarm_clock_media_wake') }}"
-      select_option:
-        - condition: template
-          value_template: "{{ option not in ['', none] }}"
-
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.alarm_clock_media_wake
-          data:
-            value: "{{ option }}"
-      options: &media_playlist "{{ playlists }}"
-
-- trigger:
-    - trigger: homeassistant
-      event: start
-
-    - trigger: event
-      event_type: event_template_reloaded
 
     - trigger: state
       entity_id: input_text.alarm_clock_media_manual
       to:
-
-    - trigger: state
-      entity_id: button.update_mass_media
-      to:
-  action:
-    - action: music_assistant.get_library
-      data:
-        config_entry_id: 01JG86QY33GS4K1FFQJ18SREYP
-        media_type: playlist
-        favorite: true
-        limit: 100
-      response_variable: mass_playlists
-
-    - variables:
-        playlists: >
-          {% set playlist_list = namespace(names=[]) %}
-          {% for playlist in mass_playlists['items'] %}
-            {% set playlist_list.names = playlist_list.names + [playlist.name] %}
-          {% endfor %}
-          {{ playlist_list.names | unique | list }}
   select:
     - name: "Alarm Clock Media Manual"
       unique_id: alarm_clock_media_manual
@@ -471,7 +367,7 @@
             entity_id: input_text.alarm_clock_media_manual
           data:
             value: "{{ option }}"
-      options: *media_playlist
+      options: *alarm_sounds
 
 - trigger:
     - trigger: homeassistant
@@ -481,8 +377,294 @@
       event_type: event_template_reloaded
 
     - trigger: state
+      entity_id: sensor.alarm_clock_soundlist
+      attribute: soundlist
+      to:
+      for: 30
+
+    - trigger: state
       entity_id: input_text.alarm_clock_media_nap
       to:
+  select:
+    - name: "Alarm Clock Media Nap"
+      unique_id: alarm_clock_media_nap
+      state: "{{ states('input_text.alarm_clock_media_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_media_nap
+          data:
+            value: "{{ option }}"
+      options: *alarm_sounds
+
+###################################################################################################
+## Media Artist
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_artist_daily
+        - input_text.alarm_clock_artist_manual
+        - input_text.alarm_clock_artist_nap
+
+    - trigger: time_pattern
+      minutes: 50 # sync with library every hour at 50 min after
+  action:
+    - action: music_assistant.get_library
+      data:
+        config_entry_id: 01JG86QY33GS4K1FFQJ18SREYP
+        media_type: artist
+        favorite: true
+        limit: 50
+      response_variable: mass_artists
+
+    - variables:
+        artists: >
+          {% set artist_list = namespace(names=[]) %}
+          {% for artist in mass_artists['items'] %}
+            {% set artist_list.names = artist_list.names + [artist.name] %}
+          {% endfor %}
+          {{ artist_list.names | unique | list }}
+  select:
+    - name: "Alarm Clock Artist Daily"
+      unique_id: alarm_clock_artist_daily
+      state: "{{ states('input_text.alarm_clock_artist_daily') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_artist_daily
+          data:
+            value: "{{ option }}"
+      options: "{{ artists }}"
+
+    - name: "Alarm Clock Artist Manual"
+      unique_id: alarm_clock_artist_manual
+      state: "{{ states('input_text.alarm_clock_artist_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_artist_manual
+          data:
+            value: "{{ option }}"
+      options: "{{ artists }}"
+
+    - name: "Alarm Clock Artist Nap"
+      unique_id: alarm_clock_artist_nap
+      state: "{{ states('input_text.alarm_clock_artist_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_artist_nap
+          data:
+            value: "{{ option }}"
+      options: "{{ artists }}"
+
+###################################################################################################
+## Media Album
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_album_daily
+        - input_text.alarm_clock_album_manual
+        - input_text.alarm_clock_album_nap
+
+    - trigger: time_pattern
+      minutes: 50 # sync with library every hour at 50 min after
+  action:
+    - action: music_assistant.get_library
+      data:
+        config_entry_id: 01JG86QY33GS4K1FFQJ18SREYP
+        media_type: album
+        favorite: true
+        limit: 100
+      response_variable: mass_albums
+
+    - variables:
+        albums: >
+          {% set album_list = namespace(names=[]) %}
+          {% for album in mass_albums['items'] %}
+            {% set album_list.names = album_list.names + [album.name] %}
+          {% endfor %}
+          {{ album_list.names | unique | list }}
+  select:
+    - name: "Alarm Clock Album Daily"
+      unique_id: alarm_clock_album_daily
+      state: "{{ states('input_text.alarm_clock_album_daily') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_album_daily
+          data:
+            value: "{{ option }}"
+      options: "{{ albums }}"
+
+    - name: "Alarm Clock Album Manual"
+      unique_id: alarm_clock_album_manual
+      state: "{{ states('input_text.alarm_clock_album_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_album_manual
+          data:
+            value: "{{ option }}"
+      options: "{{ albums }}"
+
+    - name: "Alarm Clock Album Nap"
+      unique_id: alarm_clock_album_nap
+      state: "{{ states('input_text.alarm_clock_album_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_album_nap
+          data:
+            value: "{{ option }}"
+      options: "{{ albums }}"
+
+###################################################################################################
+## Media Track
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_track_daily
+        - input_text.alarm_clock_track_manual
+        - input_text.alarm_clock_track_nap
+
+    - trigger: time_pattern
+      minutes: 50 # sync with library every hour at 50 min after
+  action:
+    - action: music_assistant.get_library
+      data:
+        config_entry_id: 01JG86QY33GS4K1FFQJ18SREYP
+        media_type: track
+        favorite: true
+        limit: 100
+      response_variable: mass_tracks
+
+    - variables:
+        tracks: >
+          {% set track_list = namespace(names=[]) %}
+          {% for track in mass_tracks['items'] %}
+            {% set track_list.names = track_list.names + [track.name] %}
+          {% endfor %}
+          {{ track_list.names | unique | list }}
+  select:
+    - name: "Alarm Clock Track Daily"
+      unique_id: alarm_clock_track_daily
+      state: "{{ states('input_text.alarm_clock_track_daily') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_track_daily
+          data:
+            value: "{{ option }}"
+      options: "{{ tracks }}"
+
+    - name: "Alarm Clock Track Manual"
+      unique_id: alarm_clock_track_manual
+      state: "{{ states('input_text.alarm_clock_track_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_track_manual
+          data:
+            value: "{{ option }}"
+      options: "{{ tracks }}"
+
+    - name: "Alarm Clock Track Nap"
+      unique_id: alarm_clock_track_nap
+      state: "{{ states('input_text.alarm_clock_track_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_track_nap
+          data:
+            value: "{{ option }}"
+      options: "{{ tracks }}"
+
+###################################################################################################
+## Media Playlist
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_playlist_daily
+        - input_text.alarm_clock_playlist_manual
+        - input_text.alarm_clock_playlist_nap
+
+    - trigger: time_pattern
+      minutes: 55 # sync with library every hour at 55 min after
   action:
     - action: music_assistant.get_library
       data:
@@ -500,19 +682,269 @@
           {% endfor %}
           {{ playlist_list.names | unique | list }}
   select:
-    - name: "Alarm Clock Media Nap"
-      unique_id: alarm_clock_media_nap
-      state: "{{ states('input_text.alarm_clock_media_nap') }}"
+    - name: "Alarm Clock Playlist Daily"
+      unique_id: alarm_clock_playlist_daily
+      state: "{{ states('input_text.alarm_clock_playlist_daily') }}"
       select_option:
         - condition: template
           value_template: "{{ option not in ['', none] }}"
 
         - action: input_text.set_value
           target:
-            entity_id: input_text.alarm_clock_media_nap
+            entity_id: input_text.alarm_clock_playlist_daily
           data:
             value: "{{ option }}"
-      options: *media_playlist
+      options: "{{ playlists }}"
+
+    - name: "Alarm Clock Playlist Manual"
+      unique_id: alarm_clock_playlist_manual
+      state: "{{ states('input_text.alarm_clock_playlist_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_playlist_manual
+          data:
+            value: "{{ option }}"
+      options: "{{ playlists }}"
+
+    - name: "Alarm Clock Playlist Nap"
+      unique_id: alarm_clock_playlist_nap
+      state: "{{ states('input_text.alarm_clock_playlist_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_playlist_nap
+          data:
+            value: "{{ option }}"
+      options: "{{ playlists }}"
+
+###################################################################################################
+## Media Radio
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_radio_daily
+        - input_text.alarm_clock_radio_manual
+        - input_text.alarm_clock_radio_nap
+
+    - trigger: time_pattern
+      minutes: 55 # sync with library every hour at 55 min after
+  action:
+    - action: music_assistant.get_library
+      data:
+        config_entry_id: 01JG86QY33GS4K1FFQJ18SREYP
+        media_type: radio
+        favorite: true
+        limit: 100
+      response_variable: mass_radios
+
+    - variables:
+        radios: >
+          {% set radio_list = namespace(names=[]) %}
+          {% for radio in mass_radios['items'] %}
+            {% set radio_list.names = radio_list.names + [radio.name] %}
+          {% endfor %}
+          {{ radio_list.names | unique | list }}
+  select:
+    - name: "Alarm Clock Radio Daily"
+      unique_id: alarm_clock_radio_daily
+      state: "{{ states('input_text.alarm_clock_radio_daily') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_radio_daily
+          data:
+            value: "{{ option }}"
+      options: "{{ radios }}"
+
+    - name: "Alarm Clock Radio Manual"
+      unique_id: alarm_clock_radio_manual
+      state: "{{ states('input_text.alarm_clock_radio_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_radio_manual
+          data:
+            value: "{{ option }}"
+      options: "{{ radios }}"
+
+    - name: "Alarm Clock Radio Nap"
+      unique_id: alarm_clock_radio_nap
+      state: "{{ states('input_text.alarm_clock_radio_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_radio_nap
+          data:
+            value: "{{ option }}"
+      options: "{{ radios }}"
+
+###################################################################################################
+## Media Video
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_video_daily
+        - input_text.alarm_clock_video_manual
+        - input_text.alarm_clock_video_nap
+      to:
+
+    - trigger: state
+      entity_id: button.update_mass_media
+      to:
+    #DISABLED not required until automatic video list
+    # - trigger: time_pattern
+    #   minutes: 55 # sync with library every hour at 55 min after
+  select:
+    - name: "Alarm Clock Video Daily"
+      unique_id: alarm_clock_video_daily
+      state: "{{ states('input_text.alarm_clock_video_daily') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_video_daily
+          data:
+            value: "{{ option }}"
+      options: !include /config/include/media_preset_videos.yaml
+
+    - name: "Alarm Clock Video Manual"
+      unique_id: alarm_clock_video_manual
+      state: "{{ states('input_text.alarm_clock_video_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_video_manual
+          data:
+            value: "{{ option }}"
+      options: !include /config/include/media_preset_videos.yaml
+
+    - name: "Alarm Clock Video Nap"
+      unique_id: alarm_clock_video_nap
+      state: "{{ states('input_text.alarm_clock_video_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_video_nap
+          data:
+            value: "{{ option }}"
+      options: !include /config/include/media_preset_videos.yaml
+
+###################################################################################################
+## Media Video Display
+###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: state
+      entity_id: group.cast_media_players
+      attribute: entity_id
+      to:
+      for: 30
+
+    - trigger: state
+      entity_id:
+        - input_text.alarm_clock_video_display_daily
+        - input_text.alarm_clock_video_display_manual
+        - input_text.alarm_clock_video_display_nap
+  condition:
+    - condition: template
+      value_template: >
+        {{ state_attr('group.cast_media_players', 'entity_id')
+            not in ['', '[]', none] }}
+  select:
+    - name: "Alarm Clock Video Display Daily"
+      unique_id: alarm_clock_video_display_daily
+      state: "{{ states('input_text.alarm_clock_video_display_daily') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_video_display_daily
+          data:
+            value: "{{ option }}"
+      options: >
+        {{ expand('group.cast_media_players')
+            | map(attribute='name') | sort }}
+
+    - name: "Alarm Clock Video Display Manual"
+      unique_id: alarm_clock_video_display_manual
+      state: "{{ states('input_text.alarm_clock_video_display_manual') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_video_display_manual
+          data:
+            value: "{{ option }}"
+      options: >
+        {{ expand('group.cast_media_players')
+            | map(attribute='name') | sort }}
+
+    - name: "Alarm Clock Video Display Nap"
+      unique_id: alarm_clock_video_display_nap
+      state: "{{ states('input_text.alarm_clock_video_display_nap') }}"
+      select_option:
+        - condition: template
+          value_template: "{{ option not in ['', none] }}"
+
+        - action: input_text.set_value
+          target:
+            entity_id: input_text.alarm_clock_video_display_nap
+          data:
+            value: "{{ option }}"
+      options: >
+        {{ expand('group.cast_media_players')
+            | map(attribute='name') | sort }}
 
 - binary_sensor:
     - name: "Alarm Clock"
@@ -520,7 +952,7 @@
       icon: mdi:alarm-note
       state: >
         {{ not is_state('input_select.alarm_clock_type', 'off')
-            and (is_state('switch.alarm_clock_wake', 'on')
+            and (is_state('switch.alarm_clock_daily', 'on')
               or is_state('switch.alarm_clock_manual', 'on')
               or is_state('switch.alarm_clock_nap', 'on')) }}
 
@@ -548,11 +980,16 @@
       device_class: enum
       state: >
         {% set alarm_type = states('input_select.alarm_clock_type') %}
+        {% set media_type = states('select.alarm_clock_media_' ~ alarm_type) %}
         {% if alarm_type != "off" %}
-          {% set player_name = states('select.alarm_clock_media_player_' ~ alarm_type) %}
-          {{ expand('group.alarm_clock_media_players')
-              | selectattr('name', 'eq', player_name)
-              | map(attribute='entity_id') | join }}
+          {% if media_type == 'Video' %}
+            {% set player_name = states('select.alarm_clock_video_display_' ~ alarm_type) %}
+          {% else %}
+            {% set player_name = states('select.alarm_clock_speaker_' ~ alarm_type) %}
+          {% endif %}
+            {{ expand('group.alarm_clock_media_players')
+                | selectattr('name', 'eq', player_name)
+                | map(attribute='entity_id') | join }}
         {% else %} {{ none }}
         {% endif %}
       attributes:
@@ -565,10 +1002,10 @@
             {% endif %}
           {% else %} none
           {% endif %}
-        options: "{{ state_attr('select.alarm_clock_media_player_wake', 'options') }}"
+        options: "{{ state_attr('select.alarm_clock_speaker_daily', 'options') }}"
 
-    - name: "Alarm Clock Wake Next Alarm"
-      unique_id: alarm_clock_wake_next_alarm
+    - name: "Alarm Clock Daily Next Alarm"
+      unique_id: alarm_clock_daily_next_alarm
       device_class: timestamp
       icon: >
         {% from 'media.jinja' import alarm_clock_icon %}
@@ -605,36 +1042,41 @@
           {# now between reset and alarm_today - today #}
           {# now after alarm_today - tomorrow #}
           {% if (reset > now() < alarm_today and work_tomorrow
-                and is_state('input_boolean.alarm_clock_wake_workdays', 'off'))
+                and is_state('input_boolean.alarm_clock_daily_workdays', 'off'))
               or (reset > now() <= alarm_today and not work_tomorrow
-                and is_state('input_boolean.alarm_clock_wake_weekends', 'off'))
+                and is_state('input_boolean.alarm_clock_daily_weekends', 'off'))
               or (reset < now() < alarm_today and work_today
-                and is_state('input_boolean.alarm_clock_wake_workdays', 'off'))
+                and is_state('input_boolean.alarm_clock_daily_workdays', 'off'))
               or  (reset < now() < alarm_today and not work_today
-                and is_state('input_boolean.alarm_clock_wake_weekends', 'off'))
+                and is_state('input_boolean.alarm_clock_daily_weekends', 'off'))
               or (now() > alarm_today and work_tomorrow
-                and is_state('input_boolean.alarm_clock_wake_workdays', 'off'))
+                and is_state('input_boolean.alarm_clock_daily_workdays', 'off'))
               or (now() > alarm_today and not work_tomorrow
-                and is_state('input_boolean.alarm_clock_wake_weekends', 'off')) %}
+                and is_state('input_boolean.alarm_clock_daily_weekends', 'off')) %}
             {% set next_alarm = none %}
           {% endif %}
         {% endif %}
         {{ next_alarm }}
       attributes:
-        source: Wake
+        source: Daily
         status: >
-          {% if is_state('switch.alarm_clock_wake', 'on') %}
+          {% if is_state('switch.alarm_clock_daily', 'on') %}
               {% if is_state('input_boolean.alarm_clock_failed', 'on') %} failed
               {% elif is_state('switch.alarm_clock_snooze', 'on') %} snoozed
               {% elif is_state('input_boolean.alarm_clock_test_play', 'on') %} testing
               {% elif is_state(states('sensor.alarm_clock_active_media_player'), ['playing', 'buffering']) %} playing
               {% else %} delayed
               {% endif %}
-          {% elif not has_value('sensor.alarm_clock_wake_next_alarm') %} off
-          {% elif is_state_attr('sensor.alarm_clock_next_alarm', 'source', 'Wake')
+          {% elif not has_value('sensor.alarm_clock_daily_next_alarm') %} off
+          {% elif is_state_attr('sensor.alarm_clock_next_alarm', 'source', 'Daily')
               and is_state('input_boolean.alarm_clock_skip_next', 'on') %} skipped
           {% else %} pending
           {% endif %}
+        display: >
+          {% set status = state_attr(this.entity_id, 'status') %}
+          {{ status | title if status
+                in ['off', 'failed', 'snoozed', 'testing', 'playing', 'skipped']
+              else state_attr(this.entity_id, '12hour') }}
         12hour: >
           {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
@@ -667,6 +1109,11 @@
               and is_state('input_boolean.alarm_clock_skip_next', 'on') %} skipped
           {% else %} pending
           {% endif %}
+        display: >
+          {% set status = state_attr(this.entity_id, 'status') %}
+          {{ status | title if status
+                in ['off', 'failed', 'snoozed', 'testing', 'playing', 'skipped']
+              else state_attr(this.entity_id, '12hour') }}
         12hour: >
           {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
@@ -693,6 +1140,11 @@
               and is_state('input_boolean.alarm_clock_skip_next', 'on') %} skipped
           {% else %} pending
           {% endif %}
+        display: >
+          {% set status = state_attr(this.entity_id, 'status') %}
+          {{ status | title if status
+                in ['off', 'failed', 'snoozed', 'testing', 'playing', 'skipped']
+              else state_attr(this.entity_id, '12hour') }}
         12hour: >
           {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
@@ -737,7 +1189,7 @@
           {% from 'schedule.jinja' import twelve_hour %}
           {{ twelve_hour(this.entity_id) }}
 
-    # earliest of wake, manual, phone, google home alarms in next 24 hours
+    # earliest of daily, manual, phone, google home alarms in next 24 hours
     - name: "Alarm Clock Next Alarm"
       unique_id: alarm_clock_next_alarm
       device_class: timestamp
@@ -752,7 +1204,7 @@
           {% set set_alarms = namespace(value=[]) %}
           {% set other_alarms = state_attr('sensor.alarm_clock_other', 'alarm_clocks')
               if state_attr('sensor.alarm_clock_other', 'alarm_clocks') != none else [] %}
-          {% set alarm_clocks = ['alarm_clock_wake', 'alarm_clock_manual', 'alarm_clock_nap'] + other_alarms %}
+          {% set alarm_clocks = ['alarm_clock_daily', 'alarm_clock_manual', 'alarm_clock_nap'] + other_alarms %}
           {% for item in alarm_clocks %}
             {% if has_value('sensor.' ~ item ~ '_next_alarm') %}
               {% set alarm = states('sensor.' ~ item ~ '_next_alarm') %}
@@ -777,7 +1229,7 @@
         source: >
           {% if has_value('sensor.alarm_clock_next_alarm') %}
             {% set next = states('sensor.alarm_clock_next_alarm') %}
-            {% if next == states('sensor.alarm_clock_wake_next_alarm') %} Wake
+            {% if next == states('sensor.alarm_clock_daily_next_alarm') %} Daily
             {% elif next == states('sensor.alarm_clock_manual_next_alarm') %} Manual
             {% elif next == states('sensor.alarm_clock_nap_next_alarm') %} Nap
             {% elif next == states('sensor.alarm_clock_other') %} {{ state_attr('sensor.alarm_clock_other', 'source') }}

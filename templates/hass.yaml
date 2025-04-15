@@ -1,82 +1,4 @@
 ###################################################################################################
-## Templates - Variables #TEST
-# https://community.home-assistant.io/t/trigger-based-template-sensor-to-store-global-variables/735474
-###################################################################################################
-- trigger:
-    - platform: event
-      event_type: set_variable
-
-    - platform: event
-      event_type: remove_variable
-
-    - platform: event
-      event_type: clear_variables
-  condition:
-    - condition: template
-      value_template: >
-        {{
-            (
-              trigger.event.event_type == 'set_variable'
-              and trigger.event.data is defined
-              and trigger.event.data.key is defined
-              and trigger.event.data.value is defined
-            )
-            or
-            (
-              trigger.event.event_type == 'remove_variable'
-              and trigger.event.data is defined
-              and trigger.event.data.key is defined
-            )
-            or
-            trigger.event.event_type == 'clear_variables'
-        }}
-  action:
-    - if: "{{ trigger.event.data.get('log', state_attr('sensor.variables', 'log_events')) }}"
-      then:
-        - action: system_log.write
-          data:
-            logger: sensor.variables
-            level: critical
-            message: >
-              {{ trigger.event.data.key | default('All variables removed') }}
-              {%- if trigger.event.event_type == 'set_variable' -%}
-                : {{ trigger.event.data.value }}.
-              {%- endif -%}
-
-        - action: logbook.log #ISSUE doesn't show unless screen refreshed
-          data:
-            name: "{{ trigger.event.event_type }}:"
-            message: >
-              {{ trigger.event.data.key | default('All variables removed') }}
-              {%- if trigger.event.event_type == 'set_variable' -%}
-                : {{ trigger.event.data.value }}.
-              {%- endif -%}
-  sensor:
-    - name: Variables
-      unique_id: variables
-      icon: mdi:alpha-v-circle
-      state: "{{ this.attributes.variables | count | int(-1) }}"
-      attributes:
-        default_timestamp: false
-        log_events: true
-        variables: >
-          {% set others = dict(this.attributes.get('variables', {}).items() | rejectattr('0', 'eq', trigger.event.data.key)) %}
-          {% if trigger.event.event_type == 'set_variable'
-              and trigger.event.data.get('set_timestamp', this.attributes.get('default_timestamp', false)) %}
-            {% set value  = trigger.event.data.value %}
-            {% set value = value.isoformat() if value is datetime else value %}
-            {% set new = {trigger.event.data.key: {'value': value, 'timestamp': now().isoformat()}} %}
-            {{ dict(others, **new) }}
-          {% elif trigger.event.event_type == 'set_variable' %}
-            {% set new = {trigger.event.data.key: trigger.event.data.value} %}
-            {{ dict(others, **new) }}
-          {% elif trigger.event.event_type == 'remove_variable' %}
-            {{ others }}
-          {% elif trigger.event.event_type == 'clear_variables' %}
-            {}
-          {% endif %}
-
-###################################################################################################
 ## Templates - Hass
 ###################################################################################################
 - trigger:
@@ -146,6 +68,7 @@
       unique_id: hass_backup_alert
       icon: mdi:backup-restore
       device_class: problem
+      delay_on: 60 # avoid triggers at startup
       state: >
         {{ now() - as_datetime(states('sensor.backup_last_successful_automatic_backup')) > timedelta(hours=30)
             or as_datetime(states('sensor.backup_next_scheduled_automatic_backup')) - now() > timedelta(hours=30)
@@ -172,8 +95,7 @@
       device_class: problem
       state: >
         {% set entities = state_attr('group.unknown_browsers', 'entity_id') %}
-        {{ entities | count > 0
-              and is_state('input_boolean.hass_alerts', 'on')
+        {{ entities | count > 0 and is_state('input_boolean.hass_alerts', 'on')
             if entities != none else false }}
 
     - name: "Low Battery Alert"
@@ -236,11 +158,12 @@
       icon: mdi:home-assistant
       device_class: enum
       state: >
-        {% if is_state('alert.unknown_browsers', 'on') %} critical
+        {% set db = states('sensor.home_assistant_v2_db_size') | int(-1) %}
+        {% if is_state('alert.unknown_browsers', 'on') or db > 10000 %} critical
         {% elif states('sensor.watchman_missing_entities') | int(-1) > 0
-            or states('sensor.watchman_missing_actions') | int(-1) > 0 %} severe
-        {% elif is_state('binary_sensor.remote_ui', 'off') %} warning
-        {% elif is_state('alert.available_updates', 'on') %} minor
+            or states('sensor.watchman_missing_actions') | int(-1) > 0 or db > 5000 %} severe
+        {% elif is_state('binary_sensor.remote_ui', 'off') or db > 3000 %} warning
+        {% elif is_state('alert.available_updates', 'on') or db > 2000 %} minor
         {% else %} ok
         {% endif %}
       attributes:

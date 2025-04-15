@@ -161,7 +161,6 @@
 - Mini Media Player
 - Multiple Entity Row
 - Multi Line Entity Card
-- Mushroom Cards
 - Numberbox Card
 - Roku Card
 - Slider Entity Row
@@ -240,6 +239,7 @@
 - #DISABLED - disabled code
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug
+- #UNLOCKED - security - phone unlocked
 - #LOCK_USER - lock user code
 - #MIDNIGHT - shift day change to day reset time
 - #TV - TV issues/notes

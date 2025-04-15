@@ -9,7 +9,7 @@
     - trigger: state
       id: disarmed
       entity_id: alarm_control_panel.house
-      to: disarmed # rearm if disarmed but nobody home (eg danger alarm off)
+      to: disarmed # arm alarm if disarmed but nobody home
       for:
         minutes: 5
 
@@ -19,11 +19,13 @@
       to:
         - Away
         - Vacation
+      for: 1 # allow occupancy mode reset
 
     - trigger: state
       id: night
       entity_id: input_select.occupancy_mode
       to: Night
+      for: 1 # allow occupancy mode reset
 
     - trigger: state
       id: keypad
@@ -44,7 +46,7 @@
         - sensor.back_door_lock_status
         - sensor.front_door_lock_status
         - sensor.side_door_lock_status
-        - sensor.garage_door_lock_status
+        - sensor.garage_side_door_lock_status
       to:
         - Locked (Jason)
       not_from:
@@ -67,12 +69,6 @@
         - input_boolean.alarm_enabled
         - input_boolean.alarm_auto_arming
       state: "on"
-
-    - condition: template
-      alias: "Occupancy override is off if occupancy trigger"
-      value_template: >
-        {{ iif(trigger.id in ['disarmed', 'away', 'night'],
-            is_state('input_boolean.occupancy_override', 'off'), true) }}
   actions:
     - choose:
         # rearm alarm if still disarmed and nobody home or night mode
@@ -101,6 +97,27 @@
 
         - conditions:
             - condition: trigger
+              id: night
+          sequence:
+            # wait 10 minutes if coming from Away mode - someone just came home
+            - if: "{{ trigger.from_state.state == 'Away' }}"
+              then:
+                - wait_template: "{{ is_state('binary_sensor.someone_home', 'off') }}"
+                  timeout:
+                    minutes: 10
+
+                - if: "{{ not wait.completed }}"
+                  then:
+                    - action: script.arm_alarm
+                      data:
+                        mode: night
+              else:
+                - action: script.arm_alarm
+                  data:
+                    mode: night
+
+        - conditions:
+            - condition: trigger
               id: away
           sequence:
             - action: script.arm_alarm
@@ -122,24 +139,3 @@
             - action: script.arm_alarm
               data:
                 mode: "{{ 'night' if is_state('input_select.occupancy_mode', 'Night') else 'home' }}"
-
-        - conditions:
-            - condition: trigger
-              id: night
-          sequence:
-            # wait 10 minutes if coming from Away mode - someone just came home
-            - if: "{{ trigger.from_state.state == 'Away' }}"
-              then:
-                - wait_template: "{{ is_state('binary_sensor.someone_home', 'off') }}"
-                  timeout:
-                    minutes: 10
-
-                - if: "{{ not wait.completed }}"
-                  then:
-                    - action: script.arm_alarm
-                      data:
-                        mode: night
-              else:
-                - action: script.arm_alarm
-                  data:
-                    mode: night

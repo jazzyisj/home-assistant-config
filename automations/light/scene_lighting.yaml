@@ -1,0 +1,185 @@
+###################################################################################################
+## Scene Lighting
+###################################################################################################
+- id: scene_lighting
+  alias: "Scene Lighting"
+  description: "Turn lights on/off based on scene state."
+  mode: queued
+  variables:
+    scene: "{{ state_attr('binary_sensor.scene_active', 'active_scene') }}"
+    scene_lights: >
+      {{ expand(state_attr('scene.' ~ scene, 'entity_id'))
+          | selectattr('domain', 'eq', 'light')
+          | map(attribute='entity_id') | list }}
+    night_lights: "{{ intersect(state_attr('group.night_lux_lights', 'entity_id'), scene_lights) }}"
+    rgb_lights: "{{ intersect(state_attr('group.rgb_lights', 'entity_id'), scene_lights) }}"
+    adaptive_lights: >
+      {% set main = expand(states.switch.adaptive_lighting_main_lights.attributes.configuration['lights'])
+          | map(attribute='entity_id') | list %}
+      {% set rgb = expand(states.switch.adaptive_lighting_rgb_lights.attributes.configuration['lights'])
+          | map(attribute='entity_id') | list %}
+      {{ intersect(union(main,rgb),scene_lights) }}
+  triggers:
+    - trigger: state
+      id: scene_on
+      entity_id:
+        - switch.chill_scene
+        - switch.company_scene
+        - switch.movie_scene
+      to:
+        - chill
+        - company
+        - movie
+      for: 2 # allow scene off to trigger first
+
+    - trigger: state
+      id: scene_off
+      entity_id:
+        - switch.chill_scene
+        - switch.company_scene
+        - switch.movie_scene
+      to: "off"
+      not_from:
+        - unknown
+        - unavailable
+  conditions:
+    - condition: state
+      entity_id: input_boolean.alarm_triggered
+      state: "off"
+
+    # illuminance lighting takes precedence in night/away
+    - condition: state
+      entity_id: input_select.occupancy_mode
+      match: any
+      state:
+        - Home
+        - Guest
+  actions:
+    - if:
+        - condition: trigger
+          id: scene_on
+      then:
+        # turn manual control on so scene settings aren't changed by adaptive lighting
+        - action: adaptive_lighting.set_manual_control
+          data:
+            entity_id: switch.adaptive_lighting_main_lights
+            lights: "{{ adaptive_lights }}"
+            manual_control: true
+
+        - action: script.light_scene_on
+          data:
+            scene: "{{ scene }}"
+      else:
+        # only if no other scene is still on, non-scene lights are turned off by new scene entity
+        - wait_template: "{{ is_state('binary_sensor.scene_active', 'off') }}"
+          timeout: 15
+          continue_on_timeout: false
+
+        - action: script.reset_rgb_lights
+          data:
+            entity_id: "{{ rgb_lights }}"
+
+        - if:
+            - condition: state
+              entity_id: binary_sensor.nighttime_illuminance_lights
+              state: "on"
+          then:
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.waketime_active
+                  state: "on"
+              then:
+                - action: script.light_scene_on
+                  data:
+                    scene: morning
+              else:
+                # turn night lux lights on
+                - action: script.turn_light_on
+                  data:
+                    entity_id: "{{ night_lights }}"
+                    activate_timer: false
+                    bypass_timer: true
+                    reset: true
+
+                # turn non-night lux scene lights off
+                - action: script.turn_light_off
+                  data:
+                    entity_id: "{{ symmetric_difference(scene_lights, night_lights) }}"
+                    activate_timer: false
+                    bypass_timer: true
+                    reset: true
+          else:
+            - action: script.turn_light_off
+              data:
+                entity_id: "{{ scene_lights }}"
+                activate_timer: false
+                bypass_timer: true
+                reset: true
+
+###################################################################################################
+## Scene Light Color
+###################################################################################################
+- id: scene_light_color
+  alias: "Scene Light Color"
+  mode: restart
+  variables:
+    scene: >
+      {{ states[trigger.entity_id].object_id | replace('rgb_', '')
+          if trigger.id =='sensor' else states[trigger.entity_id].object_id }}
+  triggers:
+    - trigger: state
+      id: sensor
+      entity_id:
+        - sensor.rgb_company_scene
+        - sensor.rgb_chill_scene
+        - sensor.rgb_movie_scene
+      not_to:
+        - unknown
+        - unavailable
+      for: 5 # throttle
+
+    - trigger: state
+      id: scene
+      entity_id:
+        - switch.chill_scene
+        - switch.company_scene
+        - switch.movie_scene
+      to: "on"
+      for: 5 # allow scene lights to turn on first
+      not_from:
+        - unknown
+        - unavailable
+  conditions:
+    - condition: template
+      alias: "Scene rgb color sensor is valid"
+      value_template: "{{ has_value('sensor.rgb_' ~ scene) }}"
+
+    - condition: template
+      alias: "Scene switch is on"
+      value_template: "{{ is_state('switch.' ~ scene , 'on') }}"
+  actions:
+    - action: adaptive_lighting.set_manual_control
+      data:
+        entity_id: switch.adaptive_lighting_rgb_lights
+        lights: light.dining_room_light_rgb
+        manual_control: true
+
+    - action: automation.turn_off
+      target:
+        entity_id: automation.turn_light_timer_on
+      data:
+        stop_actions: false
+
+    - action: script.turn_light_on
+      data:
+        entity_id: light.dining_room_light_rgb
+        rgb_color: "{{ state_attr('sensor.rgb_' ~ scene, 'rgb_color') }}"
+        transition: 5
+        activate_timer: false
+        bypass_timer: true
+        override: true
+      continue_on_error: true
+
+    - action: automation.turn_on
+      target:
+        entity_id: automation.turn_light_timer_on

@@ -1,0 +1,70 @@
+###############################################################################
+## Garage LED
+###############################################################################
+garage_led:
+  alias: 'Garage LED'
+  description: "Set led notification."
+  mode: queued
+  fields:
+    reset:
+      description: "Reset LED"
+      example: "true"
+  variables:
+    reset: '{{ reset|default(false) }}'
+    entities: "{{ state_attr('group.garage_led','entity_id') }}"
+    quiet: "{{ is_state('binary_sensor.quiet_time','on') }}"
+    alert_state: >
+      {% if is_state('binary_sensor.gdo_connected','off') %} offline
+      {% elif is_state('input_boolean.garage_door_alert','on') %} alert
+      {% elif is_state('binary_sensor.garage_door','on') %} open
+      {% else %} off
+      {% endif %}
+    duration: >
+      {% if alert_state == 'offline' %} 254
+      {% elif alert_state == 'alert' %} 62
+      {% elif alert_state == 'open' %} 254
+      {% else %} 254
+      {% endif %}
+    color: >
+      {% if alert_state == 'offline' %} 25
+      {% elif alert_state == 'alert' %} 40
+      {% elif alert_state == 'open' %} 40
+      {% else %} 170
+      {% endif %}
+    brightness: "{{ 2 if quiet else (7 if alert_state != 'off' else 3) }}"
+    effect: >
+      {% if alert_state == 'offline' %} Pulse
+      {% elif alert_state == 'alert' %} Fast Blink
+      {% elif alert_state == 'open' %} Chase
+      {% else %} off
+        {% endif %}
+  sequence:
+    - if: "{{ entities == none or entities | count == 0 }}"
+      then:
+        - action: system_log.write
+          data:
+            logger: "{{ this.entity_id }}"
+            level: warning
+            message: "Stop: No valid entities."
+
+        - stop: "No valid entities."
+
+    - if: "{{ alert_state == 'off' and not reset }}"
+      then:
+        - action: script.turn_on
+          target:
+            entity_id: script.led_reset
+          data:
+            variables:
+              entities: "{{ entities }}"
+      else:
+        - action: script.turn_on
+          target:
+            entity_id: script.inovelli_led_control
+          data:
+            variables:
+              entities: "{{ entities }}"
+              duration: "{{ duration }}"
+              color: "{{ color }}"
+              brightness: "{{ brightness }}"
+              effect: "{{ effect }}"
