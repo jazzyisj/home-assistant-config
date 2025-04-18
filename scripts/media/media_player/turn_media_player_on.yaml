@@ -14,34 +14,42 @@ turn_media_player_on:
       example: "['media_player.bedroom_tv', 'media_player.office_tv']"
   variables:
     ignore_players: "{{ ignore_players | default([]) }}"
-    media_players: > #TV can't set volume on LG tvs when off
+    media_players: >
       {% from 'media.jinja' import active_players %}
       {% set entities = active_players(entity_id) | from_json %}
-      {% set ignore_players = active_players(ignore_players) | from_json %}
+      {% set ignore_players = active_players(ignore_players|default([])) | from_json %}
       {% set entities = expand(entities)
-          | selectattr('state', 'in', ['playing', 'paused', 'buffering', 'on', 'idle'])
-          | rejectattr('entity_id', 'in', ignore_players | default([]))
+          | rejectattr('state', 'in', ['playing', 'paused', 'buffering', 'on', 'idle'])
+          | rejectattr('entity_id', 'in', ignore_players)
           | map(attribute='entity_id') | list %}
       {% if entities | count == 1 %}
         {% if is_state_attr(entities[0], 'type', 'group') %}
           {% set entities = state_attr('sensor.' ~ entities[0].split('.')[1], 'entity_id') %}
         {% endif %}
       {% endif %}
-      {{ expand(entities)
-          | rejectattr('attributes.device_class', 'eq', 'tv')
-          | map(attribute='entity_id') | unique | sort }}
+      {{ entities }}
+    #TV webOS - Error calling async_set_volume_level for device Deck TV: Device is off and cannot be controlled
+    volume_players: >
+      {% set ignored = expand(media_players)
+          | selectattr('attributes.device_class', 'eq', 'tv')
+          | selectattr('state', 'eq', 'off')
+          | map(attribute='entity_id') | list %}
+      {{ expand(media_players) | rejectattr('entity_id', 'in' , ignored)
+          | map(attribute='entity_id') | list }}
   sequence:
-    - if: "{{ media_players | count > 0 }}"
+    - if: "{{ volume_players | count > 0 }}"
       then:
         - action: media_player.volume_set
           target:
-            entity_id: "{{ media_players }}"
+            entity_id: "{{ volume_players }}"
           data:
             volume_level: 0 # prevent google bloop
           continue_on_error: true
 
         - delay: 1 # allow volumes to set
 
+    - if: "{{ media_players | count > 0 }}"
+      then:
         - variables:
             players_on: > #BITWISE
               {% set players = namespace(entity_id=[]) %}
