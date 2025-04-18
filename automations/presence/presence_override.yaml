@@ -1,8 +1,8 @@
 ###################################################################################################
-## Presense Override
+## Turn Presence Override On
 ###################################################################################################
-- id: presense_override
-  alias: "Presense Override"
+- id: turn_presence_override_on
+  alias: "Turn Presence Override On"
   description: "Override person presence."
   mode: parallel
   variables:
@@ -49,20 +49,18 @@
       event_data:
         action: guest_off
   conditions:
-    - condition: state
-      entity_id: input_boolean.occupancy_automation
-      state: "on"
-
-    - "{{ is_state('person.' ~ person, 'home') if trigger.id == 'phone' else true }}"
+    - condition: template
+      alias: "Person is home it trigger is their phone"
+      value_template: "{{ is_state('person.' ~ person, 'home') if trigger.id == 'phone' else true }}"
   actions:
     - if: "{{ trigger.id in ['phone', 'unlocked'] }}"
       then:
-        - action: script.presence_override
+        - action: script.turn_presence_override_on
           data:
             people: "{{ person }}"
             home: turn_on
       else:
-        - action: script.presence_override
+        - action: script.turn_presence_override_on
           data:
             people: "{{ person }}"
             home: turn_off
@@ -76,11 +74,11 @@
                   tag: guest_alert
 
 ###################################################################################################
-## Reset Presence Override
+## Turn Presence Override Off
 ###################################################################################################
-- id: reset_presence_override
-  alias: "Reset Presence Override"
-  description: "Reset override boolean when tracker state to/from home."
+- id: turn_presence_override_off
+  alias: "Turn Presence Override Off"
+  description: "Turn off override boolean when tracker state to/from home."
   mode: parallel
   variables:
     person: >
@@ -91,7 +89,6 @@
       id: home
       entity_id: person.jason
       to: home
-      for: 300 # in case lock code triggered override
 
     - trigger: state
       id: away
@@ -113,17 +110,24 @@
       entity_id: binary_sensor.jason_phone_connected
       to: "on"
       from: "off"
-  conditions:
-    - condition: state
-      entity_id: input_boolean.occupancy_automation
-      state: "on"
 
-    - "{{ is_state('input_boolean.home_override_' ~ person, 'on') }}"
-    - "{{ is_state('binary_sensor.' ~ person ~ '_phone_connected', 'on') }}"
+    - trigger: state
+      id: occupancy
+      entity_id: input_select.occupancy_mode
+      to:
+        - Home
+        - Guest
+      for: 1 # allow occupancy mode reset
+  conditions:
+    - "{{ trigger.id == 'occupancy' or is_state('input_boolean.' ~ person ~ '_home_override', 'on') }}"
+    - "{{ trigger.id == 'occupancy' or is_state('binary_sensor.' ~ person ~ '_phone_connected', 'on') }}"
   actions:
-    - action: input_boolean.turn_off
-      target:
-        entity_id: "input_boolean.home_override_{{ person }}"
+    - variables:
+        home: "{{ states.person | selectattr('state', 'eq', 'home') | map(attribute='object_id') | list }}"
+
+    - action: script.turn_presence_override_off
+      data:
+        people: "{{ iif(trigger.id == 'occupancy', home, person) }}"
 
 ###################################################################################################
 ## Jason Override Alert
@@ -135,7 +139,7 @@
   triggers:
     - trigger: state
       entity_id:
-        - input_boolean.home_override_jason
+        - input_boolean.jason_home_override
         - binary_sensor.jason_home
       to: "on"
       not_from:
@@ -154,7 +158,7 @@
         minutes: 15 # allow override to turn off before notifications
   conditions:
     - condition: state
-      entity_id: input_boolean.home_override_jason
+      entity_id: input_boolean.jason_home_override
       state: "on"
   actions:
     - action: script.tts_play

@@ -1,24 +1,3 @@
-###################################################################################################
-## Occupancy Mode Reset
-###################################################################################################
-- id: occupancy_mode_reset
-  alias: "Occupancy Mode Reset"
-  description: "Auto select occupancy mode."
-  triggers:
-    - trigger: homeassistant
-      event: start
-  conditions:
-    - condition: state
-      entity_id: input_boolean.occupancy_automation
-      state: "on"
-  actions:
-    - action: input_select.select_option
-      target:
-        entity_id: input_select.occupancy_mode
-      data:
-        option: >
-          {% from 'presence.jinja' import occupancy_mode %}
-          {{ occupancy_mode() }}
 
 ###################################################################################################
 ## Set Occupancy Mode
@@ -29,11 +8,19 @@
   max_exceeded: silent
   triggers:
     - trigger: state
+      id: startup
+      entity_id: input_boolean.startup_pending
+      to: "off"
+
+    - trigger: state
       id: arrive
       entity_id:
         - binary_sensor.someone_home
         - binary_sensor.owner_home
       to: "on"
+      not_from:
+        - unknown
+        - unavailable
 
     - trigger: state
       id: leave
@@ -41,6 +28,9 @@
         - binary_sensor.someone_home
         - binary_sensor.owner_home
       to: "off"
+      not_from:
+        - unknown
+        - unavailable
       for: 60 # make sure everyone is gone
 
     - trigger: state
@@ -60,10 +50,14 @@
       event_data:
         action: set_away_mode
   conditions:
+    - condition: state
+      entity_id: input_boolean.startup_pending
+      state: "off"
+
     - condition: template
       value_template: >
         {{ is_state('input_boolean.alarm_auto_arming', 'on')
-            if trigger.id == 'night' else is_state('input_boolean.occupancy_automation', 'on') }}
+            if trigger.id == 'night' else is_state('input_boolean.occupancy_mode_automation', 'on') }}
   actions:
     - action: input_select.select_option
       target:
@@ -71,7 +65,7 @@
       data:
         option: >
           {% from 'presence.jinja' import occupancy_mode %}
-          {{ iif(trigger.id in ['arrive', 'leave'], occupancy_mode(), trigger.id | title) }}
+          {{ iif(trigger.id in ['startup', 'arrive', 'leave'], occupancy_mode(), trigger.id | title) }}
 
 ###################################################################################################
 ## Occupancy Mode Changed
@@ -82,18 +76,14 @@
   mode: queued
   variables:
     prev_mode: "{{ trigger.from_state.state }}"
-    check_entities:
-      - input_boolean.bedtime_delayed
-      - script.waketime
-      - script.bedtime
-      - switch.company_scene
-      - switch.movie_scene
-      - switch.chill_scene
-      - switch.shower_scene
   triggers:
     - trigger: state
       entity_id: input_select.occupancy_mode
       to:
+  conditions:
+    - condition: state
+      entity_id: input_boolean.occupancy_mode_automation
+      state: "on"
   actions:
     - choose:
         - conditions:
@@ -101,18 +91,32 @@
               entity_id: input_select.occupancy_mode
               state: Home
           sequence:
-            - action: script.turn_off
-              target:
-                entity_id: script.bedtime
+            - variables:
+                overrides: >
+                  {{ expand('group.presence_override_controls')
+                      | selectattr('state', 'eq', 'on')
+                      | map(attribute='entity_id') | list }}
+
+            - if: "{{ overrides | count > 0 }}"
+              then:
+                - repeat:
+                    count: "{{ overrides | count > 0 }}"
+                    sequence:
+                      - variables:
+                          person: "{{ overrides[repeat.index-1].split('.')[1] | replace('_home_override', '') }}"
+
+                      - if: "{{ is_state('person.' ~ person, 'home') }}"
+                        then:
+                          - action: input_boolean.turn_off
+                            target:
+                              entity_id: "input_boolean.{{ person }}_home_override"
+
+            - delay: 1
 
             - if:
                 - condition: state
                   entity_id: binary_sensor.owner_home
                   state: "off"
-
-                - condition: state
-                  entity_id: input_boolean.occupancy_automation
-                  state: "on"
               then:
                 - action: automation.turn_off
                   target:
@@ -140,10 +144,6 @@
                 - condition: state
                   entity_id: binary_sensor.someone_home
                   state: "off"
-
-                - condition: state
-                  entity_id: input_boolean.occupancy_automation
-                  state: "on"
               then:
                 - action: automation.turn_off
                   target:
@@ -172,20 +172,6 @@
                   target:
                     entity_id: automation.someone_arrives_home
 
-                - variables:
-                    entities_on: >
-                      {{ expand(check_entities)
-                          | selectattr('state', 'eq', 'on')
-                          | map(attribute='entity_id') | list }}
-
-                - condition: template
-                  alias: "One or more entities are on"
-                  value_template: "{{ entities_on | count > 0 }}"
-
-                - action: homeassistant.turn_off
-                  target:
-                    entity_id: "{{ entities_on }}"
-
         - conditions:
             - condition: state
               entity_id: input_select.occupancy_mode
@@ -194,11 +180,9 @@
                 - Vacation
           sequence:
             - if:
-                - condition: state
-                  entity_id: input_boolean.occupancy_automation
-                  state: "on"
+
               then:
-                - action: script.presence_override
+                - action: script.turn_presence_override_on
                   data:
                     people: "{{ state_attr('binary_sensor.someone_home', 'home') }}"
                     home: turn_off
@@ -214,41 +198,18 @@
               target:
                 entity_id: automation.someone_arrives_home
 
-            - variables:
-                entities_on: >
-                  {{ expand(check_entities)
-                      | selectattr('state', 'eq', 'on')
-                      | map(attribute='entity_id') | list }}
-
-            - condition: template
-              alias: "One or more entities are on"
-              value_template: "{{ entities_on | count > 0 }}"
-
-            - action: homeassistant.turn_off
-              target:
-                entity_id: "{{ entities_on }}"
-
         - conditions:
             - condition: state
               entity_id: input_select.occupancy_mode
               state: Guest
           sequence:
-            - if:
-                - condition: state
-                  entity_id: input_boolean.occupancy_automation
-                  state: "on"
-              then:
-                - action: input_boolean.turn_on
-                  target:
-                    entity_id: input_boolean.guest_home
+            - action: input_boolean.turn_on
+              target:
+                entity_id: input_boolean.guest_home
 
             - if:
                 - condition: state
                   entity_id: binary_sensor.owner_home
-                  state: "on"
-
-                - condition: state
-                  entity_id: input_boolean.occupancy_automation
                   state: "on"
               then:
                 - action: automation.turn_off
@@ -266,7 +227,3 @@
                 - action: automation.turn_on
                   target:
                     entity_id: *group
-              else:
-                - action: script.turn_off
-                  target:
-                    entity_id: script.bedtime

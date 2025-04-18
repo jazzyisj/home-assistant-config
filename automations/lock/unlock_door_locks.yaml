@@ -1,22 +1,21 @@
 ###################################################################################################
-## Unlock House Locks
+## Unlock Door Locks
 ###################################################################################################
-- id: unlock_house_locks
-  alias: "Unlock House Locks"
-  description: "Unlock house entry locks."
-  mode: queued
+- id: unlock_door_locks
+  alias: "Unlock Door Locks"
+  description: "Unlock entry door locks."
+  mode: queued # not parallel so locks already locked are skipped, reduce zwave congestion
   variables:
     locks: >
-      {% if trigger.id == 'danger' %}
-        {% set locks = state_attr('group.door_locks', 'entity_id') %}
-      {% elif trigger.id == 'doorbell' %}
-        {% set locks = ['lock.front_door_lock'] %}
+      {% if trigger.id == 'doorbell' %}
+        {% set locks = 'lock.front_door_lock' %}
       {% elif trigger.id == 'arriving' %}
         {% set locks = ['lock.back_door_lock', 'lock.side_door_lock'] %}
       {% else %}
-        {% set locks = state_attr('group.house_locks', 'entity_id') %}
+        {% set locks = state_attr('group.door_locks', 'entity_id') %}
       {% endif %}
-      {{ expand(locks) | selectattr('state', 'eq', 'locked') | map(attribute='entity_id') | sort }}
+      {{ expand(locks) | selectattr('state', 'eq', 'locked')
+          | map(attribute='entity_id') | sort }}
     person: >
       {% from 'presence.jinja' import trigger_person %}
       {{ trigger_person(trigger) }}
@@ -26,6 +25,12 @@
       event_type: mobile_app_notification_action
       event_data:
         action: arriving_home_jason
+
+    - trigger: event
+      id: arriving
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arriving_home_garage_jason
 
     - trigger: event
       id: doorbell
@@ -40,6 +45,12 @@
   conditions:
     - "{{ locks | count > 0 }}"
   actions:
+    - if: "{{ trigger.id == 'arriving' }}"
+      then:
+        - wait_template: "{{ is_state('alarm_control_panel.house','disarmed') }}"
+          timeout: 60
+          continue_on_timeout: false
+
     - if: "{{ person == 'jason' }}"
       then:
         - action: script.unlock_door_locks

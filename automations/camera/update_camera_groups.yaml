@@ -11,6 +11,15 @@
       id: startup
       event: start
 
+    - trigger: event
+      event_type: call_service
+      event_data:
+        domain: group
+        service: reload
+
+    - trigger: time
+      at: input_datetime.day_reset
+
     - trigger: state
       entity_id:
         - binary_sensor.wyze_integration_connected
@@ -21,15 +30,6 @@
       not_from:
         - unknown
         - unavailable
-
-    - trigger: event
-      event_type: call_service
-      event_data:
-        domain: group
-        service: reload
-
-    - trigger: time_pattern
-      minutes: "/15"
 
     - trigger: state
       entity_id: &cameras
@@ -59,6 +59,25 @@
         - unavailable
       for: 60 # throttle
   actions:
+    - if: "{{ trigger.id == 'startup' }}"
+      then:
+        - wait_template: >
+            {{ expand(integration_entities('frigate'))
+                | map(attribute='entity_id')
+                | select('has_value') | list | count > 0 }}
+          timeout: 300
+
+        - if: "{{ not wait.completed }}"
+          then:
+            - action: notify.persistent_notification
+              data:
+                title: "Startup Error"
+                message: |-
+                  Camera groups did not load.
+                  Try reloading groups using Developer Tools.
+
+            - stop: "Integration did not load."
+
     - action: group.set
       data:
         object_id: indoor_cameras
@@ -108,9 +127,13 @@
         object_id: offline_cameras
         # indoor cams are off when somebody home
         entities: >
+          {% from 'hass.jinja' import ignored_device_entities %}
           {% set indoor = state_attr('group.indoor_cameras', 'entity_id') | list
               if is_state('binary_sensor.someone_home', 'off')
                 and state_attr('group.indoor_cameras', 'entity_id') != none else [] %}
           {% set outdoor = state_attr('group.outdoor_cameras', 'entity_id') | list
               if state_attr('group.outdoor_cameras', 'entity_id') != none else [] %}
-          {{ expand(indoor + outdoor) | map(attribute='entity_id') | reject('has_value') | sort }}
+          {{ expand(union(indoor, outdoor))
+              | rejectattr('entity_id', 'in', ignored_device_entities())
+              | rejectattr('entity_id', 'in', label_entities('ignored'))
+              | map(attribute='entity_id') | reject('has_value') | sort }}

@@ -28,6 +28,177 @@ template:
         turn_off:
           - action: script.shower_off
 
+script:
+  ###################################################################################################
+  ## Shower On
+  ###################################################################################################
+  shower_on:
+    alias: "Shower On"
+    description: "Turn on shower scene."
+    icon: mdi:shower-head
+    mode: restart
+    sequence:
+      - action: timer.start
+        target:
+          entity_id: timer.shower_scene
+        data:
+          duration:
+            minutes: "{{ states('input_number.shower_scene_duration') | int(0) }}"
+
+      - action: script.light_scene_on
+        data:
+          scene: shower
+      - if:
+          - condition: state
+            entity_id: input_boolean.media_enabled_shower
+            state: "on"
+
+          - condition: state
+            entity_id: input_select.occupancy_mode
+            match: any
+            state:
+              - Home
+              - Guest
+        then:
+          - if:
+              - condition: state
+                entity_id: input_boolean.tts
+                state: "on"
+            then:
+              # set post tts volume level to preset volume
+              - action: input_number.set_value
+                target:
+                  entity_id: input_number.bathroom_speaker_tts
+                data:
+                  value: "{{ states('input_number.media_volume_shower') | float(-1)/100 }}"
+
+              - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+                timeout: 120
+
+              - delay: 5 # allow media to resume after tts
+
+          - if:
+              - condition: template
+                alias: "Bathroom speaker already playing media"
+                value_template: "{{ is_state('media_player.bathroom_speaker', ['playing', 'buffering', 'paused']) }}"
+            then:
+              - action: script.media_player_set_volumes
+                target:
+                  entity_id: media_player.bathroom_speaker
+                data:
+                  volume: "{{ states('input_number.media_volume_shower') | int }}"
+                  source: media
+                  quiet_override: true
+                continue_on_error: true
+            else:
+              - action: script.media_play
+                data:
+                  preset: shower
+                continue_on_error: true
+
+  ###################################################################################################
+  ## Shower Off
+  ###################################################################################################
+  shower_off:
+    alias: "Shower Off"
+    description: "Turn off shower scene."
+    icon: mdi:shower-head
+    mode: restart
+    sequence:
+      - if:
+          - condition: state
+            entity_id: input_boolean.alarm_triggered
+            state: "off"
+        then:
+          - action: light.turn_off
+            target:
+              entity_id: light.bathroom_shower_light
+            continue_on_error: true
+
+          - if:
+              - condition: state
+                entity_id: binary_sensor.bathroom_illuminance
+                state: "on"
+            then:
+              # - action: light.turn_on
+              #   target:
+              #     entity_id: light.bathroom_vanity_light_rgb
+              #   data:
+              #     profile: default_max
+              #   continue_on_error: true
+
+              - action: script.turn_light_on #ZWAVE
+                data:
+                  entity_id: light.bathroom_vanity_light_rgb
+                  profile: default_max
+                  override: true
+                  activate_timer: true
+                continue_on_error: true
+            else:
+              - action: light.turn_off
+                target:
+                  entity_id: light.bathroom_vanity_light_rgb
+                continue_on_error: true
+
+          - if:
+              - condition: state
+                entity_id: input_select.occupancy_mode
+                state:
+                  - Home
+                  - Guest
+
+              - condition: state
+                entity_id: input_boolean.media_enabled_shower
+                state: "on"
+            then:
+              - if:
+                  - condition: template
+                    alias: "TTS on and bathroom speaker is a tts media player"
+                    value_template: >
+                      {{ is_state('input_boolean.tts', 'on')
+                          and 'media_player.bathroom_speaker' in state_attr('sensor.tts_active_media_player', 'entity_id') }}
+                then:
+                  # set bathroom speaker to default volume for post tts volume level
+                  - action: input_number.set_value
+                    alias: "Set bathroom speaker restore volume to media volume"
+                    target:
+                      entity_id: input_number.bathroom_speaker_tts
+                    data:
+                      value: "{{ states('input_number.bathroom_speaker_default_volume') | float }}"
+
+                  - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
+                    timeout: 120
+
+              - if:
+                  - condition: template
+                    alias: "Bathroom speaker is in an active speaker group."
+                    value_template: "{{ states('sensor.bathroom_speaker') == 'group' }}"
+                then:
+                  # set bathroom speaker to group volume
+                  - action: script.media_player_set_volumes
+                    data:
+                      entity_id: media_player.bathroom_speaker
+                      source: media
+                      volume: >
+                        {% for item in state_attr('group.group_media_players', 'entity_id') %}
+                          {% set sensor = 'sensor.' ~ states[item].object_id %}
+                          {% if states(sensor) == 'on'
+                            and 'media_player.bathroom_speaker' in state_attr(sensor, 'entity_id') %}
+                            {{ (state_attr(item, 'volume_level')*100) | int }}
+                          {% break %}
+                          {% endif %}
+                        {% endfor %}
+                    continue_on_error: true
+                else:
+                  - action: script.turn_media_player_off
+                    data:
+                      entity_id: media_player.bathroom_speaker
+                    continue_on_error: true
+
+      - action: timer.cancel
+        target:
+          entity_id: timer.shower_scene
+
 automation:
   ###################################################################################################
   ## Turn Shower Scene Off

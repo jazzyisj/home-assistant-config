@@ -1,9 +1,9 @@
 ###################################################################################################
-## Update Media Player Group Entities
+## Update Media Player Groups
 ###################################################################################################
-- id: update_media_player_group_entities
-  alias: "Update Media Player Group Entities"
-  description: "Update media player entities."
+- id: update_media_player_groups
+  alias: "Update Media Player Groups"
+  description: "Create and update groups."
   mode: single
   max_exceeded: silent
   triggers:
@@ -16,6 +16,9 @@
       event_data:
         domain: group
         service: reload
+
+    - trigger: time
+      at: input_datetime.day_reset
 
     - trigger: state
       entity_id: &media_players !include /config/include/media_player_entities_single.yaml
@@ -50,14 +53,25 @@
       for:
         minutes: 5
   actions:
-    # wait for music assistant to load
-    - wait_template: >
-        {{ states.media_player
-            | selectattr('attributes.mass_player_type', 'defined')
-            | map(attribute='entity_id') | list
-            | select('has_value') | list | count > 0 }}
-      timeout: 300
-      continue_on_timeout: false
+    - if: "{{ trigger.id == 'startup' }}"
+      then:
+        - wait_template: >
+            {{ expand(integration_entities('music_assistant'))
+                | selectattr('domain', 'eq', 'media_player')
+                | map(attribute='entity_id')
+                | select('has_value') | list | count > 0 }}
+          timeout: 300
+
+        - if: "{{ not wait.completed }}"
+          then:
+            - action: notify.persistent_notification
+              data:
+                title: "Startup Error"
+                message: |-
+                  Media player groups did not load.
+                  Try reloading groups using Developer Tools.
+
+            - stop: "Integration did not load."
 
     - action: group.set
       data:
