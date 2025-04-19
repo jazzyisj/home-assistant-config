@@ -23,9 +23,9 @@ tts_play:
     voice:
       description: "Override voice to use for TTS (HASS only)."
       example: "ClaraNueral"
-    media_player:
-      description: "Override default media player."
-      example: "media_player.inside_speakers"
+    # media_player: #MASS #DISABLED for mass resume
+    #   description: "Override default media player."
+    #   example: "media_player.inside_speakers"
     volume:
       description: "Override default volume level (%)"
       example: "50"
@@ -64,7 +64,7 @@ tts_play:
         #MASS redirect tts to active mass player for resume, use first group or first single player found
         #HACK to make sure mass always resumes
         #ISSUE subsequent TTS messages play on reg tts player, mass not resumed
-        media_active: "{{ is_state('binary_sensor.speaker', 'on') and is_state('input_boolean.tts', 'off') }}"
+        media_active: "{{ is_state('binary_sensor.speaker', 'on') }}"
         active_player: >
           {% if media_active %}
             {% set group = expand(state_attr('binary_sensor.speaker', 'entity_id'))
@@ -239,6 +239,13 @@ tts_play:
         duration: 10000
         message: "{{ message }}"
 
+    - if: "{{ is_state('binary_sensor.speaker', 'on') }}"
+      then:
+        #MASS turn boolean on to keep binary_sensor.speaker on
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.resume_media
+
     - choose:
         - conditions: "{{ mute_tts }}"
           sequence:
@@ -350,7 +357,7 @@ tts_play:
             - sequence:
                 # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
                 - variables:
-                    active_players: >
+                    volume_players: >
                       {% set muted_players = expand(media_players) | selectattr('attributes.is_volume_muted', 'defined')
                           | selectattr('attributes.is_volume_muted', 'eq', true) | map(attribute='entity_id') | list %}
                       {{ expand(media_players) | rejectattr('entity_id', 'in', muted_players) | map(attribute='entity_id') | list }}
@@ -358,7 +365,7 @@ tts_play:
                 # set volumes to 0 to prevent jump in volume before playing media stops
                 - action: media_player.volume_set
                   target:
-                    entity_id: "{{ active_players }}"
+                    entity_id: "{{ volume_players }}"
                   data:
                     volume_level: 0
                   continue_on_error: true
@@ -369,7 +376,7 @@ tts_play:
                 #ISSUE no way to avoid google home volume pops here
                 - action: media_player.volume_set
                   target:
-                    entity_id: "{{ active_players }}"
+                    entity_id: "{{ volume_players }}"
                   data:
                     volume_level: "{{ tts_volume }}"
                   continue_on_error: true
@@ -379,7 +386,7 @@ tts_play:
                   then:
                     # if shower on set shower speaker to shower volume
                     - if: >
-                        {{ 'media_player.bathroom_speaker' in active_players
+                        {{ 'media_player.bathroom_speaker' in volume_players
                             and shower_on }}
                       then:
                         - action: media_player.volume_set
@@ -390,7 +397,7 @@ tts_play:
 
                     # no volume balancing for tts - turn up garage speaker
                     # - if: >
-                    #     {{ 'media_player.garage_speaker' in active_players
+                    #     {{ 'media_player.garage_speaker' in volume_players
                     #         and is_state('binary_sensor.garage_occupied', 'on') }}
                     #   then:
                     #     - action: media_player.volume_set

@@ -12,38 +12,45 @@ tts_finished:
     media_players: "{{ state_attr('sensor.tts_active_media_player', 'entity_id') }}"
   mode: restart
   sequence:
+    - if: "{{ reset }}"
+      then:
+        # media not playing anywhere, reset volumes to default
+        - if:
+          - condition: state
+            entity_id: binary_sensor.speaker
+            state: "off"
+          then:
+            - action: button.press
+              target:
+                entity_id: button.reset_volumes
     - if:
         - condition: state
           entity_id: input_boolean.tts_muted
           state: "off"
       then:
-        - if: "{{ reset }}"
-          then:
-            # media not playing anywhere, reset volumes to default
-            - if: "{{ is_state('binary_sensor.speaker', 'off') }}"
-              then:
-                - action: button.press
-                  target:
-                    entity_id: button.reset_volumes
-          else:
-            #MASS active media group resuming to tts_all volumes, reset to saved volumes
-            - action: script.media_player_set_volumes
-              data:
-                source: tts_off
-              continue_on_error: true
+        # active media group resuming to tts_all volumes, reset to saved volumes
+        - action: script.media_player_set_volumes
+          data:
+            source: tts_off
+          continue_on_error: true
 
-    - delay: 1 # keep input_boolean.tts on while volumes set so we don't trigger save volume automations
+        - delay: 1 # keep input_boolean.tts on while volumes set so we don't trigger save volume automations
 
-    # reset tts booleans
     - action: input_boolean.turn_off
       target:
         entity_id:
           - input_boolean.tts
           - input_boolean.tts_muted
 
-    # clear active tts player
-    - action: input_text.set_value
-      target:
-        entity_id: input_text.tts_active_media_player
-      data:
-        value: ""
+    - if:
+        - condition: state
+          entity_id: binary_sensor.speaker
+          state: "on"
+      then:
+        # wait for media to resume playing
+        - wait_template: "{{ state_attr('binary_sensor.speaker', 'entity_id') | count > 0 }}"
+          timeout: 30
+
+        - action: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.resume_media

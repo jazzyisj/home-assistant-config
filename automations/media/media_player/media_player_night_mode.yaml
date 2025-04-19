@@ -4,12 +4,14 @@
 - id: media_player_night_mode
   alias: "Media Player Night Mode"
   description: "Turn media players night mode on or off."
-  mode: restart
+  max_exceeded: silent
   variables:
     switches: >
       {{ states.switch | selectattr('entity_id', 'in', integration_entities('google_home'))
           | selectattr('entity_id', 'contains', '_do_not_disturb')
           | map(attribute='entity_id') | list }}
+    pm_tvs: "{{ ['media_player.living_room_tv', 'media_player.bedroom_tv'] }}"
+    night: "{{ is_state('input_select.occupancy_mode', 'Night') }}"
   triggers:
     - trigger: state
       id: occupancy
@@ -26,24 +28,8 @@
     - trigger: state
       id: living_room_tv
       entity_id: media_player.living_room_tv
-      from: "off"
-      not_to:
-        - unknown
-        - unavailable
-
-    - trigger: state
-      id: living_room_tv
-      entity_id: media_player.living_room_tv
       attribute: source
       to: ~
-
-    - trigger: state
-      id: bedroom_tv
-      entity_id: media_player.bedroom_tv
-      from: "off"
-      not_to:
-        - unknown
-        - unavailable
 
     - trigger: state
       id: bedroom_tv
@@ -51,44 +37,22 @@
       attribute: source
       to: ~
   actions:
-    - if: "{{ is_state('input_select.occupancy_mode', 'Night') }}"
+    - if: "{{ trigger.id == 'occupancy' }}"
       then:
-        - action: switch.turn_on
+        - action: "switch.turn_{{ 'on' if night else 'off' }}"
           target:
             entity_id: "{{ switches }}"
 
-        - if: >
-            {{ states('media_player.living_room_tv') not in ['off', 'unknown', 'unavailable']
-                and trigger.id != 'bedroom_tv'}}
-          then:
-            - action: script.living_room_tv_picture_mode
-              data:
-                picture_mode: expert2 # dark room
+    - repeat:
+        count: "{{ pm_tvs | count }}"
+        sequence:
+          - variables:
+              tv: "{{ pm_tvs[repeat.index - 1] }}"
 
-        - if: >
-            {{ states('media_player.bedroom_tv') not in ['off', 'unknown', 'unavailable']
-                and trigger.id != 'living_room_tv' }}
-          then:
-            - action: script.bedroom_tv_picture_mode
-              data:
-                picture_mode: expert2 # dark room
-      else:
-        - action: switch.turn_off
-          target:
-            entity_id: "{{ switches }}"
-
-        - if: >
-            {{ states('media_player.living_room_tv') not in ['off', 'unknown', 'unavailable']
-                and trigger.id != 'bedroom_tv'}}
-          then:
-            - action: script.living_room_tv_picture_mode
-              data:
-                picture_mode: cinema
-
-        - if: >
-            {{ states('media_player.bedroom_tv') not in ['off', 'unknown', 'unavailable']
-                and trigger.id != 'living_room_tv' }}
-          then:
-            - action: script.bedroom_tv_picture_mode
-              data:
-                picture_mode: cinema
+          - if: >
+              {{ states(tv) not in ['off', 'unknown', 'unavailable']
+                  and (trigger.id == 'occupancy' or trigger.entity_id == tv) }}
+            then:
+              - action: "script.{{ trigger.id }}_picture_mode"
+                data:
+                  picture_mode: "{{ 'expert2' if night else 'cinema' }}"

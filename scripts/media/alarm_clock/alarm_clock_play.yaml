@@ -94,26 +94,29 @@ alarm_clock_play:
           target:
             entity_id: input_boolean.alarm_clock_failed
       else:
-        - variables:
-            stop_players: > #BITWISE
-              {% set players = namespace(entity_id=[]) %}
-              {% for item in expand(state_attr(media_player, 'entity_id'))
-                  | selectattr('state', 'in', ['playing', 'paused', 'buffering', 'on']) %}
-                {% if item.attributes.supported_features | bitwise_and(4096) %}
-                  {% set players.entity_id = players.entity_id + [item.entity_id] %}
-                {% endif %}
-              {% endfor %}
-              {{ players.entity_id }}
-
-        # if an alarm clock media player is playing stop it so we don't get a volume jump
-        - if: "{{ stop_players | count > 0 }}"
+        - if: "{{ not states(media_player) in ['idle', 'off', 'standby'] }}"
           then:
-            - action: media_player.media_stop
-              target:
-                entity_id: "{{ stop_players }}"
+            - variables: #TODO for resume?
+                active_player: >
+                  {% set player = namespace(entity_id = none) %}
+                  {% set active = expand('group.media_players') | selectattr('state', 'in', ['on', 'playing', 'buffering'])
+                      | map(attribute='entity_id') %}
+                  {% for item in active %}
+                    {% if is_state_attr(item, 'type', 'group')
+                          and media_player in state_attr('sensor.' ~ item.split('.')[1], 'entity_id') %}
+                    {% set player.entity_id = item %}
+                    {% break %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ player.entity_id if player.entity_id != none else media_player }}
+
+            # turn off alarm clock media player so we don't get a volume jump, other group players turn off
+            - action: script.turn_media_player_off
+              data:
+                entity_id: "{{ media_player }}"
               continue_on_error: true
 
-        - wait_template: "{{ not is_state(media_player, 'playing') }}"
+        - wait_template: "{{ is_state(media_player, 'off') }}"
           timeout: # wait for alarm clock media players to stop if to avoid volume jump, players auto off
             seconds: 15
 
@@ -123,8 +126,6 @@ alarm_clock_play:
           data:
             volume_level: 0
           continue_on_error: true
-
-        - delay: 1 # allow volumes to set
 
         - if: "{{ media_type == 'video' }}"
           then:
@@ -167,7 +168,7 @@ alarm_clock_play:
                   data:
                     media_id: "{{ media_id }}"
                     media_type: "{{ media_type }}"
-                    enqueue: replace
+                    enqueue: play
                     radio_mode: false #NEXT
                   continue_on_error: true
               else:
@@ -186,7 +187,7 @@ alarm_clock_play:
                   data:
                     media_content_id: "{{ states('sensor.hass_base_url') ~ '/local/alarm_clock_sounds/digital.mp3' }}"
                     media_content_type: music
-                    enqueue: replace
+                    enqueue: play
                   continue_on_error: true
 
         - wait_template: "{{ is_state(media_player, 'playing') }}"
