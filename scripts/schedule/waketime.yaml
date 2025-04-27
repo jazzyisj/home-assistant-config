@@ -7,10 +7,6 @@ waketime:
   icon: mdi:sun-clock
   mode: single
   max_exceeded: silent
-  fields:
-    delay:
-      description: "Delay script execution for early trigger."
-      example: "true"
   sequence:
     - if:
         - condition: not
@@ -21,7 +17,6 @@ waketime:
       then:
         - action: browser_mod.notification
           data:
-            duration: 10000
             message: |
               The house is in {{ states('input_select.occupancy_mode') }} mode.
               Waketime routine cannot run if occupancy mode is not Night.
@@ -34,7 +29,7 @@ waketime:
 
     - if:
         - condition: state
-          alias: "Waketime was run when alarm clock is active"
+          alias: "Alarm clock is active"
           entity_id: binary_sensor.alarm_clock
           state: "on"
       then:
@@ -47,24 +42,15 @@ waketime:
               entity_id: input_boolean.alarm_clock_skip_next
               state: "off"
           then:
-            - if: "{{ delay | default(false) }}"
-              then:
-                - delay: 60 # compensate for early trigger in automation
+            # wait for alarm clock to turn on (auto, manual, nap)
+            - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'on') }}"
+              timeout: 30
 
-                # wait for alarm clock to turn on (auto, manual, nap)
-                - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'on') }}"
-                  timeout: 30
-
-                # wait for alarm clock to be turned off
-                - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
-                  timeout:
-                    minutes: 60
-                  continue_on_timeout: false
-
-    - condition: state
-      alias: "Someone is still home"
-      entity_id: binary_sensor.someone_home
-      state: "on"
+            # wait for alarm clock to be turned off
+            - wait_template: "{{ is_state('binary_sensor.alarm_clock', 'off') }}"
+              timeout:
+                minutes: 60
+              continue_on_timeout: false
 
     - action: input_select.select_option
       target:
@@ -94,11 +80,20 @@ waketime:
                 - action: script.turn_light_on
                   data:
                     entity_id:
-                      - light.bedroom_fan_light
-                      - light.bathroom_vanity_light_rgb
                       - light.dining_room_light_rgb
-                      - light.kitchen_potlights
                       - light.kitchen_cabinet_lights
+                    profile: default_low
+                    transition: 10
+                    activate_timer: false
+                  continue_on_error: true
+
+                - action: script.turn_light_on
+                  data:
+                    entity_id:
+                      - light.bedroom_fan_light
+                      - light.dining_room_potlights
+                      - light.hallway_potlights
+                      - light.kitchen_potlights
                     profile: default_min
                     transition: 10
                     activate_timer: false
@@ -110,15 +105,23 @@ waketime:
                 - action: script.turn_light_on
                   data:
                     entity_id:
-                      - light.bedroom_fan_light
-                      - light.bathroom_vanity_light_rgb
                       - light.dining_room_light_rgb
-                      - light.kitchen_potlights
-                      - light.kitchen_potlights
                       - light.kitchen_cabinet_lights
                       - light.laundry_room_cabinet_lights
+                    profile: default
+                    transition: 10
+                    activate_timer: false
+                  continue_on_error: true
+
+                - action: script.turn_light_on
+                  data:
+                    entity_id:
+                      - light.bedroom_fan_light
+                      - light.dining_room_potlights
+                      - light.hallway_potlights
+                      - light.kitchen_potlights
                     profile: default_low
-                    transition: 120
+                    transition: 60
                     activate_timer: false
                   continue_on_error: true
 
@@ -126,7 +129,7 @@ waketime:
                   data:
                     entity_id:
                       - light.back_house_potlights
-                    profile: default_max
+                    profile: default
                     activate_timer: false
 
                 - delay: # wait for next set of lights
@@ -137,19 +140,19 @@ waketime:
                     entity_id:
                       - light.bedroom_fan_light
                       - light.bedroom_potlights
-                      - light.bathroom_vanity_light_rgb
-                      - light.dining_room_light_rgb
+                      - light.dining_room_potlights
+                      - light.hallway_potlights
                       - light.kitchen_potlights
-                      - light.kitchen_potlights
-                      - light.kitchen_cabinet_lights
-                      - light.laundry_room_cabinet_lights
                       - light.kitchen_sink_light
                     profile: default
-                    transition: 120
+                    transition: 60
                     activate_timer: false
                   continue_on_error: true
 
         - sequence:
+            - variables:
+                delay: "{{ states('input_number.media_wake_time') | int }}"
+
             - if:
                 - condition: state
                   entity_id:
@@ -160,7 +163,7 @@ waketime:
               then:
                 - wait_for_trigger:
                     - trigger: event
-                      event_type: occupancy_notification
+                      event_type: occupancy_notification_done
                   timeout: 60
 
             - if:
@@ -174,57 +177,55 @@ waketime:
                   continue_on_error: true
 
                 - delay:
-                    minutes: "{{ states('input_number.media_wake_time') | int }}"
+                    minutes: "{{ delay }}"
 
                 - variables:
-                    stop_player: >
+                    wake_player: >
                       {{ expand('group.media_players')
                           | selectattr('name', 'eq', states('select.media_speaker_wake'))
                           | map(attribute='entity_id') | join }}
 
-                - if: "{{ stop_player != '' }}"
-                  then:
-                    - action: script.turn_media_player_off
-                      data:
-                        entity_id: "{{ stop_player }}"
-                      continue_on_error: true
+                - action: script.turn_media_player_off
+                  data:
+                    entity_id: "{{ wake_player }}"
+                  continue_on_error: true
+
+                #HACK wait until wake player speaker off or tts skipped (media active but players are off)
+                - wait_template: "{{ is_state(wake_player, 'off') }}"
               else:
                 - delay:
-                    minutes: "{{ states('input_number.media_wake_time') | int }}"
+                    minutes: "{{ delay }}"
+
+            - action: script.announce_time_and_date
+              continue_on_error: true
 
             - if:
                 - condition: state
                   entity_id: binary_sensor.jason_home
                   state: "on"
-              then:
-                - if:
-                    - condition: state
-                      entity_id: input_boolean.calendar_announcements
-                      state: "on"
-                  then:
-                    - action: button.press
-                      target:
-                        entity_id: button.announce_calendar_events_jason
-                      continue_on_error: true
 
-            - action: button.press
-              target:
-                entity_id: button.tts_play_saved_messages
-              continue_on_error: true
+                - condition: state
+                  entity_id: input_boolean.calendar_announcements
+                  state: "on"
+              then:
+                - action: script.announce_calendar_events_jason
+                  continue_on_error: true
+
+            - if:
+                - condition: numeric_state
+                  entity_id: sensor.tts_saved_messages
+                  above: 0
+              then:
+                - action: script.tts_play_saved_messages
+                  continue_on_error: true
 
             - if:
                 - condition: state
                   entity_id: input_boolean.morning_weather_enabled
                   state: "on"
               then:
-                - action: button.press
-                  target:
-                    entity_id: button.weather_report
+                - action: script.weather_report
                   continue_on_error: true
-
-            - delay: 5 # allow weather report to start
-
-            - wait_template: "{{ is_state('input_boolean.tts', 'off') }}"
 
             - if:
                 - condition: state

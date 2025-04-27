@@ -1,47 +1,3 @@
-- id: error_reporter #TODO
-  alias: error reporter
-  variables:
-    log_error: >
-      {% set message = '' %}
-      {% set exception = '' %}
-      {% if trigger.event.data.message[0] is defined %}
-        {% set message = trigger.event.data.message[0] %}
-      {% endif %}
-      {% if trigger.event.data.exception is defined %}
-        {% set exception = trigger.event.data.exception %}
-      {% endif %}
-      {% if 'TemplateError: Invalid domain name' in message
-          or 'TemplateError: Invalid domain name' in exception %}
-            ZWave Keypress Error!
-      {% elif "TypeError: 'Wrapper' object is not callable" in message
-          or "TypeError: 'Wrapper' object is not callable" in exception %}
-            Reset volumes variable error
-      {% else %} {{ none }}
-      {% endif %}
-  triggers:
-    - trigger: event
-      event_type: system_log_event
-      event_data:
-        level: ERROR
-  conditions:
-    - condition: template
-      value_template: "{{ log_error != none }}"
-  actions:
-    - action: browser_mod.notification
-      data:
-        message: "{{ log_error }}"
-
-    - action: persistent_notification.create
-      data:
-        title: "HASS Log Error"
-        notification_id: log_error
-        message: "{{ log_error }}"
-
-    - action: script.tts_play
-      data:
-        message: "{{ log_error }}"
-        alert: true
-
 ###################################################################################################
 ## ZWave Keypress Events
 ###################################################################################################
@@ -51,21 +7,21 @@
   mode: parallel
   variables:
     entity: >
-      {{ states.light
-        | selectattr('attributes.node_id', 'defined')
+      {{ expand('group.zwave_entities')
         | selectattr('attributes.node_id', 'eq', trigger.event.data['node_id'])
         | map(attribute='entity_id') | join }}
     light: >
-      {% if is_state_attr(entity, 'rgb_light', 'control') %}
-        {% set entity = states.light
-            | selectattr('attributes.rgb_control', 'defined')
-            | selectattr('attributes.rgb_control', 'eq', entity)
+      {% set light = entity | replace('switch.', 'light.') %}
+      {% if is_state_attr(light, 'master', true) %}
+        {% set light = expand('group.lights')
+            | selectattr('attributes.master', 'defined')
+            | selectattr('attributes.master', 'eq', entity)
             | map(attribute='entity_id') | join %}
       {% endif %}
-      {{ entity | replace('switch.', 'light.') }}
+      {{ light }}
     timer: >
       {% from 'light.jinja' import light_timer %}
-      {{ light_timer(entity) }}
+      {{ light_timer(light) }}
     key_value: "{{ trigger.event.data['value'] }}"
     key_name: "{{ trigger.event.data['property_key_name'] }}"
   triggers:
@@ -129,8 +85,6 @@
                   {{ is_state(light, 'off')
                       and not is_state(timer, 'active')
                       and now() - states[light].last_changed > timedelta(seconds=2) }}
-                bypass_timer: true
-                reset: true
 
         # 1x up events
         - conditions: "{{ key_value == 'KeyPressed' and key_name == '002' }}"
@@ -181,7 +135,7 @@
                   sequence:
                     - action: input_boolean.toggle
                       target:
-                        entity_id: input_boolean.charlie_home #IDEA use tracker
+                        entity_id: input_boolean.charlie_home #TEMP until tracker
 
                     - action: script.inovelli_led_control
                       data:
@@ -435,9 +389,6 @@
                 - conditions: "{{ entity == 'light.hallway_potlights' }}"
                   sequence:
                     - action: script.turn_light_off
-                      data:
-                        bypass_timer: true
-                        reset: true
 
                 - conditions: "{{ entity == 'light.dining_room_potlights' }}"
                   sequence:

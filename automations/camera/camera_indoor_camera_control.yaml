@@ -5,17 +5,10 @@
   alias: "Indoor Camera Control"
   description: "Turn indoor cameras on and off."
   mode: restart
-  variables:
-    entities: >
-      {{ expand('group.wyze_cameras')
-          | select('in', expand('group.indoor_cameras'))
-          | map(attribute='entity_id') | list
-          | map('regex_replace', find='camera.(.*)',
-            replace='switch.\\1_camera_power', ignorecase=False) | list }}
   triggers:
-    - trigger: homeassistant
-      id: starup
-      event: start
+    - trigger: state
+      entity_id: input_boolean.startup_pending
+      to: "off" # both cams not always ready when wyze connected turns on
 
     - trigger: state
       entity_id:
@@ -28,21 +21,21 @@
       not_from:
         - unknown
         - unavailable
+      for: 1 # allow groups to populate at startup avoid turning on/off
 
     - trigger: state
-      entity_id: group.indoor_cameras
+      entity_id:
+        - group.indoor_cameras
+        - group.indoor_camera_switches
       attribute: entity_id
       to:
   actions:
-    - if: "{{ trigger.id == 'startup' }}"
-      then:
-        - wait_template: >
-            {{ states('group.indoor_cameras') not in ['unknown', 'unavailable']
-                and states('binary_sensor.someone_home') not in ['unknown', 'unavailable']
-                and is_state('binary_sensor.wyze_integration_connected', 'on') }}
-          timeout: 300
+    - wait_template: "{{ state_attr('group.indoor_camera_switches', 'entity_id') != none }}"
+      timeout:
+        minutes: 5
 
-        - stop: "Startup didn't complete."
+    - variables:
+        entities: "{{ state_attr('group.indoor_camera_switches', 'entity_id') }}"
 
     - if: "{{ entities == none or entities | count == 0 }}"
       then:

@@ -7,26 +7,22 @@ turn_light_off:
   icon: mdi:lightbulb-off
   mode: parallel
   fields:
-    lights:
-      description: "List of light entity ids"
-      example: "light.dining_room_light_rgb"
     activate_timer:
       description: "Activate light in use timer"
       example: "true"
-    bypass_timer:
-      description: "Bypass light in use timer / manual mode"
-      example: "false"
+    entity_id:
+      description: "List of light entity ids"
+      example: "light.dining_room_light_rgb"
     reset:
-      description: "Reset manual mode."
-      example: "false"
+      description: "Reset manual mode, bypass timer."
+      example: "true"
   variables:
     entities: >
       {% from 'light.jinja' import valid_lights %}
-      {{ valid_lights(lights) | from_json }}
-    activate_timer: "{{ activate_timer | default(false) }}"
-    reset: "{{ reset | default(false) }}"
+      {{ valid_lights(entity_id) | from_json }}
+    reset: "{{ reset | default(true) }}"
   sequence:
-    - if: "{{ entities == none or entities | count == 0 }}"
+    - if: "{{ entities | count == 0 }}"
       then:
         - action: system_log.write
           data:
@@ -35,12 +31,6 @@ turn_light_off:
             message: "Stop: No valid entities."
 
         - stop: "No valid entities."
-
-    - action: automation.turn_off
-      target:
-        entity_id: automation.turn_light_timer_off
-      data:
-        stop_actions: false
 
     - repeat:
         for_each: "{{ entities }}"
@@ -58,13 +48,24 @@ turn_light_off:
 
           - if:
               - condition: template
-                alias: "Reset, timer bypassed or no timer, or timer is idle and not manual mode"
+                alias: "Reset color"
                 value_template: >
-                  {{ reset or (bypass_timer | default(false) or timer == none)
-                      or (not manual and is_state(timer, 'idle')) }}
+                  {{ reset and is_state_attr(repeat.item, 'rgb', true)
+                      and is_state(repeat.item, 'on') }}
+            then:
+              - action: light.turn_on
+                target:
+                  entity_id: "{{ repeat.item }}"
+                data:
+                  profile: default_min # reset color
+
+          - if:
+              - condition: template
+                alias: "Reset, no timer, or timer is idle and not manual mode"
+                value_template: "{{ reset or (timer == none or (not manual and is_state(timer, 'idle'))) }}"
 
               - condition: template
-                alias: "Reset or light not in active scene"
+                alias: "Reset mode or light not in active scene"
                 value_template: >
                   {{ reset or repeat.item not in state_attr('binary_sensor.scene_active', 'entity_id')
                       if is_state('binary_sensor.scene_active', 'on') else true }}
@@ -84,19 +85,14 @@ turn_light_off:
 
           - if: "{{ timer != none }}"
             then:
-              - if: "{{ activate_timer }}"
+              - if: "{{ activate_timer | default(false) }}"
                 then:
                   - action: timer.start
                     target:
                       entity_id: "{{ timer }}"
                     continue_on_error: true
-                else:
-                  - action: timer.cancel
-                    target:
-                      entity_id: "{{ timer }}"
-                    continue_on_error: true
 
-          - if: "{{ switch != none and reset }}"
+          - if: "{{ reset and switch != none }}"
             then:
               - action: adaptive_lighting.set_manual_control
                 data:
@@ -110,10 +106,3 @@ turn_light_off:
         {{ expand(entities) | selectattr('state', 'eq', 'on') | list | count == 0
             and state_attr(this.entity_id, 'current') | int == 1 }}
       timeout: 30
-
-    - action: automation.turn_on
-      target:
-        entity_id: automation.turn_light_timer_off
-
-  #ISSUE for the time it takes light to turn off timers will not turn off by state
-  # eg when turned off by ui or voice assistant

@@ -55,6 +55,7 @@ tts_play:
         entity_id: script.tts_finished
 
     - variables:
+        first_run: "{{ is_state('input_boolean.tts', 'off') }}"
         min_volume: "{{ min_volume | default(-1) | float(-1) }}"
         quiet_play: "{{ quiet_play | default(false) }}"
         always_play: "{{ always_play | default(false) }}"
@@ -65,16 +66,17 @@ tts_play:
         #HACK to make sure mass always resumes
         #ISSUE subsequent TTS messages play on reg tts player, mass not resumed
         media_active: "{{ is_state('binary_sensor.speaker', 'on') }}"
+        #HACK only returns first active item, groups have priority
         active_player: >
           {% if media_active %}
             {% set group = expand(state_attr('binary_sensor.speaker', 'entity_id'))
                 | selectattr('attributes.type', 'eq', 'group')
-                | map(attribute='entity_id') | list %}
+                | map(attribute='entity_id') | sort %}
             {% set single = expand(state_attr('binary_sensor.speaker', 'entity_id'))
                 | selectattr('attributes.type', 'eq', 'single')
-                | map(attribute='entity_id') | list %}
+                | map(attribute='entity_id') | sort %}
             {% if group[0] is defined or single[0] is defined %}
-              {{ group[0] if group not in [[], none] else single[0] }}
+              {{ group[0] if group | count > 0 else single[0] }}
             {% endif %}
           {% endif %}
         shower_on: "{{ is_state('switch.shower_scene', 'on') }}"
@@ -86,15 +88,16 @@ tts_play:
           {% endif %}
         shower_active: >
           {% if media_active and shower_on %}
-            {{ shower_player == active_player or shower_player
-                in state_attr('sensor.' ~ active_player.split('.')[1], 'entity_id') }}
+            {{ shower_player in state_attr('binary_sensor.speaker', 'entity_id') }}
           {% else %} {{ false }}
           {% endif %}
-        #HACK #MASS if media is on redirect to shower speaker if shower on and shower player
+        #HACK #MASS #TEMP if media is on redirect to shower speaker if shower on and shower player
         #is not in active speakers else redirect to active media players so mass will resume
         #IDEA dynamically add shower speaker to active speakers
         tts_player: >
-          {% if is_state('binary_sensor.wan', 'off') %} media_player.kiosk_speaker
+          {% if is_state('binary_sensor.wan', 'off') %}
+            {% set player = 'media_player.kiosk_speaker' %}
+            {{ player if has_value(player) }}
           {% elif is_state('input_boolean.tts_override', 'on') %}
             {{ expand('group.tts_media_players')
               | selectattr('name', 'eq', states('select.tts_media_player_override'))
@@ -121,6 +124,11 @@ tts_play:
               if is_state_attr(tts_player, 'type', 'group') else [tts_player])
               | map(attribute='entity_id') | list %}
           {{ media_players }}
+        # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
+        volume_players: >
+          {% set muted_players = expand(media_players) | selectattr('attributes.is_volume_muted', 'defined')
+              | selectattr('attributes.is_volume_muted', 'eq', true) | map(attribute='entity_id') | list %}
+          {{ expand(media_players) | rejectattr('entity_id', 'in', muted_players) | map(attribute='entity_id') | list }}
         #MASS use mass player for tts play, default to ha player
         mass_player: >
           {% set mass = expand('group.mass_media_players')
@@ -239,7 +247,7 @@ tts_play:
         duration: 10000
         message: "{{ message }}"
 
-    - if: "{{ is_state('binary_sensor.speaker', 'on') }}"
+    - if: "{{ media_active }}"
       then:
         #MASS turn boolean on to keep binary_sensor.speaker on
         - action: input_boolean.turn_on
@@ -278,7 +286,7 @@ tts_play:
 
         - conditions: "{{ tts_service == 'broadcast' }}"
           sequence:
-            # don't reset volumes etc.
+            # prevents volume reset after broadcast
             - action: input_boolean.turn_on
               target:
                 entity_id: input_boolean.tts_muted
@@ -293,115 +301,102 @@ tts_play:
 
             - delay: 10 #HACK - no state - keep script running for a few seconds, 10 avg tts length
       default:
-        # store tts player for tts sensor
-        - action: input_text.set_value
-          target:
-            entity_id: input_text.tts_active_media_player
-          data:
-            value: "{{ tts_player }}"
-
         - action: input_boolean.turn_off
           target:
             entity_id: input_boolean.tts_muted
 
-        - if: "{{ is_state('input_boolean.tts', 'off') }}"
+        # turn boolean on to start announcement queue
+        - action: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.tts
+
+        - if: >
+            {{ first_run or volume | default(-1) > 0 or min_volume | default(-1) > 0
+                or tts_player != states('input_text.tts_active_media_player') }}
           then:
+            # store tts player for tts sensor
+            - action: input_text.set_value
+              target:
+                entity_id: input_text.tts_active_media_player
+              data:
+                value: "{{ tts_player }}"
+
             - action: script.media_player_set_volumes
               data:
                 source: tts_all # lower active media player volumes for tts
               continue_on_error: true
 
-            # turn boolean on to start announcement queue
-            - action: input_boolean.turn_on
+            - delay: 1
+
+            - action: media_player.turn_on
               target:
-                entity_id: input_boolean.tts
+                entity_id: "{{ mass_player }}"
 
-        - parallel:
-            - sequence:
-                - choose:
-                    - conditions: "{{ tts_service == 'tts.home_assistant_cloud' }}"
-                      sequence:
-                        - action: tts.speak
-                          data:
-                            cache: true
-                            media_player_entity_id: "{{ mass_player }}"
-                            message: "{{ message }}"
-                            language: "{{ language }}"
-                            options:
-                              voice: "{{ voice }}"
-                          target:
-                            entity_id: "{{ tts_service }}"
-                          continue_on_error: true
-                    - conditions: "{{ tts_service == 'tts.google_cloud' }}"
-                      sequence:
-                        - action: tts.speak
-                          data:
-                            cache: true
-                            media_player_entity_id: "{{ mass_player }}"
-                            message: "{{ message }}"
-                            options:
-                              voice: "{{ voice }}"
-                          target:
-                            entity_id: "{{ tts_service }}"
-                          continue_on_error: true
-                  default:
-                    - action: tts.speak
-                      data:
-                        cache: true
-                        media_player_entity_id: "{{ mass_player }}"
-                        message: "{{ message }}"
-                      target:
-                        entity_id: "{{ tts_service }}"
-                      continue_on_error: true
+            #ISSUE no way to avoid google home volume pops here
+            - action: media_player.volume_set
+              target:
+                entity_id: "{{ volume_players }}"
+              data:
+                volume_level: "{{ tts_volume }}"
+              continue_on_error: true
 
-            - sequence:
-                # filter out muted media players so we don't unmute with volume set (player must be on for is_volume_muted)
-                - variables:
-                    volume_players: >
-                      {% set muted_players = expand(media_players) | selectattr('attributes.is_volume_muted', 'defined')
-                          | selectattr('attributes.is_volume_muted', 'eq', true) | map(attribute='entity_id') | list %}
-                      {{ expand(media_players) | rejectattr('entity_id', 'in', muted_players) | map(attribute='entity_id') | list }}
-
-                # set volumes to 0 to prevent jump in volume before playing media stops
+        # volume exceptions - skip if alert
+        - if: "{{ not alert }}"
+          then:
+            # if shower on set shower speaker to shower volume
+            - if: >
+                {{ 'media_player.bathroom_speaker' in volume_players
+                    and shower_on }}
+              then:
                 - action: media_player.volume_set
                   target:
-                    entity_id: "{{ volume_players }}"
+                    entity_id: media_player.bathroom_speaker
                   data:
-                    volume_level: 0
-                  continue_on_error: true
+                    volume_level: "{{ states('input_number.media_volume_shower') | int / 100 }}"
 
-                - delay: 1
+            # # no volume balancing for tts - turn up garage speaker
+            # - if: >
+            #     {{ 'media_player.garage_speaker' in volume_players
+            #         and is_state('binary_sensor.garage_occupied', 'on') }}
+            #   then:
+            #     - action: media_player.volume_set
+            #       target:
+            #         entity_id: media_player.garage_speaker #DISABLED until garage speaker
+            #       data:
+            #         volume_level: 1
 
-                # set main volume before player volume exceptions
-                #ISSUE no way to avoid google home volume pops here
-                - action: media_player.volume_set
+        - choose:
+            - conditions: "{{ tts_service == 'tts.home_assistant_cloud' }}"
+              sequence:
+                - action: tts.speak
+                  data:
+                    cache: true
+                    media_player_entity_id: "{{ mass_player }}"
+                    message: "{{ message }}"
+                    language: "{{ language }}"
+                    options:
+                      voice: "{{ voice }}"
                   target:
-                    entity_id: "{{ volume_players }}"
-                  data:
-                    volume_level: "{{ tts_volume }}"
+                    entity_id: "{{ tts_service }}"
                   continue_on_error: true
-
-                # volume exceptions - skip if alert
-                - if: "{{ not alert }}"
-                  then:
-                    # if shower on set shower speaker to shower volume
-                    - if: >
-                        {{ 'media_player.bathroom_speaker' in volume_players
-                            and shower_on }}
-                      then:
-                        - action: media_player.volume_set
-                          target:
-                            entity_id: media_player.bathroom_speaker
-                          data:
-                            volume_level: "{{ states('input_number.media_volume_shower') | int / 100 }}"
-
-                    # no volume balancing for tts - turn up garage speaker
-                    # - if: >
-                    #     {{ 'media_player.garage_speaker' in volume_players
-                    #         and is_state('binary_sensor.garage_occupied', 'on') }}
-                    #   then:
-                    #     - action: media_player.volume_set
-                    #       target:
-                    #         entity_id: media_player.garage_speaker #DISABLED until garage speaker
-                    #       data:
-                    #         volume_level: 1
+            - conditions: "{{ tts_service == 'tts.google_cloud' }}"
+              sequence:
+                - action: tts.speak
+                  data:
+                    cache: true
+                    media_player_entity_id: "{{ mass_player }}"
+                    message: "{{ message }}"
+                    options:
+                      voice: "{{ voice }}"
+                  target:
+                    entity_id: "{{ tts_service }}"
+                  continue_on_error: true
+          default:
+            - action: tts.speak
+              data:
+                cache: true
+                media_player_entity_id: "{{ mass_player }}"
+                message: "{{ message }}"
+              target:
+                entity_id: "{{ tts_service }}"
+              continue_on_error: true

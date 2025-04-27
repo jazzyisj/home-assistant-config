@@ -6,6 +6,10 @@
 
 [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home3.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home4.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+
 ##### <font color='cyan'>Updated 2025-04-07</font>
 
 ## HARDWARE
@@ -174,49 +178,50 @@
 - Weather Chart Card
 - Wind Rose Card
 
-## ENTITY COUNTS (44 Domains, 4659 Entities)
+## ENTITY COUNTS (45 Domains, 4827 Entities)
 
 - alarm_control_panel: 1
-- alert: 102
-- automation: 328
-- binary_sensor: 572
-- button: 153
+- alert: 105
+- automation: 352
+- binary_sensor: 576
+- button: 162
 - calendar: 13
 - camera: 34
 - climate: 5
 - conversation: 1
 - counter: 1
-- device_tracker: 112
+- cover: 1
+- device_tracker: 115
 - event: 4
 - fan: 9
-- group: 87
-- image: 46
-- input_boolean: 204
+- group: 91
+- image: 44
+- input_boolean: 215
 - input_button: 2
-- input_datetime: 37
+- input_datetime: 40
 - input_number: 195
-- input_select: 55
-- input_text: 140
-- light: 59
-- lock: 4
-- media_player: 40
+- input_select: 58
+- input_text: 159
+- light: 60
+- lock: 5
+- media_player: 45
 - notify: 1
 - number: 59
 - person: 2
 - remote: 1
-- scene: 10
-- script: 66
-- select: 164
-- sensor: 1689
+- scene: 11
+- script: 79
+- select: 193
+- sensor: 1720
 - siren: 2
 - stt: 2
 - sun: 1
-- switch: 247
+- switch: 249
 - time: 4
-- timer: 41
+- timer: 42
 - todo: 3
 - tts: 4
-- update: 138
+- update: 140
 - valve: 12
 - weather: 4
 - zone: 5

@@ -1,6 +1,49 @@
 ###################################################################################################
 ## Templates - Camera
 ###################################################################################################
+- image:
+    - name: "Last Detected Object"
+      unique_id: last_detected_object
+      icon: mdi:cctv
+      url: "{{ states('sensor.hass_base_url') ~ state_attr(states('sensor.last_detected_object'), 'entity_picture') }}"
+
+- sensor:
+    - name: "Last Detected Object"
+      unique_id: last_detected_object
+      icon: >
+        {% set obj = state_attr(this.entity_id, 'object') %}
+        {% if is_state('input_boolean.camera_object_detection', 'off') %} mdi:cctv-off
+        {% elif obj == 'Person' %} mdi:walk
+        {% elif obj == 'Car' %} mdi:car-hatchback
+        {% elif obj == 'Dog' %} mdi:dog-side
+        {% elif obj == 'Cat' %} mdi:cat
+        {% elif obj == 'Mouse' %} mdi:rodent
+        {% elif obj == 'Package' %} mdi:package-variant
+        {% else %} mdi:cctv
+        {% endif %}
+      state: >
+        {% set images = expand(integration_entities('frigate'))
+          | selectattr('domain', 'eq', 'image')
+          | rejectattr('state', 'in', ['unknown', 'unavailable'])
+          | sort(attribute='state', reverse=true)
+          | map(attribute='entity_id') | list %}
+        {{ images | first if images | count > 0 else [] }}
+      attributes:
+        camera: >
+          {% from 'camera.jinja' import camera_name %}
+          {{ camera_name(states(this.entity_id)) }}
+        object: >
+          {% set state = states(this.entity_id) %}
+          {% if state | contains('person') %} Person
+          {% elif state | contains('car') %} Car
+          {% elif state | contains('dog') %} Dog
+          {% elif state | contains('cat') %} Cat
+          {% elif state | contains('mouse') %} Mouse
+          {% elif state | contains('package') %} Package
+          {% else %} Unknown
+          {% endif %}
+        image_url: "{{ state_attr(states(this.entity_id), 'entity_picture') }}"
+
 - trigger:
     - trigger: homeassistant
       event: start
@@ -76,3 +119,11 @@
           {{ expand('group.frigate_all_count_sensors')
               | selectattr('state', 'gt', '0')
               | map(attribute='entity_id') | sort }}
+
+    - name: "Indoor Camera Alert"
+      unique_id: indoor_camera_alert
+      icon: mdi:cctv
+      device_class: problem
+      state: >
+        {{ is_state('group.indoor_camera_switches', 'on')
+            and is_state('binary_sensor.someone_home', 'on') }}

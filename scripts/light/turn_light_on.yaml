@@ -41,7 +41,7 @@ turn_light_on:
     override: "{{ override | default(false) }}"
     reset: "{{ reset | default(false) }}"
   sequence:
-    - if: "{{ entities == none or entities | count == 0 }}"
+    - if: "{{ entities | count == 0 }}"
       then:
         - action: system_log.write
           data:
@@ -61,6 +61,9 @@ turn_light_on:
         for_each: "{{ entities }}"
         sequence:
           - variables:
+              light: >
+                {% set group = state_attr(repeat.item, 'group') %}
+                {{ repeat.item if group == none else group }}
               timer: >
                 {% from 'light.jinja' import light_timer %}
                 {{ light_timer(repeat.item) }}
@@ -80,7 +83,7 @@ turn_light_on:
           - condition: template
             alias: "Light not in active scene"
             value_template: >
-              {{ override or repeat.item not in state_attr('binary_sensor.scene_active', 'entity_id')
+              {{ override or light not in state_attr('binary_sensor.scene_active', 'entity_id')
                   if is_state('binary_sensor.scene_active', 'on') else true }}
 
           - if: >
@@ -92,13 +95,13 @@ turn_light_on:
                   - action: adaptive_lighting.set_manual_control
                     data:
                       entity_id: "{{ switch }}"
-                      lights: "{{ repeat.item }}"
+                      lights: "{{ light }}"
                       manual_control: true
                     continue_on_error: true
 
               - action: light.turn_on
                 target:
-                  entity_id: "{{ repeat.item }}"
+                  entity_id: "{{ light }}"
                 data: >-
                   {%- set data = namespace(value='') %}
                   {%- set count = namespace(value=0) %}
@@ -126,32 +129,32 @@ turn_light_on:
                       - action: adaptive_lighting.set_manual_control
                         data:
                           entity_id: "{{ switch }}"
-                          lights: "{{ repeat.item }}"
+                          lights: "{{ light }}"
                           manual_control: true
                         continue_on_error: true
 
                   - action: adaptive_lighting.apply
                     data:
                       entity_id: "{{ switch }}"
-                      lights: "{{ repeat.item }}"
+                      lights: "{{ light }}"
                       transition: "{{ transition | default(0) }}"
-                      adapt_brightness: "{{ is_state(repeat.item, 'off') or override }}"
-                      adapt_color: "{{ is_state(repeat.item, 'off') or override }}"
+                      adapt_brightness: "{{ is_state(light, 'off') or override }}"
+                      adapt_color: "{{ is_state(light, 'off') or override }}"
                       prefer_rgb_color: true
-                      turn_on_lights: "{{ is_state(repeat.item, 'off') or override }}"
+                      turn_on_lights: "{{ is_state(light, 'off') or override }}"
                     continue_on_error: true
                 else:
                   - action: light.turn_on
                     target:
-                      entity_id: "{{ repeat.item }}"
+                      entity_id: "{{ light }}"
                     data:
                       profile: "{{ iif(is_state('input_select.occupancy_mode', 'Night'), 'default_dim', 'default') }}"
                       transition: "{{ transition | default(0) }}"
                     continue_on_error: true
 
-          # only run on last iteration or timer will prevent remaining bulbs turning on (groups)
-          # activate_timer: true only used on single lights / light groups
-          - if: "{{ repeat.last and timer != none and (activate_timer | default(false)) }}"
+          #NOTE only run on last iteration or timer will prevent remaining group bulbs from turning on
+          #NOTE activate_timer: true should only used on single lights / light groups
+          - if: "{{ repeat.last and timer != none and (activate_timer | default(true)) }}"
             then:
               - action: timer.start
                 target:
@@ -163,7 +166,7 @@ turn_light_on:
               - action: adaptive_lighting.set_manual_control
                 data:
                   entity_id: "{{ switch }}"
-                  lights: "{{ repeat.item }}"
+                  lights: "{{ light }}"
                   manual_control: false
                 continue_on_error: true
 
