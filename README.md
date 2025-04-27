@@ -2,13 +2,9 @@
 
 ## [View Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki) [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
-
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home3.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
-
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home4.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
+[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home3.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki) [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home4.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 
 ##### <font color='cyan'>Updated 2025-04-07</font>
 
