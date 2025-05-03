@@ -7,13 +7,17 @@
   mode: queued
   triggers:
     - trigger: homeassistant
+      id: startup
       event: start
 
     # reset detect/motion after frigate restart
     - trigger: state
       entity_id:
         - binary_sensor.frigate_integration_connected
-        - input_boolean.camera_object_detection
+        - switch.camera_object_detection
+        - switch.camera_recording
+        - switch.camera_snapshots
+        - switch.camera_motion
       to: "on"
       not_from:
         - unknown
@@ -22,7 +26,7 @@
     # reset when disabled after 8 hours
     - trigger: state
       id: disabled
-      entity_id: input_boolean.camera_object_detection
+      entity_id: switch.camera_object_detection
       to: "off"
       for:
         hours: 8
@@ -38,72 +42,63 @@
   actions:
     - if: "{{ trigger.id == 'disabled' }}"
       then:
-        - action: input_boolean.turn_on
+        - action: switch.turn_on
           target:
-            entity_id: input_boolean.camera_object_detection
+            entity_id: switch.camera_object_detection
 
     - wait_template: >
-        {% set cams = state_attr('group.frigate_cameras', 'entity_id') %}
-        {% set cam_count = cams | count if cams != none else -1 %}
+        {% set cameras = state_attr('group.frigate_cameras', 'entity_id') %}
+        {% set cam_count = cameras | count if cameras != none else -1 %}
         {{ is_state('binary_sensor.frigate_integration_connected', 'on')
             and is_state('binary_sensor.wyze_integration_connected', 'on')
-            and cams != none and cam_count > 0 }}
+            and cameras != none and cam_count > 0 }}
       timeout:
-        minutes: 10 # frigate, wyze take a while on restart
-      continue_on_timeout: false
+        minutes: 5 # frigate, wyze take a while on restart
 
     - variables:
         state: >
           {{ states('alarm_control_panel.house')
               | replace('armed_vacation', 'armed_away')
               | replace('armed_', '') }}
-        on_cams: >
+        on_cameras: >
           {{ expand('group.frigate_cameras')
               | selectattr('attributes.' ~ state, 'eq', true)
               | map(attribute='entity_id') | list }}
-        off_cams: >
+        off_cameras: >
           {{ expand('group.frigate_cameras')
               | rejectattr('attributes.' ~ state, 'eq', true)
-              | map(attribute='entity_id') | list }}
-        audio_on: >
-          {{ expand(on_cams)
-              | selectattr('attributes.audio', 'eq', true)
-              | map(attribute='entity_id') | list }}
-        audio_off: >
-          {{ expand(off_cams)
-              | selectattr('attributes.audio', 'eq', true)
               | map(attribute='entity_id') | list }}
 
     - action: switch.turn_on
       target:
         entity_id: >
-          {% set detect = on_cams | map('regex_replace',
+          {% set detect = on_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_detect', ignorecase=False) | list %}
-          {% set motion = on_cams | map('regex_replace',
+          {% set motion = on_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_motion', ignorecase=False) | list %}
-          {% set recordings = on_cams | map('regex_replace',
+          {% set recordings = on_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_recordings', ignorecase=False) | list %}
-          {% set snapshots = on_cams | map('regex_replace',
+          {% set snapshots = on_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_snapshots', ignorecase=False) | list %}
           {{ detect + motion + recordings + snapshots }}
 
     - action: switch.turn_off
       target:
         entity_id: >
-          {% set detect = off_cams | map('regex_replace',
+          {% set detect = off_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_detect', ignorecase=False) | list %}
-          {% set recordings = off_cams | map('regex_replace',
+          {% set recordings = off_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_recordings', ignorecase=False) | list %}
-          {% set snapshots = off_cams | map('regex_replace',
+          {% set snapshots = off_cameras | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_snapshots', ignorecase=False) | list %}
           {{ detect + recordings + snapshots }}
 
     # detect switches must bet turned off first or motion switches won't turn off
-    - action: switch.turn_off
-      target:
-        entity_id: >
-          {{ off_cams | map('regex_replace', find='camera.(.*)',
-                replace='switch.\\1_motion', ignorecase=False) | list }}
+    # - action: switch.turn_off #DISABLED - no need to turn off
+    #   target:
+    #     entity_id: >
+    #       {{ off_cameras | map('regex_replace', find='camera.(.*)',
+    #             replace='switch.\\1_motion', ignorecase=False) | list }}
 
 ###################################################################################################
 ## Turn Camera Object Detection Off
@@ -113,19 +108,8 @@
   description: "Turn off camera event detection."
   max_exceeded: silent
   variables:
-    cams: >
-      {{ expand('group.frigate_cameras') | map(attribute='entity_id') | list
-          if trigger.id == 'all_cams' else ['camera.' ~ trigger.id ] }}
-    audio_cams: >
-      {{ expand(cams)
-          | selectattr('attributes.audio', 'eq', true)
-          | map(attribute='entity_id') | list }}
+    camera: "{{ ['camera.' ~ trigger.id ] }}"
   triggers:
-    - trigger: state
-      id: cams
-      entity_id: input_boolean.camera_object_detection
-      to: "off"
-
     - trigger: event
       id: side_driveway
       event_type: mobile_app_notification_action
@@ -210,25 +194,20 @@
       event_data:
         action: disable_charlie_cam_camera_events
   actions:
-    - wait_template: "{{ is_state('binary_sensor.frigate_integration_connected', 'on') }}"
-      timeout:
-        minutes: 10
-      continue_on_timeout: false
-
     - action: switch.turn_off
       target:
         entity_id: >
-          {% set detect = cams | map('regex_replace',
+          {% set detect = camera | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_detect', ignorecase=False) | list %}
-          {% set recordings = cams | map('regex_replace',
+          {% set recordings = camera | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_recordings', ignorecase=False) | list %}
-          {% set snapshots = cams | map('regex_replace',
+          {% set snapshots = camera | map('regex_replace',
               find='camera.(.*)', replace='switch.\\1_snapshots', ignorecase=False) | list %}
           {{ detect + recordings + snapshots }}
 
-    # detect switches must bet turned off first or motion switches won't turn off
+    # detect switch must bet turned off first or motion switch won't turn off
     - action: switch.turn_off
       target:
         entity_id: >
-          {{ cams | map('regex_replace', find='camera.(.*)',
+          {{ camera | map('regex_replace', find='camera.(.*)',
                 replace='switch.\\1_motion', ignorecase=False) | list }}
