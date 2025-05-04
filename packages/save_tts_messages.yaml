@@ -1,130 +1,85 @@
 ###################################################################################################
-# PACKAGE - Save and Play TTS Messages + Message History
+# Package - Saved TTS Messages
 ###################################################################################################
 template:
-  button:
-    - name: "TTS Play Saved Messages"
-      unique_id: tts_play_saved_messages
+  - button:
+    - name: "Play Saved TTS Messages"
+      unique_id: play_saved_tts_messages
       icon: mdi:play-box-multiple
       press:
-        - action: script.tts_play_saved_messages
+        - action: script.play_saved_tts_messages
 
-    - name: "TTS Clear Saved Messages"
-      unique_id: tts_clear_saved_messages
+    - name: "Clear Saved TTS Messages"
+      unique_id: clear_saved_tts_messages
       icon: mdi:delete-forever
       press:
-        - action: script.tts_clear_saved_messages
+        - event: clear_saved_tts_messages
 
-    - name: "TTS Play Last Message"
-      unique_id: tts_play_last_message
-      icon: mdi:comment-arrow-left-outline
-      press:
-        - action: script.tts_play_last_message
+  - trigger:
+      - platform: event
+        event_type: save_tts_message
+
+      - platform: event
+        event_type: clear_saved_tts_messages
+    condition:
+      - condition: template
+        value_template: >
+          {{ (trigger.event.event_type == 'save_tts_message'
+                and trigger.event.data is defined
+                and trigger.event.data.key is defined
+                and trigger.event.data.value is defined)
+              or trigger.event.event_type == 'clear_saved_tts_messages' }}
+    sensor:
+      - name: "Saved TTS Messages"
+        unique_id: saved_tts_messages
+        icon: mdi:account-voice
+        state: >
+          {% if trigger.event.event_type == 'save_tts_message' %}
+            {% set current = this.attributes.messages | count %}
+            {% set dupe = dict(this.attributes.get('messages', {}).items() | selectattr('1', 'search', trigger.event.data.value)) | count > 0 %}
+            {{ iif(dupe, current, current + 1) }}
+          {% else %} 0
+          {% endif %}
+        attributes:
+          messages: >
+            {% set msgs = dict(this.attributes.get('messages', {}).items()) %}
+            {% if trigger.event.event_type == 'save_tts_message' %}
+              {% set dupe = dict(this.attributes.get('messages', {}).items()
+                  | selectattr('1', 'search', trigger.event.data.value)) | count > 0 %}
+              {% if dupe %}{{ msgs }}
+              {% else %}
+                {% set value  = trigger.event.data.value %}
+                {% set value = value.isoformat() if value is datetime else value %}
+                {% set new = {trigger.event.data.key: {'message': value, 'timestamp': now().isoformat()}} %}
+                {{ dict(msgs, **new) }}
+              {% endif %}
+            {% elif trigger.event.event_type == 'clear_saved_tts_messages' %} {}
+            {% endif %}
 
 script:
   ###################################################################################################
-  # TTS Play Message
+  # Save TTS Message
   ###################################################################################################
-  tts_play_message:
-    alias: "TTS Play Message"
-    description: "Play or save TTS message."
-    mode: queued
-    fields:
-      message:
-        description: "Message to play or save."
-        example: "This is my message!"
-      save_message:
-        description: "Save TTS message if required."
-        example: "true"
-    variables:
-      save_message: "{{ save_message | default(true) }}"
-    sequence:
-      - action: notify.send_message
-        target:
-          entity_id: notify.tts_message_history
-        data:
-          message: "{{ (now() ~ ' ' ~ message)[0:250] | replace('\n', ' ') }}"
-
-      - if:
-          - condition: template
-            alias: "Save message parameter is true."
-            value_template: "{{ save_message }}"
-
-          - condition: state
-            entity_id: binary_sensor.someone_home
-            state: "off"
-        then:
-          - action: script.tts_save_message
-            data:
-              message: "{{ message }}"
-        else:
-          - action: script.tts_play
-            data:
-              always_play: true
-              message: "{{ message }}"
-
-  ###################################################################################################
-  # TTS Save Message
-  ###################################################################################################
-  tts_save_message:
-    alias: "TTS Save Message"
+  save_tts_message:
+    alias: "Save TTS Message"
     description: "Save TTS message."
     mode: queued
     fields:
       message:
         description: "Message to be saved."
         example: "This is a message!"
-    variables:
-      count: "{{ states('sensor.tts_saved_messages') | int(0) }}"
-      repeat_message: "{{ message in states.sensor.tts_saved_messages.attributes.values() }}"
     sequence:
-      - action: variable.update_sensor
-        target:
-          entity_id: sensor.tts_saved_messages
-        data:
-          value: "{{ count if repeat_message else count + 1 }}"
-          attributes: >
-            {% set message = message | replace('\n', ' ') %} {# newlines mess with dictionary format #}
-            {% set msg_num = namespace(value=0) %}
-            {% set found_msg = namespace(value=0) %}
-            {% set dict_string = namespace(value='') %}
-            {% if count > 0 %}
-              {% for key, value in states.sensor.tts_saved_messages.attributes.items()
-                  if key not in ['icon', 'friendly_name'] %}
-                {% if loop.index % 2 == 1 %} {# even number attribute is msg, odd is msg_time #}
-                  {% set msg_num.value = msg_num.value + 1 %}
-                  {% if message == value %}
-                    {# message is a repeat - record index #}
-                    {% set found_msg.value = msg_num.value %}
-                  {% else %}
-                    {# add to message dict string, 2 attributes - msg, msg_time #}
-                    {% set dict_string.value = dict_string.value
-                        ~ '"msg' ~ msg_num.value ~ '":"'
-                        ~ states.sensor.tts_saved_messages.attributes['msg' ~ msg_num.value] ~ '"' ~ ', '
-                        ~ '"msg_time' ~ msg_num.value ~ '":"'
-                        ~ states.sensor.tts_saved_messages.attributes['msg_time' ~ msg_num.value] ~ '"' ~ ', ' %}
-                  {% endif %}
-                {% endif %}
-              {% endfor %}
-            {% endif %}
-            {% if repeat_message %}
-              {# update found message time attribute value #}
-              {% set dict_string.value = '"msg_time' ~ found_msg.value ~ '":"' ~ now() ~ '"' %}
-            {% else %}
-              {# new message, we will replace all attributes so add to previous message string #}
-              {% set dict_string.value = dict_string.value ~ '"msg' ~ (count + 1) ~ '":"' ~ message  ~ '", "msg_time' ~ (count + 1) ~ '":"' ~ now()  ~ '"' %}
-            {% endif %}
-            {# complete dictionary format -#}
-            {{- '{ ' ~ dict_string.value ~ ' }' -}}
-          replace_attributes: "{{ not repeat_message }}"
+      - event: save_tts_message
+        event_data:
+          key: "msg{{ states.sensor.saved_tts_messages.attributes.messages | count + 1  }}"
+          value: "{{ message }}"
 
-  #REQUIRED
   ###################################################################################################
   # TTS Play Saved Messages
   ###################################################################################################
-  tts_play_saved_messages:
-    alias: "TTS Play Saved Messages"
-    description: "Play and delete saved TTS messages."
+  play_saved_tts_messages:
+    alias: "Play Saved TTS Messages"
+    description: "Play and clear saved TTS messages."
     icon: mdi:play-box-multiple
     max_exceeded: silent
     fields:
@@ -133,7 +88,7 @@ script:
         example: "true"
     variables:
       skip_none: "{{ skip_none | default(false) }}"
-      msgs: "{{ states('sensor.tts_saved_messages') | int(0) }}"
+      msgs: "{{ states('sensor.saved_tts_messages') | int(0) }}"
     sequence:
       - condition: template
         alias: "Message count > 0 if skip_none is true"
@@ -141,11 +96,14 @@ script:
 
       - action: script.tts_play
         data:
-          always_play: true
           message: |-
             {% from 'speech_helpers.jinja' import plural %}
             {% from 'speech_helpers.jinja' import plural_verb %}
             There {{ plural_verb(msgs) }} {{ iif(msgs == 0, 'no messages', plural('message', msgs, true)) }} waiting for you.
+          provider: "HASS"
+          language: "English (USA)"
+          voice: "Tony:friendly"
+          always_play: true
 
       - choose:
           - conditions: "{{ msgs > 0 }}"
@@ -153,67 +111,34 @@ script:
               - repeat:
                   count: "{{ msgs }}"
                   sequence:
-                    - if: "{{ state_attr('sensor.tts_saved_messages', 'msg' ~ repeat.index) != none }}"
+                    - variables:
+                        msg_num: "msg{{ repeat.index }}"
+                    - if: "{{ state_attr('sensor.saved_tts_messages', 'messages')[msg_num] != none }}"
                       then:
                         - action: script.tts_play
                           data:
-                            always_play: true
                             message: |-
-                              {{ state_attr('sensor.tts_saved_messages', 'msg' ~ repeat.index) }}
-                              {% set date = as_datetime(state_attr('sensor.tts_saved_messages', 'msg_time' ~ repeat.index), none) %}
-                              {% if date != none %}
-                                {% from 'schedule.jinja' import day_or_date %}
-                                {{ day_or_date(date, false, true, true) }}
+                              {{ state_attr('sensor.saved_tts_messages', 'messages')[msg_num]['message'] }}
+                              {%- set date = as_datetime(state_attr('sensor.saved_tts_messages', 'messages')[msg_num]['timestamp'], none) %}
+                              {%- if date != none %}
+                                {%- from 'schedule.jinja' import day_or_date %}
+                                {{- day_or_date(date, false, true, true) }}
                               {%- endif %}
+                            provider: "HASS"
+                            language: "English (USA)"
+                            voice: "Jenny:newscast"
+                            always_play: true
                           continue_on_error: true
 
-      - action: script.tts_clear_saved_messages
-
-  ###################################################################################################
-  # TTS Clear Saved Messages
-  ###################################################################################################
-  tts_clear_saved_messages:
-    alias: "TTS Clear Saved Messages"
-    description: "Clear saved TTS messages."
-    icon: mdi:delete-forever
-    sequence:
-      - action: variable.update_sensor
-        target:
-          entity_id: sensor.tts_saved_messages
-        data:
-          value: 0
-          replace_attributes: true
-
-  ###################################################################################################
-  # TTS Play Last Message
-  ###################################################################################################
-  tts_play_last_message:
-    alias: "TTS Play Last Message"
-    description: "Play last TTS message."
-    icon: mdi:comment-arrow-left-outline
-    sequence:
-      - action: script.tts_play
-        data:
-          always_play: true
-          message: |-
-            {% set message = states('sensor.tts_last_message')[33:255] %}
-            {% if message == '' %} There are no messages in the history.
-            {% else %}
-              {{ message }}
-              {% set date = as_datetime(states('sensor.tts_last_message')[0:32], none) %}
-              {% if date != none %}
-                {% from 'schedule.jinja' import day_or_date %}
-                {{ day_or_date(date, false, true, true) }}
-              {%- endif %}
-            {% endif %}
+              - event: clear_saved_tts_messages
 
 automation:
   ###################################################################################################
-  # TTS Auto Play Saved Messages
+  # Play Saved TTS Messages
   ###################################################################################################
-  - id: tts_auto_play_saved_messages
-    alias: "TTS Auto Play Saved Messages"
-    description: "Automatically play saved TTS messages."
+  - id: play_saved_tts_messages
+    alias: "Play Saved TTS Messages"
+    description: "Play saved TTS messages."
     max_exceeded: silent
     trigger:
       - trigger: state
@@ -248,7 +173,7 @@ automation:
           minutes: 1
     condition:
       - condition: numeric_state
-        entity_id: sensor.tts_saved_messages
+        entity_id: sensor.saved_tts_messages
         above: 0
 
       - condition: state
@@ -269,6 +194,6 @@ automation:
           - Home
           - Guest
     action:
-      - action: script.tts_play_saved_messages
+      - action: script.play_saved_tts_messages
         data:
           skip_none: true

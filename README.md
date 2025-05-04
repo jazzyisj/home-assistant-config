@@ -134,7 +134,6 @@
 - Smart ThinQ Sensors
 - Spook
 - Thermal Comfort
-- Variables+History
 - Virtual Devices
 - Watchman
 - Weatherflow Forecast
