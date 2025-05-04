@@ -1,12 +1,10 @@
 # Home Assistant Configuration
 
-## [View Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
+## [View More Dashboard Screenshots](https://github.com/jazzyisj/home-assistant-config/wiki)
 
 [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki) [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home2.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
 
-[<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home3.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki) [<img src="https://github.com/jazzyisj/home-assistant-config/blob/master/www/screenshots/browser_home4.png" alt="Home" width="400" height="230"/>](https://github.com/jazzyisj/home-assistant-config/wiki)
-
-##### <font color='cyan'>Updated 2025-04-07</font>
+##### <font color='cyan'>Updated 2025-05-03</font>
 
 ## HARDWARE
 
@@ -112,7 +110,7 @@
 - Z-Wave JS
 - Z-Wave JS UI
 
-## CUSTOM INTEGRATIONS (20)
+## CUSTOM INTEGRATIONS (23)
 
 - Adaptive Lighting
 - Alarmo
@@ -173,50 +171,50 @@
 - Weather Chart Card
 - Wind Rose Card
 
-## ENTITY COUNTS (45 Domains, 4827 Entities)
+## ENTITY COUNTS (45 Domains, 4820 Entities)
 
 - alarm_control_panel: 1
 - alert: 105
-- automation: 352
-- binary_sensor: 576
-- button: 162
+- automation: 351
+- binary_sensor: 577
+- button: 161
 - calendar: 13
-- camera: 34
+- camera: 32
 - climate: 5
 - conversation: 1
 - counter: 1
 - cover: 1
-- device_tracker: 115
+- device_tracker: 117
 - event: 4
 - fan: 9
-- group: 91
+- group: 95
 - image: 44
-- input_boolean: 215
+- input_boolean: 214
 - input_button: 2
 - input_datetime: 40
 - input_number: 195
-- input_select: 58
+- input_select: 53
 - input_text: 159
 - light: 60
 - lock: 5
-- media_player: 45
+- media_player: 43
 - notify: 1
 - number: 59
 - person: 2
 - remote: 1
 - scene: 11
-- script: 79
+- script: 76
 - select: 193
 - sensor: 1720
 - siren: 2
-- stt: 2
+- stt: 1
 - sun: 1
-- switch: 249
+- switch: 253
 - time: 4
 - timer: 42
 - todo: 3
-- tts: 4
-- update: 140
+- tts: 3
+- update: 139
 - valve: 12
 - weather: 4
 - zone: 5
