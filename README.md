@@ -231,18 +231,12 @@
 - #ISSUE - unresolved issue
 - #TEMP - temporary option/code
 - #STYLE - css styling issues/notes
-- #IMAGE - new image required
-- #QUESTION - question to answer
-- #DELETE - code to be deleted
-- #DISABLED - disabled code
+- #DISABLED - disabled code / option
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug
-- #LOCK_USER - lock user code
 - #MIDNIGHT - shift day change to day reset time
 - #TV - TV issues/notes
-- #ALARMO - alarmo issues/notes
 - #MASS - music assistant issues/notes
-- #ZWAVE - zwave issues / notes
 - #INFO - info level log tag
 - #WARNING - warning level log tag
 - #ERROR - error level log tag
