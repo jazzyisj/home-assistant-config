@@ -2,6 +2,102 @@
 ## Templates - Work Schedule
 ###################################################################################################
 - trigger:
+    - trigger: state
+      entity_id: input_boolean.work_schedule
+      to:
+        - "on"
+        - "off"
+
+    - trigger: state
+      entity_id:
+        - calendar.days1
+        - calendar.days2
+        - calendar.afternoons1
+        - calendar.afternoons2
+      to: "on"
+      from:
+        - unknown
+        - unavailable
+
+    - trigger: state
+      entity_id:
+        - calendar.days1
+        - calendar.days2
+        - calendar.afternoons1
+        - calendar.afternoons2
+      to: "on"
+      not_from:
+        - unknown
+        - unavailable
+      #MIDNIGHT delayed by day reset time, prevent bedtimes missed sunday night aft -> days
+      for: "{{ states('input_datetime.day_reset') }}"
+
+    - trigger: state
+      entity_id: input_select.current_work_shift
+      to:
+      for: 1 # req or input_select won't update in UI
+
+    - trigger: state
+      entity_id: input_boolean.work_shift_override
+      to: "off"
+  conditions:
+    - condition: state
+      entity_id: input_boolean.work_shift_override
+      state: "off"
+  actions:
+    - action: input_select.select_option
+      target:
+        entity_id: input_select.current_work_shift
+      data:
+        option: >
+          {% if is_state('calendar.days1', 'on') or is_state('calendar.days2', 'on') %} Days
+          {% elif is_state('calendar.afternoons1', 'on') or is_state('calendar.afternoons2', 'on') %} Afternoons
+          {% endif %}
+  sensor:
+    - name: "Scheduled Shift Today"
+      unique_id: scheduled_shift_today
+      device_class: enum
+      icon: >
+        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
+        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
+        {% else %} mdi:calendar-alert
+        {% endif %}
+      state: >
+          {% if is_state('calendar.afternoons1', 'on') or is_state('calendar.afternoons2', 'on') %} Afternoons
+          {% elif is_state('calendar.days1', 'on') or is_state('calendar.days2', 'on') %} Days
+          {% else %} {{ none }}
+          {% endif %}
+      attributes:
+        options: "{{ ['Days', 'Afternoons'] }}"
+
+    # #MIDNIGHT shift start time advanced by day_reset time
+    # check for next days/afternoons start to be less than 24 hours away (end not in past)
+    # defaults to scheduled_shift_today
+    - name: "Scheduled Shift Tomorrow"
+      unique_id: scheduled_shift_tomorrow
+      device_class: enum
+      icon: >
+        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
+        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
+        {% else %} mdi:calendar-alert
+        {% endif %}
+      state: >
+        {% from 'schedule.jinja' import rdate %}
+        {% set days = as_datetime(state_attr('calendar.days1', 'start_time'), none) %}
+        {% set afts = as_datetime(state_attr('calendar.afternoons1', 'start_time'), none) %}
+        {% if is_state('input_boolean.work_shift_override', 'on') %} {{ states('sensor.work_shift_today') }}
+        {% elif days != none and afts != none %}
+          {% if as_datetime(rdate(days)) - timedelta(days=1) < now() %} Days
+          {% elif as_datetime(rdate(afts)) - timedelta(days=1) < now() %} Afternoons
+          {% else -%} {{ states('sensor.scheduled_shift_today') }}
+          {% endif %}
+        {% else %} {{ states('sensor.scheduled_shift_today') }}
+        {% endif %}
+      attributes:
+        options: "{{ ['Days', 'Afternoons'] }}"
+
+
+- trigger:
     # #MIDNIGHT day change happens at day_reset instead of midnight
     # to accomodate bedtimes after midnight and afternoon shifts
     # do not reload on restart, template reload - incorrect value if after midnight
@@ -30,14 +126,14 @@
       for: 1 # allow other sensors to update before updating
 
     - trigger: state
-      entity_id: sensor.work_shift_today
+      entity_id: sensor.scheduled_shift_today
       to:
       for: 1 # force icon update after sensor state change
   binary_sensor:
     - name: "Work Today"
       unique_id: work_today
       icon: >
-        {% set icon = state_attr('sensor.work_shift_today', 'icon') %}
+        {% set icon = state_attr('sensor.scheduled_shift_today', 'icon') %}
         {{ icon if icon != none else 'mdi:calendar-alert' }}
       state: >
         {% if is_state('input_boolean.work_schedule', 'on') %}
@@ -82,14 +178,14 @@
       for: 1 # allow other sensors to update before updating
 
     - trigger: state
-      entity_id: sensor.work_shift_tomorrow
+      entity_id: sensor.scheduled_shift_tomorrow
       to:
       for: 1 # force icon update after sensor state change
   binary_sensor:
     - name: "Work Tomorrow"
       unique_id: work_tomorrow
       icon: >
-        {% set icon = state_attr('sensor.work_shift_tomorrow', 'icon') %}
+        {% set icon = state_attr('sensor.scheduled_shift_tomorrow', 'icon') %}
         {{ icon if icon != none else 'mdi:calendar-alert' }}
       # holiday/vacation/layoff start within 1 day and end > 1 day away = false
       state: >
@@ -187,14 +283,39 @@
       availability: "{{ has_value('calendar.work_layoff') }}"
 
 - sensor:
+    - name: "Work Shift Today"
+      unique_id: work_shift_today
+      device_class: enum
+      icon: >
+        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
+        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
+        {% else %} mdi:minus-circle
+        {% endif %}
+      state: >
+        {% if is_state('binary_sensor.work_today', 'on') %}
+          {% if is_state('input_boolean.work_shift_override', 'on') %} {{ states('input_select.current_work_shift') }}
+          {% else %} {{ states('sensor.scheduled_shift_today') }}
+          {% endif %}
+        {% else %} Off
+        {% endif %}
+      attributes:
+        options: "{{ ['Off', 'Days', 'Afternoons'] }}"
+
     - name: "Work Status"
       unique_id: work_status
       icon: >
-        {% set icon = state_attr('sensor.work_shift_today', 'icon') %}
-        {% if is_state('binary_sensor.work_today', 'off') %} mdi:factory
-        {% elif icon != none %} {{ icon }}
-        {% else %} mdi:calendar-alert
+        {% if is_state('binary_sensor.work_vacation', 'on') %}
+          {% set icon = state_attr('binary_sensor.work_vacation', 'icon') %}
+        {% elif is_state('binary_sensor.work_layoff', 'on') %}
+          {% set icon = state_attr('binary_sensor.work_layoff', 'icon') %}
+        {% elif is_state('binary_sensor.work_holiday', 'on') %}
+          {% set icon = state_attr('binary_sensor.work_holiday', 'icon') %}
+        {% elif is_state('binary_sensor.work_today', 'on') %}
+          {% set icon = state_attr('sensor.work_shift_today', 'icon') %}
+        {% elif is_state('binary_sensor.work_today', 'off') %} mdi:factory
+        {% else %} {% set icon = 'mdi:calendar-alert' %}
         {% endif %}
+        {{ icon }}
       device_class: enum
       state: >
         {% if is_state('input_boolean.work_schedule', 'off') %} Disabled
@@ -205,11 +326,7 @@
         {% elif is_state('binary_sensor.work_layoff', 'on') %} Layoff
         {% elif is_state('binary_sensor.work_vacation', 'on') %} Vacation
         {% elif is_state('binary_sensor.work_holiday', 'on') %} Holiday
-        {% elif is_state('sensor.work_shift_today', 'Days')
-            and is_state('binary_sensor.work_today', 'on') %} Days
-        {% elif is_state('sensor.work_shift_today', 'Afternoons')
-            and is_state('binary_sensor.work_today', 'on') %} Afternoons
-        {% else %} Off
+        {% else %} {{ states('sensor.work_shift_today') }}
         {% endif %}
       attributes:
         options: "{{ ['Off', 'Days', 'Afternoons', 'Holiday', 'Vacation', 'Layoff', 'Override', 'Disabled'] }}"
@@ -218,45 +335,6 @@
           {% elif is_state(this.entity_id, 'Afternoons') %}
           {% else %} Off
           {% endif %}
-
-    - name: "Work Shift Today"
-      unique_id: work_shift_today
-      device_class: enum
-      icon: >
-        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
-        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
-        {% else %} mdi:calendar-alert
-        {% endif %}
-      state: "{{ states('input_select.current_work_shift') }}"
-      attributes:
-        options: "{{ ['Off', 'Days', 'Afternoons'] }}"
-
-    # #MIDNIGHT shift start time advanced by day_reset time
-    # check for next days/afternoons start to be less than 24 hours away (end not in past)
-    # defaults to work_shift_today
-    - name: "Work Shift Tomorrow"
-      unique_id: work_shift_tomorrow
-      device_class: enum
-      icon: >
-        {% if is_state(this.entity_id, 'Days') %} mdi:alpha-d-circle
-        {% elif is_state(this.entity_id, 'Afternoons') %} mdi:alpha-a-circle
-        {% else %} mdi:calendar-alert
-        {% endif %}
-      state: >
-        {% from 'schedule.jinja' import rdate %}
-        {% set days = as_datetime(state_attr('calendar.days1', 'start_time'), none) %}
-        {% set afts = as_datetime(state_attr('calendar.afternoons1', 'start_time'), none) %}
-        {% if is_state('input_boolean.work_shift_override', 'on') %}
-          {{ states('sensor.work_shift_today') }}
-        {% elif days != none and afts != none %}
-          {% if as_datetime(rdate(days)) - timedelta(days=1) < now() %} Days
-          {% elif as_datetime(rdate(afts)) - timedelta(days=1) < now() %} Afternoons
-          {% else -%} {{ states('sensor.work_shift_today') }}
-          {% endif %}
-        {% else %} {{ states('sensor.work_shift_today') }}
-        {% endif %}
-      attributes:
-        options: "{{ ['Off', 'Days', 'Afternoons'] }}"
 
     - name: "Next Work Holiday"
       unique_id: next_work_holiday

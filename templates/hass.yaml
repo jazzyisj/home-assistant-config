@@ -13,21 +13,14 @@
   condition:
     - condition: template
       value_template: >
-        {{
-            (
-              trigger.event.event_type == 'set_variable'
+        {{ (trigger.event.event_type == 'set_variable'
               and trigger.event.data is defined
               and trigger.event.data.key is defined
-              and trigger.event.data.value is defined
-            )
-            or
-            (
-              trigger.event.event_type == 'remove_variable'
+              and trigger.event.data.value is defined)
+            or (trigger.event.event_type == 'remove_variable'
               and trigger.event.data is defined
-              and trigger.event.data.key is defined
-            )
-            or
-            trigger.event.event_type == 'clear_variables'
+              and trigger.event.data.key is defined)
+            or trigger.event.event_type == 'clear_variables'
         }}
   action:
     - if: "{{ trigger.event.data.get('log', state_attr('sensor.variables', 'log_events')) }}"
@@ -222,12 +215,15 @@
       icon: mdi:home-assistant
       device_class: enum
       state: >
-        {% set db = states('sensor.home_assistant_v2_db_size') | int(-1) %}
-        {% if is_state('alert.unknown_browsers', 'on') or db > 10000 %} critical
+        {% set disk = states('sensor.hass_disk_status') -%}
+        {% if is_state('group.unknown_browsers', 'on') or disk == 'critical' %} critical
         {% elif states('sensor.watchman_missing_entities') | int(-1) > 0
-            or states('sensor.watchman_missing_actions') | int(-1) > 0 or db > 5000 %} severe
-        {% elif is_state('binary_sensor.remote_ui', 'off') or db > 3000 %} warning
-        {% elif is_state('alert.available_updates', 'on') or db > 2000 %} minor
+            or states('sensor.watchman_missing_actions') | int(-1) > 0
+            or disk == 'severe' %} severe
+        {% elif is_state('binary_sensor.remote_ui', 'off')
+            or disk == 'warning' %} warning
+        {% elif states('sensor.available_updates') | int(-1) > 0
+            or disk == 'warning' %} minor
         {% else %} ok
         {% endif %}
       attributes:
@@ -235,13 +231,29 @@
           {% from 'hass.jinja' import status_options %}
           {{ status_options() }}
 
+    - name: "Hass Disk Status"
+      unique_id: hass_disk_status
+      icon: mdi:home-assistant
+      state: >
+          {% set size = states('sensor.system_monitor_disk_usage_config') | int(-1) -%}
+          {% set log = states('sensor.home_assistant_log_size') | int(-1) -%}
+          {% set db = states('sensor.home_assistant_v2_db_size') | int(-1) -%}
+          {% set cam = states('sensor.alarm_snapshots') | int(-1) -%}
+          {% set tts = states('sensor.tts') | int(-1) -%}
+          {% if size >= 95 or log >= 25 or db >= 10000 or cam >= 125 or tts >= 400 %} critical
+          {% elif size >= 90 or log >= 20 or db >= 7500 or cam >= 100 or tts >= 350  %} severe
+          {% elif size >= 80 or log >= 15 or db >= 6000 or cam >= 75 or tts >= 300  %} warning
+          {% elif size >= 70 or log >= 10 or db >= 5000 or cam >= 50 or tts >= 250  %} minor
+          {% else %} ok
+          {% endif %}
+
     - name: "Device Status"
       unique_id: device_status
       icon: mdi:devices
       device_class: enum
       state: >
-        {% if is_state('binary_sensor.offline_integrations_alert', 'on') %} severe
-        {% elif is_state('binary_sensor.unavailable_entities_alert', 'on') %} minor
+        {% if states('sensor.offline_integrations') | int(-1) > 0 %} severe
+        {% elif states('sensor.unavailable_entities') | int(-1) > 0 %} minor
         {% else %} ok
         {% endif %}
       attributes:
