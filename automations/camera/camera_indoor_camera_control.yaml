@@ -7,32 +7,39 @@
   mode: restart
   triggers:
     - trigger: state
+      id: startup
       entity_id: input_boolean.startup_pending
-      to: "off" # both cams not always ready when wyze connected turns on
+      to: "off"
 
     - trigger: state
       entity_id:
-        - binary_sensor.wyze_integration_connected
-        - binary_sensor.someone_home
-        - input_boolean.alarm_triggered
+        - group.indoor_cameras #STARTUP
+        - group.indoor_camera_switches #STARTUP
+      attribute: entity_id
+      to:
+
+    - trigger: state
+      entity_id: binary_sensor.someone_home #STARTUP #TEMPLATE
       to:
         - "on"
         - "off"
       not_from:
         - unknown
         - unavailable
-      for: 1 # allow groups to populate at startup avoid turning on/off
 
     - trigger: state
-      entity_id:
-        - group.indoor_cameras
-        - group.indoor_camera_switches
-      attribute: entity_id
+      entity_id: input_boolean.alarm_triggered
       to:
+  conditions:
+    - condition: state
+      entity_id: input_boolean.startup_pending
+      state: "off"
   actions:
-    - wait_template: "{{ state_attr('group.indoor_camera_switches', 'entity_id') != none }}"
+    - wait_template: >
+        {{ state_attr('group.indoor_cameras', 'entity_id') != none
+            and state_attr('group.indoor_camera_switches', 'entity_id') != none }}
       timeout:
-        minutes: 5
+        minutes: 2
 
     - variables:
         entities: "{{ state_attr('group.indoor_camera_switches', 'entity_id') }}"
@@ -40,15 +47,15 @@
     - if: "{{ entities == none or entities | count == 0 }}"
       then:
         - stop: "No valid entities."
+
+    - if: >
+        {{ is_state('binary_sensor.someone_home', 'on')
+            and is_state('input_boolean.alarm_triggered', 'off') }}
+      then:
+        - action: switch.turn_off
+          target:
+            entity_id: "{{ entities }}"
       else:
-        - if: >
-            {{ is_state('binary_sensor.someone_home', 'on')
-                and is_state('input_boolean.alarm_triggered', 'off') }}
-          then:
-            - action: switch.turn_off
-              target:
-                entity_id: "{{ entities }}"
-          else:
-            - action: switch.turn_on
-              target:
-                entity_id: "{{ entities }}"
+        - action: switch.turn_on
+          target:
+            entity_id: "{{ entities }}"

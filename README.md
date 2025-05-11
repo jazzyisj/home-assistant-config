@@ -231,6 +231,8 @@
 - #ISSUE - unresolved issue
 - #TEMP - temporary option/code
 - #STYLE - css styling issues/notes
+- #STARTUP - entity triggering automation at startup
+- #TEMPLATE - entity triggering automation on template reload
 - #DISABLED - disabled code / option
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug

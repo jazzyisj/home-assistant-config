@@ -39,83 +39,59 @@
         value: "{{ now() }}"
         set_timestamp: false
 
-    - parallel:
-        - sequence:
-            - if: "{{ person != 'guest' }}"
-              then:
-                - action: input_boolean.turn_off
-                  target:
-                    entity_id: "input_boolean.{{ person }}_almost_home"
+    - if:
+        - condition: state
+          entity_id: input_boolean.occupancy_announcements
+          state: "on"
+      then:
+        - action: script.tts_play
+          data:
+            message: "{{ 'A guest has arrived.' if person == 'guest' else person | title ~ ' is home' }}"
+            provider: "HASS"
+            language: "English (USA)"
+            voice: "Sara:excited"
+            save_message: false
+          continue_on_error: true
 
-                - if:
-                    - condition: state
-                      entity_id: input_boolean.occupancy_announcements
-                      state: "on"
-                  then:
-                    - action: "notify.{{ person }}"
-                      data:
-                        message: clear_notification
-                        data:
-                          tag: "{{ person }}_heading_home"
+    - delay: 90 # let person get in house
 
-                # update traffic sensors to ensure time to home is zeroed out
-                - action: script.update_traffic_sensors
-                  continue_on_error: true
+    - if: # only if person still home (may have come and gone)
+        - condition: template
+          alias: "Person is still home"
+          value_template: "{{ is_state('binary_sensor.' ~ person ~ '_home', 'on') }}"
+      then:
+        - if:
+            - condition: state
+              entity_id: input_boolean.occupancy_announcements
+              state: "on"
+          then:
+            - action: script.tts_play
+              data:
+                message: |
+                  Good {{ states('sensor.tod_greeting') }} {{ person | title if person != 'guest' }}!
+                  Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
+                provider: "HASS"
+                language: "English (USA)"
+                voice: "Jenny:cheerful"
+                save_message: false
+              continue_on_error: true
 
-        - sequence:
+        - if: "{{ first_home }}"
+          then:
             - if:
-                - condition: state
-                  entity_id: input_boolean.occupancy_announcements
-                  state: "on"
+                - condition: numeric_state
+                  entity_id: sensor.saved_tts_messages
+                  above: 0
               then:
-                - action: script.tts_play
-                  data:
-                    message: "{{ 'A guest has arrived.' if person == 'guest' else person | title ~ ' is home' }}"
-                    provider: "HASS"
-                    language: "English (USA)"
-                    voice: "Sara:excited"
-                    save_message: false
+                - action: script.play_saved_tts_messages
                   continue_on_error: true
 
-            - delay: 90 # let person get in house
+                - wait_template: "{{ is_state('script.play_saved_tts_messages', 'off') }}"
+                  timeout:
+                    minutes: 5
 
-            - if: # only if person still home (may have come and gone)
-                - condition: template
-                  alias: "Person is still home"
-                  value_template: "{{ is_state('binary_sensor.' ~ person ~ '_home', 'on') }}"
+            - if: "{{ is_state('input_boolean.media_enabled_' ~ person, 'on') }}"
               then:
-                - if:
-                    - condition: state
-                      entity_id: input_boolean.occupancy_announcements
-                      state: "on"
-                  then:
-                    - action: script.tts_play
-                      data:
-                        message: |
-                          Good {{ states('sensor.tod_greeting') }} {{ person | title if person != 'guest' }}!
-                          Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
-                        provider: "HASS"
-                        language: "English (USA)"
-                        voice: "Jenny:cheerful"
-                        save_message: false
-                      continue_on_error: true
-
-                - if: "{{ first_home }}"
-                  then:
-                    - if:
-                        - condition: numeric_state
-                          entity_id: sensor.saved_tts_messages
-                          above: 0
-                      then:
-                        - action: script.play_saved_tts_messages
-                          continue_on_error: true
-
-                        - wait_template: "{{ is_state('script.play_saved_tts_messages', 'off') }}"
-                          timeout:
-                            minutes: 5
-
-                    - if: "{{ is_state('input_boolean.media_enabled_' ~ person, 'on') }}"
-                      then:
-                        - action: script.media_play
-                          data:
-                            preset: "{{ person }}"
+                - action: script.media_play
+                  data:
+                    preset: "{{ person }}"

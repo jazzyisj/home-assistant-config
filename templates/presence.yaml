@@ -1,6 +1,30 @@
 ###################################################################################################
 ## Templates - Presence
 ###################################################################################################
+- trigger:
+    - trigger: homeassistant
+      event: start
+
+    - trigger: event
+      event_type: event_template_reloaded
+
+    - trigger: zone
+      entity_id: person.jason
+      zone: zone.almost_home
+      event: enter
+
+    - trigger: zone
+      entity_id: person.jason
+      zone: zone.almost_home
+      event: leave
+  binary_sensor:
+    - name: "Jason Almost Home"
+      unique_id: jason_almost_home
+      icon: mdi:home-outline
+      state: >
+        {{ 'person.jason' in state_attr('zone.almost_home', 'persons')
+              and is_state_attr('binary_sensor.jason_home', 'just_left', false) }}
+
 - binary_sensor:
     - name: "Someone Home"
       unique_id: someone_home
@@ -32,8 +56,8 @@
     - name: "Jason Home"
       unique_id: jason_home
       device_class: presence
-      delay_off: 15 # allow reset, avoid false off when arriving home
-      delay_on: 5 # allow reset, avoid false triggers when driving by
+      delay_on: 1 # allow reset  #TEST, avoid false triggers when driving by
+      delay_off: 1 # allow reset, avoid false off when arriving home
       state: >
         {{ is_state('input_boolean.jason_home', 'on')
             if is_state('input_boolean.jason_presence_override', 'on')
@@ -43,24 +67,26 @@
           {% if states.sensor.variables.attributes.variables is defined
               and states.sensor.variables.attributes.variables.last_arrived_jason is defined %}
             {% set time = as_datetime(state_attr('sensor.variables', 'variables')['last_arrived_jason'], none) %}
-            {{ is_state(this.entity_id, 'on') and now() - time < timedelta(minutes=10)
+            {{ is_state(this.entity_id, 'on') and now() - time < timedelta(minutes=5)
                 if time != none else none }}
           {% endif %}
         just_left: >
           {% if states.sensor.variables.attributes.variables is defined
               and states.sensor.variables.attributes.variables.last_left_jason is defined %}
             {% set time = as_datetime(state_attr('sensor.variables', 'variables')['last_left_jason'], none) %}
-            {{ is_state(this.entity_id, 'off') and now() - time < timedelta(minutes=10)
+            {{ is_state(this.entity_id, 'off') and now() - time < timedelta(minutes=5)
                 if time != none else none }}
           {% endif %}
 
     - name: "Jason Heading Home"
       unique_id: jason_heading_home
       icon: mdi:account-arrow-right
-      delay_on: 30 # ignore temporary towards values #TEST
-      delay_off: 60 # ignore temporary stationary values
+      delay_on: 30 # ignore temporary "towards" values #TEST
+      delay_off: "{{ iif(is_state('binary_sensor.jason_home', 'on'), 0, 120) }}" # ignore temporary "stationary" values
       state: >
-        {{ 'person.jason' in state_attr('zone.near_home', 'persons')
+        {{ ('person.jason' in state_attr('zone.near_home', 'persons')
+              or 'person.jason' in state_attr('zone.almost_home', 'persons'))
+            and is_state_attr('binary_sensor.jason_home', 'just_left', false)
             and is_state('sensor.jphone_detected_activity', 'in_vehicle')
             and is_state('sensor.home_jason_direction_of_travel', 'towards') }}
 
@@ -74,14 +100,14 @@
           {% if states.sensor.variables.attributes.variables is defined
               and states.sensor.variables.attributes.variables.last_arrived_guest is defined %}
             {% set time = as_datetime(state_attr('sensor.variables', 'variables')['last_arrived_guest'], none) %}
-            {{ is_state(this.entity_id, 'on') and now() - time < timedelta(minutes=10)
+            {{ is_state(this.entity_id, 'on') and now() - time < timedelta(minutes=5)
                 if time != none else none }}
           {% endif %}
         just_left: >
           {% if states.sensor.variables.attributes.variables is defined
               and states.sensor.variables.attributes.variables.last_left_guest is defined %}
             {% set time = as_datetime(state_attr('sensor.variables', 'variables')['last_left_guest'], none) %}
-            {{ is_state(this.entity_id, 'off') and now() - time < timedelta(minutes=10)
+            {{ is_state(this.entity_id, 'off') and now() - time < timedelta(minutes=5)
                 if time != none else none }}
           {% endif %}
 
@@ -94,14 +120,14 @@
           {% if states.sensor.variables.attributes.variables is defined
               and states.sensor.variables.attributes.variables.last_arrived_charlie is defined %}
             {% set time = as_datetime(state_attr('sensor.variables', 'variables')['last_arrived_charlie'], none) %}
-            {{ is_state(this.entity_id, 'on') and now() - time < timedelta(minutes=10)
+            {{ is_state(this.entity_id, 'on') and now() - time < timedelta(minutes=5)
                 if time != none else none }}
           {% endif %}
         just_left: >
           {% if states.sensor.variables.attributes.variables is defined
               and states.sensor.variables.attributes.variables.last_left_charlie is defined %}
             {% set time = as_datetime(state_attr('sensor.variables', 'variables')['last_left_charlie'], none) %}
-            {{ is_state(this.entity_id, 'off') and now() - time < timedelta(minutes=10)
+            {{ is_state(this.entity_id, 'off') and now() - time < timedelta(minutes=5)
                 if time != none else none }}
           {% endif %}
 
@@ -133,12 +159,12 @@
     - name: "Presence LED Alert"
       unique_id: presence_led_alert
       state: >
-        {{ is_state('input_boolean.jason_almost_home', 'on')
+        {{ is_state('binary_sensor.jason_heading_home', 'on')
+            or is_state('binary_sensor.jason_almost_home', 'on')
             or (states.binary_sensor
                   | selectattr('attributes.just_arrived', 'defined')
                   | selectattr('attributes.just_arrived', 'eq', true)
                   | map(attribute='entity_id') | list | count > 0)
-            or is_state('binary_sensor.jason_heading_home', 'on')
             or is_state('alert.jason_phone_offline', 'on') }}
 
 - sensor:

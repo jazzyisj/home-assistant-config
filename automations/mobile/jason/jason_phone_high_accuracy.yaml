@@ -14,24 +14,13 @@
         - Near Home
         - Almost Home
 
-    # almost home
-    - trigger: state
-      entity_id: input_boolean.jason_almost_home
-      to: "on"
-      for: 1 # allow reset
-
-    # arriving from out of town
-    - trigger: numeric_state
-      entity_id: sensor.home_jason_distance
-      below: 20
-
     - trigger: state
       entity_id: sensor.jphone_detected_activity
       to: in_vehicle
 
-    # quicker trigger in case gps tracker slow
+    # quicker trigger if gps tracker slow
     - trigger: state
-      entity_id: binary_sensor.jason_phone_wifi_connected
+      entity_id: binary_sensor.jason_home
       to: "off"
       not_from:
         - unknown
@@ -40,19 +29,8 @@
     - alias: "Not out of town"
       condition: template
       value_template: "{{ states('sensor.home_jason_distance') | int(-1) <= 20 }}"
-
-    - alias: "Near home if triggered by activity"
-      condition: template
-      value_template: >
-        {{ iif(trigger.entity_id == 'sensor.jphone_detected_activity',
-            states('sensor.home_jason_distance') | int(-1) <= 20, true) }}
-
-    - condition: template
-      value_template: >
-        {{ iif(trigger.entity_id == 'input_boolean.jason_almost_home',
-            not is_state('person.jason', 'home'), true) }}
   actions:
-    #NOTE sending commands direct without switch - sensor doesn't always turn on
+    #NOTE sending commands direct without switch - #ISSUE sensor doesn't always turn on
     - action: notify.mobile_app_jphone
       data:
         message: command_high_accuracy_mode
@@ -64,7 +42,7 @@
         message: command_high_accuracy_mode
         data:
           command: high_accuracy_set_update_interval
-          high_accuracy_update_interval: 30
+          high_accuracy_update_interval: 15
 
 ###################################################################################################
 ## Turn Jason Phone High Accuracy Off
@@ -76,6 +54,7 @@
   triggers:
     # safeguard, turn off after an hour
     - trigger: state
+      id: state
       entity_id:
         - switch.jason_phone_high_accuracy
         - binary_sensor.jphone_high_accuracy_mode
@@ -84,12 +63,14 @@
         minutes: 60
 
     - trigger: event
+      id: notification
       event_type: mobile_app_notification_action
       event_data:
         action: turn_off_jason_phone_high_accuracy
 
-    # turn off when we've arrived somwhere (another zone)
+    # turn off when we've arrived somwhere (another zone) or not near home (away)
     - trigger: state
+      id: person
       entity_id: person.jason
       from:
         - not_home
@@ -106,23 +87,26 @@
       above: 20
 
     - trigger: state
+      id: activity
       entity_id: sensor.jphone_detected_activity
       from: in_vehicle
       for:
         minutes: 10
 
+    # quicker trigger if gps tracker slow
     - trigger: state
-      entity_id: binary_sensor.jason_phone_wifi_connected
+      id: home
+      entity_id: binary_sensor.jason_home
       to: "on"
       not_from:
         - unknown
         - unavailable
   conditions:
     - condition: template
+      alias: "Do not turn off during commute times"
       value_template: >
         {{ iif(trigger.entity_id == 'sensor.jphone_detected_activity',
-            is_state('binary_sensor.work_commute_active', 'off')
-              and is_state('binary_sensor.home_commute_active', 'off'), true) }}
+            is_state('binary_sensor.commute_active', 'off'), true) }}
   actions:
     #NOTE sending commands direct without switch - sensor doesn't always turn on
     - action: notify.mobile_app_jphone
