@@ -85,12 +85,22 @@ turn_light_off:
 
           - if: "{{ timer != none }}"
             then:
-              - if: "{{ activate_timer | default(false) }}"
+              - if: >
+                  {{ activate_timer | default(false)
+                      or ((activate_timer is not defined or activate_timer)
+                      and (is_state(repeat.item, 'off') and not is_state(timer, 'active')
+                        and (now() - states[repeat.item].last_changed) > timedelta(seconds=1))) }}
                 then:
                   - action: timer.start
                     target:
                       entity_id: "{{ timer }}"
                     continue_on_error: true
+                else:
+                  - if: "{{ is_state(timer, ['active', 'paused']) }}"
+                    then:
+                      - action: timer.cancel
+                        target:
+                          entity_id: "{{ timer }}"
 
           - if: "{{ reset and switch != none }}"
             then:
@@ -100,6 +110,9 @@ turn_light_off:
                   lights: "{{ repeat.item }}"
                   manual_control: false
                 continue_on_error: true
+
+          - delay:
+              milliseconds: 100 #ZWAVE don't overwhelm the network
 
     # wait until all lights are off and this is the last instance of this script running
     - wait_template: >

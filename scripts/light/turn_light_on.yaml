@@ -10,15 +10,6 @@ turn_light_on:
     entity_id:
       description: "List of light entity ids"
       example: "['light.dining_room_light_rgb', 'light.dining_room_potlights']"
-    activate_timer:
-      description: "Activate light in use timer"
-      example: "true"
-    override:
-      description: "Override scene/manual mode."
-      example: "false"
-    reset:
-      description: "Reset manual mode."
-      example: "false"
     profile:
       description: "Light profile"
       example: "default"
@@ -31,6 +22,15 @@ turn_light_on:
     transition:
       description: "Transition time"
       example: "5"
+    activate_timer:
+      description: "Activate light in use timer"
+      example: "true"
+    override:
+      description: "Override scene/manual mode."
+      example: "false"
+    reset:
+      description: "Reset manual mode."
+      example: "false"
   variables:
     entities: >
       {% from 'light.jinja' import valid_lights %}
@@ -72,21 +72,21 @@ turn_light_on:
                 {{ manual_mode(repeat.item, switch) }}
 
           - condition: template
-            alias: "Override or no timer, or timer is idle and not manual mode"
+            alias: "Reset, override, no timer, or timer is idle and not manual mode"
             value_template: >
-              {{ override or timer == none or (not manual and is_state(timer, 'idle')) }}
+              {{ reset or override or timer == none or (not manual and is_state(timer, 'idle')) }}
 
           - condition: template
             alias: "Light not in active scene"
             value_template: >
-              {{ override or light not in state_attr('binary_sensor.scene_active', 'entity_id')
+              {{ reset or override or light not in state_attr('binary_sensor.scene_active', 'entity_id')
                   if is_state('binary_sensor.scene_active', 'on') else true }}
 
           - if: >
               {{ brightness is defined or profile is defined
                   or transition is defined or rgb_color is defined }}
             then:
-              - if: "{{ switch != none and is_state(switch, 'on') }}"
+              - if: "{{ switch != none and is_state(switch, 'on') and not reset }}"
                 then:
                   - action: adaptive_lighting.set_manual_control
                     data:
@@ -120,7 +120,7 @@ turn_light_on:
             else:
               - if: "{{ switch != none and is_state(switch, 'on') }}"
                 then:
-                  - if: "{{ override }}"
+                  - if: "{{ override and not reset }}"
                     then:
                       - action: adaptive_lighting.set_manual_control
                         data:
@@ -150,21 +150,40 @@ turn_light_on:
 
           #NOTE only run on last iteration or timer will prevent remaining group bulbs from turning on
           #NOTE activate_timer: true should only used on single lights / light groups
-          - if: "{{ repeat.last and timer != none and (activate_timer | default(true)) }}"
+          - if: "{{ repeat.last and timer != none }}"
             then:
-              - action: timer.start
-                target:
-                  entity_id: "{{ timer }}"
-                continue_on_error: true
+              - if: >
+                  {{ activate_timer | default(false)
+                      or ((activate_timer is not defined or activate_timer)
+                        and (is_state(repeat.item, 'on') and not is_state(timer, 'active')
+                          and now() - states[repeat.item].last_changed > timedelta(seconds=1))) }}
+                then:
+                  - action: timer.start
+                    target:
+                      entity_id: "{{ timer }}"
+                    continue_on_error: true
+                else:
+                  - action: timer.cancel
+                    target:
+                      entity_id: "{{ timer }}"
+                    continue_on_error: true
 
           - if: "{{ reset and switch != none }}"
             then:
+              - if: "{{ timer != none and is_state(timer, 'active') }}"
+                then:
+                  # wait for automation.light_timer_changed to run if timer is active
+                  - delay: 5
+
               - action: adaptive_lighting.set_manual_control
                 data:
                   entity_id: "{{ switch }}"
                   lights: "{{ light }}"
                   manual_control: false
                 continue_on_error: true
+
+          - delay:
+              milliseconds: 100 #ZWAVE don't overwhelm the network
 
     # wait until all lights are off and this is the last instance of this script running
     - wait_template: >
