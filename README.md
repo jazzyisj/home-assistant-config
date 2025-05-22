@@ -230,6 +230,7 @@
 - #IDEA - idea for feature/option/function
 - #ISSUE - unresolved issue
 - #TEMP - temporary option/code
+- #DEBUG - code/options for debugging
 - #STYLE - css styling issues/notes
 - #STARTUP - entity triggering automation at startup
 - #TEMPLATE - entity triggering automation on template reload

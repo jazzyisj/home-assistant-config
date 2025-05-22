@@ -1,80 +1,85 @@
 ###################################################################################################
-## Reset Locks
+## Reset Door Locks
 ###################################################################################################
-reset_locks:
-  alias: "Reset Locks"
+reset_door_locks:
+  alias: "Reset Door Locks"
   description: "Reset door locks."
   icon: mdi:lock
-  fields:
-    type:
-      description: "Lock failure type"
-      example: "jammed"
   variables:
-    sensor_name: >
-      {% if type == 'jammed' %} _door_lock_lock_jammed
-      {% elif type == 'failed' %} _door_lock_system_hardware_failure
-      {% elif type == 'intrusion' %} _door_lock_intrusion
-      {% elif type == 'keypad' %} _door_lock_keypad_temporary_disabled
-      {% endif %}
-    button_name: >
-      {% if type == 'jammed' %} _door_lock_idle_access_control_lock_state
-      {% elif type == 'failed' %} _door_lock_idle_system_hardware_status
-      {% elif type == 'intrusion' %} _door_lock_idle_home_security_sensor_status
-      {% elif type == 'keypad' %} _door_lock_idle_access_control_keypad_state
-      {% endif %}
-    locks: >
-      {{ states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
-          | selectattr('state', 'eq', 'on') | map(attribute='object_id')
-          | map('regex_replace', find='(.*)' ~ sensor_name,
-              replace='lock.\\1_door_lock', ignorecase=False) | list }}
+    alerts: "{{ ['jammed', 'failed' ,'intrusion', 'keypad'] }}"
+    fail_count: 0
   sequence:
-    - if: "{{ locks == none or locks | count == 0 }}"
-      then:
-        - stop: "No valid entities."
-          error: true
+    - repeat:
+        count: "{{ alerts | count }}"
+        sequence:
+          - variables:
+              alert: "{{ alerts[repeat.index - 1] }}"
+              sensor_name: >
+                {% if alert == 'jammed' %} _door_lock_lock_jammed
+                {% elif alert == 'failed' %} _door_lock_system_hardware_failure
+                {% elif alert == 'intrusion' %} _door_lock_intrusion
+                {% elif alert == 'keypad' %} _door_lock_keypad_temporary_disabled
+                {% endif %}
+              button_name: >
+                {% if alert == 'jammed' %} _door_lock_idle_access_control_lock_state
+                {% elif alert == 'failed' %} _door_lock_idle_system_hardware_status
+                {% elif alert == 'intrusion' %} _door_lock_idle_home_security_sensor_status
+                {% elif alert == 'keypad' %} _door_lock_idle_access_control_keypad_state
+                {% endif %}
+              locks: >
+                {{ states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
+                    | selectattr('state', 'eq', 'on') | map(attribute='object_id')
+                    | map('regex_replace', find='(.*)' ~ sensor_name,
+                        replace='lock.\\1_door_lock', ignorecase=False) | list }}
+              sensors: >
+                {{ expand(states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
+                    | selectattr('state', 'eq', 'on')) | map(attribute='entity_id') | list }}
+              buttons: >
+                {{ expand(states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
+                    | selectattr('state', 'eq', 'on')) | map(attribute='object_id') | list
+                    | map('regex_replace', find='(.*)' ~ sensor_name,
+                      replace='button.\\1' ~ button_name, ignorecase=False) | list }}
 
-    # toggle lock to reset state from unknown
-    - action: lock.unlock
-      data:
-        entity_id: "{{ locks }}"
+          - if: "{{ locks != none or locks | count > 0 }}"
+            then:
+              # toggle lock to reset state from unknown
+              - action: lock.unlock
+                data:
+                  entity_id: "{{ locks }}"
 
-    - delay: 5 # allow locks to unlock
+              - wait_template: >
+                  {{ expand(locks)
+                      | selectattr('state', 'in', ['locked', 'unknown'])
+                      | list | count == 0 }}
+                timeout: 30
 
-    - action: lock.lock
-      data:
-        entity_id: "{{ locks }}"
+              - action: lock.lock
+                data:
+                  entity_id: "{{ locks }}"
 
-    - wait_template: "{{ expand(locks) | selectattr('state', 'eq', 'unlocked') | list | count == 0 }}"
-      timeout: 60
+              - wait_template: >
+                  {{ expand(locks)
+                      | selectattr('state', 'eq', 'unlocked')
+                      | list | count == 0 }}
+                timeout: 30
 
-    - variables:
-        buttons: >
-          {{ expand(states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
-              | selectattr('state', 'eq', 'on')) | map(attribute='object_id') | list
-              | map('regex_replace', find='(.*)' ~ sensor_name,
-                replace='button.\\1' ~ button_name, ignorecase=False) | list }}
+              - if: "{{ buttons | count > 0 }}"
+                then:
+                  - action: button.press
+                    target:
+                      entity_id: "{{ buttons }}"
 
-    # if any sensors have not turned off press reset buttons
-    - if: "{{ buttons | count > 0 }}"
-      then:
-        - action: button.press
-          target:
-            entity_id: "{{ buttons }}"
+              - delay: 1
 
-    - delay: 5 # let sensors reset
+              - variables:
+                  fail_count: >
+                    {{ fail_count + expand(sensors)
+                        | selectattr('state', 'eq', 'on')
+                        | list | count }}
 
-    - variables:
-        locks: >
-          {{ states.binary_sensor | selectattr('entity_id', 'contains', sensor_name)
-              | selectattr('state', 'eq', 'on') | map(attribute='object_id')
-              | map('regex_replace', find='(.*)' ~ sensor_name,
-                  replace='lock.\\1_door_lock', ignorecase=False) | list }}
-
-    - if: "{{ locks | count > 0 }}"
+    - if: "{{ fail_count > 0 }}"
       then:
         - action: script.tts_play
           data:
-            message: |
-              {%- from 'lock.jinja' import list_locks -%}
-              The {{ list_locks(locks, 'failure') }} not cleared!
-            quiet_play: true
+            message: "Attention! The door lock errors did not been reset!"
+            alert: true
