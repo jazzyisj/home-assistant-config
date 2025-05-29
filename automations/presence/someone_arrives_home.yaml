@@ -47,11 +47,19 @@
             message: "{{ 'A guest has arrived.' if person == 'guest' else person | title ~ ' is home' }}"
             provider: "HASS"
             language: "English (USA)"
-            voice: "Sara:excited"
+            voice: "Aria:friendly"
             save_message: false
           continue_on_error: true
 
-    - delay: 90 # let person get in house
+    - if: # only if person still home (may have come and gone)
+        - condition: template
+          alias: "Person is Jason"
+          value_template: "{{ person == 'jason' }}"
+      then:
+        - wait_template: "{{ is_state('binary_sensor.side_entrance_motion', 'on') }}"
+          timeout: 300
+
+    - delay: 60 # let person get in house
 
     - if: # only if person still home (may have come and gone)
         - condition: template
@@ -63,14 +71,26 @@
               entity_id: input_boolean.occupancy_announcements
               state: "on"
           then:
+            - action: google_generative_ai_conversation.generate_content
+              data:
+                prompt: >
+                  {% if person == 'jason' %}
+                    Welcome the male person Jason home as a female using a cute pet version of his name
+                    in an explicit and flirty manner using innuendos in 30 words or less and no emoticons.
+                  {% elif person == 'guest' %}
+                    Act surprised when noticing a new guest and welcome them to our home in a rude and
+                    disappointed but very funny manner in 30 words or less and no emoticons.
+                  {% endif %}
+              response_variable: response
+
+            - delay: 1
+
             - action: script.tts_play
               data:
-                message: |
-                  Good {{ states('sensor.tod_greeting') }} {{ person | title if person != 'guest' }}!
-                  Welcome {{ 'home' if person != 'guest' else 'to our home' }}.
+                message: "{{ response['text'] }}"
                 provider: "HASS"
                 language: "English (USA)"
-                voice: "Jenny:cheerful"
+                voice: "{{ 'Aria:whispering' if person == 'jason' else 'Jane:unfriendly' }}"
                 save_message: false
               continue_on_error: true
 

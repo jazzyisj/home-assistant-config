@@ -6,65 +6,39 @@
   description: "Camera object detected notification."
   max_exceeded: silent
   trace:
-    stored_traces: 50
+    stored_traces: 100
   variables:
     id: "{{ trigger.payload_json['after']['id'] }}"
     camera: "{{ trigger.payload_json['after']['camera'] }}"
     object: "{{ trigger.payload_json['after']['label'] }}"
     start_time: "{{ trigger.payload_json['after']['start_time'] }}"
-    entered_zones: "{{ trigger.payload_json['after']['entered_zones'] }}"
-    current_zones: "{{ trigger.payload_json['after']['current_zones'] }}"
     score: "{{ trigger.payload_json['after']['score'] | float(-1) }}"
-    stationary: "{{ trigger.payload_json['after']['stationary'] | default(false) }}"
   triggers:
-    - trigger: mqtt
-      id: new
-      topic: frigate/events
-      payload: new
-      value_template: "{{ value_json.type }}"
-
     - trigger: mqtt
       id: update
       topic: frigate/events
-      payload: update
-      value_template: "{{ value_json.type }}"
+      payload: alert
+      value_template: "{{ value_json.after['max_severity'] }}"
   conditions:
     - condition: template
       alias: "Throttle notifications"
       value_template: >
-        {{ true if this.attributes.last_triggered == none or trigger.id == 'new'
-            else now() - this.attributes.last_triggered > timedelta(seconds=120) }}
+        {{ true if this.attributes.last_triggered == none
+            else now() - this.attributes.last_triggered > timedelta(seconds=60) }}
 
-    - condition: template
-      alias: "Object is new and not stationary."
-      value_template: >
-        {{ trigger.id == 'new' or (not stationary
-            and now() - as_datetime(start_time) < timedelta(seconds=60)) }}
-
-    - condition: template
-      alias: "Detected object is is valid and in required zone."
-      value_template: >
-        {% if object == 'car' and score >= 0.65 %}
-          {% if camera == 'front_driveway' %} {{ 'driveway' in entered_zones }}
-          {% else %} {{ true }}
-          {% endif %}
-        {% elif object == 'person' and score >= 0.65 %}
-          {% if camera == 'front_driveway' %} {{ 'near_house' in entered_zones }}
-          {% elif camera == 'side_door' %} {{ 'driveway' in entered_zones }}
-          {% elif camera == 'front_door' %} {{ 'porch' in entered_zones }}
-          {% elif camera == 'front_yard' %} {{ 'near_house' in entered_zones }}
-          {% elif camera == 'back_door' %} {{ 'back_door_deck' in entered_zones }}
-          {% elif camera == 'patio_door' %} {{ 'patio_deck' in entered_zones }}
-          {% else %} {{ true }}
-          {% endif %}
-        {% endif %}
-
-    # prevent notification when arriving home
+    # prevent notifications when someone arriving home
     - condition: state
       alias: "Someone hasn't just arrived home"
       entity_id: binary_sensor.someone_home
       attribute: just_arrived
       state: false
+
+    - condition: template
+      alias: "New valid object"
+      value_template: >
+        {{ now() - as_datetime(start_time) < timedelta(seconds=60)
+            and ((object == 'person' and score >= 0.65)
+              or (object == 'car' and score >= 0.65)) }}
   actions:
     - parallel:
         - sequence:
@@ -82,7 +56,8 @@
                     - condition: template
                       alias: "At least 2 minutes since last announcement or camera is front door"
                       value_template: >
-                        {{ true if this.attributes.last_triggered == none or camera == 'front_door'
+                        {{ true if this.attributes.last_triggered == none
+                              or camera in ['front_door', 'side_door']
                             else now() - this.attributes.last_triggered > timedelta(minutes=2) }}
                   then:
                     - action: script.turn_on
@@ -104,13 +79,13 @@
                           save_message: false
                       continue_on_error: true
 
-                # - action: script.turn_on #DISABLED until kiosk navigation is resolved
-                #   target:
-                #     entity_id: script.kiosk_display_camera
-                #   data:
-                #     variables:
-                #       camera: "{{ camera }}"
-                #   continue_on_error: true
+                - action: script.turn_on
+                  target:
+                    entity_id: script.kiosk_display_camera
+                  data:
+                    variables:
+                      camera: "{{ camera }}"
+                  continue_on_error: true
 
         - sequence:
             - if:
@@ -118,7 +93,7 @@
                   entity_id: input_boolean.camera_object_notifications
                   state: "on"
               then:
-                - delay: 2 # allow snapshot to save
+                - delay: 5 # allow snapshot to save
 
                 - action: notify.jason
                   data:

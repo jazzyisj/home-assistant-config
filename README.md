@@ -237,6 +237,7 @@
 - #DISABLED - disabled code / option
 - #BUG - unfixable bug in HA/component/device
 - #BUGFIX - workaround for bug
+- #MOBILE - mobile view adjustments
 - #MIDNIGHT - shift day change to day reset time
 - #TV - TV issues/notes
 - #MASS - music assistant issues/notes
