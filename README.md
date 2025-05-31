@@ -83,11 +83,12 @@
 - LG WebOS TV
 - HiSense Roku TV
 
-## INSTALLED ADDONS (24)
+## INSTALLED ADDONS (25)
 
 - Advanced SSH & Web Terminal
 - Assist Microphone
 - Chrony
+- DBStats
 - Docker Wyze Bridge
 - ESP Home Device Builder
 - File editor
@@ -138,18 +139,18 @@
 
 ## UI Plugins (32)
 
+- Advanced Camera Card
 - Apex Charts
 - Auto Entities
 - Bar Card
 - Battery State Card
 - Button Card
+- Calendar Card Pro
 - Card Mod
 - Card Tools
 - Digital Clock
 - Flex Table
 - Fold Entity Row
-- Frigate Card
-- Github Flexi Card
 - Horizon Card
 - Hourly Weather
 - HTML Template Card
