@@ -10,6 +10,7 @@
       id: disarmed
       entity_id: alarm_control_panel.house
       to: disarmed # arm alarm if disarmed but nobody home
+      for: 1 # disarms momentarily before arming after open sensor alert
 
     - trigger: state
       id: away
@@ -62,6 +63,24 @@
       not_from:
         - unknown
         - unavailable
+
+    - trigger: event
+      id: action
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arm_alarm_home
+
+    - trigger: event
+      id: action
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arm_alarm_away
+
+    - trigger: event
+      id: action
+      event_type: mobile_app_notification_action
+      event_data:
+        action: arm_alarm_night
   conditions:
     - condition: state
       entity_id:
@@ -70,6 +89,16 @@
       state: "on"
   actions:
     - choose:
+        - conditions:
+            - condition: trigger
+              id: action
+          sequence:
+            - action: script.arm_alarm
+              data:
+                mode: "{{ trigger.event.data['action'] | replace('arm_alarm_', '') }}"
+                force: true
+                skip_delay: true
+
         # rearm alarm if still disarmed and nobody home or night mode
         - conditions:
             - condition: trigger
@@ -81,23 +110,20 @@
                       entity_id: binary_sensor.someone_home
                       state: "off"
                   sequence:
-                    # wait to see if someone came home
+                    # wait to see if someone arrives home
                     - wait_template: "{{ is_state('binary_sensor.someone_home', 'on') }}"
                       timeout:
-                        minutes: 5
+                        minutes: 10
 
                     - if:
                         - condition: state
                           entity_id: binary_sensor.someone_home
                           state: "off"
-
-                        - condition: state
-                          entity_id: input_select.occupancy_mode
-                          state: Away
                       then:
                         - action: script.arm_alarm
                           data:
                             mode: away
+                            skip_delay: true
 
                 - conditions:
                     - condition: state
@@ -106,15 +132,20 @@
 
                     - condition: template
                       alias: "Someone just arrived home"
-                      value_template: >
-                        {{ now() - states.automation.someone_arrives_home.attributes.last_triggered
-                            < timedelta(seconds=60) }}
+                      value_template: "{{ is_state_attr('binary_sensor.someone_home', 'just_arrived', true) }}"
                   sequence:
+                    - delay:
+                        minutes: 10
+
                     - wait_template: >
                         {% from 'alarm.jinja' import arm_alarm_check %}
-                        {{ arm_alarm_check() }}
+                        {{ arm_alarm_check('night') }}
                       timeout:
-                        minutes: 15
+                        minutes: 5
+
+                    - condition: state
+                      entity_id: input_select.occupancy_mode
+                      state: Night
 
                     - action: script.arm_alarm
                       data:
@@ -124,52 +155,24 @@
             - condition: trigger
               id: night
           sequence:
-            # wait 10 minutes if coming from Away mode - someone just came home, verify they stay home
-            - if: "{{ trigger.from_state.state == 'Away' }}"
+            - wait_template: >
+                {% from 'alarm.jinja' import arm_alarm_check %}
+                {{ arm_alarm_check('night') }}
+              timeout:
+                minutes: 5
+
+            - if:
+                - condition: state
+                  entity_id: binary_sensor.someone_home
+                  state: "on"
+
+                - condition: state
+                  entity_id: input_select.occupancy_mode
+                  state: Night
               then:
-                - wait_template: "{{ is_state('binary_sensor.someone_home', 'on') }}"
-                  timeout:
-                    minutes: 5
-
-                - if: "{{ wait.completed }}"
-                  then:
-                    - wait_template: >
-                        {% from 'alarm.jinja' import arm_alarm_check %}
-                        {{ arm_alarm_check() }}
-                      timeout:
-                        minutes: 15
-
-                    - if:
-                        - condition: state
-                          entity_id: binary_sensor.someone_home
-                          state: "on"
-
-                        - condition: state
-                          entity_id: input_select.occupancy_mode
-                          state: Night
-                      then:
-                        - action: script.arm_alarm
-                          data:
-                            mode: night
-              else:
-                - wait_template: >
-                    {% from 'alarm.jinja' import arm_alarm_check %}
-                    {{ arm_alarm_check() }}
-                  timeout:
-                    minutes: 15
-
-                - if:
-                    - condition: state
-                      entity_id: binary_sensor.someone_home
-                      state: "on"
-
-                    - condition: state
-                      entity_id: input_select.occupancy_mode
-                      state: Night
-                  then:
-                    - action: script.arm_alarm
-                      data:
-                        mode: night
+                - action: script.arm_alarm
+                  data:
+                    mode: night
 
         - conditions:
             - condition: trigger
@@ -177,15 +180,11 @@
           sequence:
             - wait_template: >
                 {% from 'alarm.jinja' import arm_alarm_check %}
-                {{ arm_alarm_check() }}
+                {{ arm_alarm_check('away') }}
               timeout:
-                minutes: 15
+                minutes: 5
 
             - if:
-                - condition: state
-                  entity_id: binary_sensor.someone_home
-                  state: "off"
-
                 - condition: state
                   entity_id: input_select.occupancy_mode
                   state: Away
@@ -198,17 +197,16 @@
             - condition: trigger
               id: lock_code
           sequence:
-            - wait_template: >
-                {% from 'alarm.jinja' import arm_alarm_check %}
-                {{ arm_alarm_check() }}
-              timeout:
-                minutes: 15
+            - delay: 60 # allow re-enter before arming
 
-            - if:
-                - condition: state
-                  entity_id: binary_sensor.someone_home
-                  state: "off"
+            - if: "{{ states(trigger.entity_id) == trigger.to_state.state }}"
               then:
+                - wait_template: >
+                    {% from 'alarm.jinja' import arm_alarm_check %}
+                    {{ arm_alarm_check('away') }}
+                  timeout:
+                    minutes: 5
+
                 - action: script.arm_alarm
                   data:
                     mode: away
@@ -219,9 +217,9 @@
           sequence:
             - wait_template: >
                 {% from 'alarm.jinja' import arm_alarm_check %}
-                {{ arm_alarm_check() }}
+                {{ arm_alarm_check('away') }}
               timeout:
-                minutes: 15
+                minutes: 5
 
             - if:
                 - condition: state

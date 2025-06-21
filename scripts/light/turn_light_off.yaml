@@ -7,12 +7,12 @@ turn_light_off:
   icon: mdi:lightbulb-off
   mode: parallel
   fields:
-    activate_timer:
-      description: "Activate light in use timer"
-      example: "true"
     entity_id:
       description: "List of light entity ids"
       example: "light.dining_room_light_rgb"
+    activate_timer:
+      description: "Activate light in use timer"
+      example: "true"
     reset:
       description: "Reset manual mode, bypass timer."
       example: "true"
@@ -20,6 +20,7 @@ turn_light_off:
     entities: >
       {% from 'light.jinja' import valid_lights %}
       {{ valid_lights(entity_id) | from_json }}
+    activate_timer: "{{ activate_timer | default(false) }}"
     reset: "{{ reset | default(true) }}"
   sequence:
     - if: "{{ entities | count == 0 }}"
@@ -48,18 +49,9 @@ turn_light_off:
 
           - if:
               - condition: template
-                alias: "Reset color"
-                value_template: >
-                  {{ reset and is_state_attr(repeat.item, 'rgb', true)
-                      and is_state(repeat.item, 'on') }}
-            then:
-              - action: light.turn_on
-                target:
-                  entity_id: "{{ repeat.item }}"
-                data:
-                  profile: default_min # reset color
+                alias: "Light is on"
+                value_template: "{{ is_state(repeat.item, 'on') }}"
 
-          - if:
               - condition: template
                 alias: "Reset, no timer, or timer is idle and not manual mode"
                 value_template: "{{ reset or (timer == none or (not manual and is_state(timer, 'idle'))) }}"
@@ -76,20 +68,27 @@ turn_light_off:
                   {{ iif(repeat.item in area_entities('bathroom'),
                       is_state('switch.shower_scene', 'off'), true) }}
             then:
-              - if: "{{ is_state(repeat.item, 'on') }}"
+              - if:
+                  - condition: template
+                    alias: "Reset color"
+                    value_template: "{{ reset and is_state_attr(repeat.item, 'rgb', true) }}"
                 then:
-                  - action: light.turn_off
+                  - action: light.turn_on
                     target:
                       entity_id: "{{ repeat.item }}"
-                    continue_on_error: true
+                    data:
+                      profile: default_min # reset color
 
-          - if: "{{ timer != none }}"
+              - action: light.turn_off
+                target:
+                  entity_id: "{{ repeat.item }}"
+                continue_on_error: true
+
+          - if: "{{ is_state(repeat.item, 'off') and timer != none }}"
             then:
               - if: >
-                  {{ activate_timer | default(false)
-                      or ((activate_timer is not defined or activate_timer)
-                      and (is_state(repeat.item, 'off') and not is_state(timer, 'active')
-                        and (now() - states[repeat.item].last_changed) > timedelta(seconds=1))) }}
+                  {{ activate_timer
+                      and now() - states[repeat.item].last_changed > timedelta(seconds=1) }}
                 then:
                   - action: timer.start
                     target:
@@ -113,9 +112,3 @@ turn_light_off:
 
           - delay:
               milliseconds: 100 #ZWAVE don't overwhelm the network
-
-    # wait until all lights are off and this is the last instance of this script running
-    - wait_template: >
-        {{ expand(entities) | selectattr('state', 'eq', 'on') | list | count == 0
-            and state_attr(this.entity_id, 'current') | int == 1 }}
-      timeout: 30

@@ -77,57 +77,44 @@ script:
               - wait_template: "{{ is_state('media_player.bathroom_speaker', ['playing', 'buffering']) }}"
                 timeout: 10 # allow media to resume after tts
 
-          - choose:
-              - conditions:
+          - if:
+              - condition: state
+                entity_id: binary_sensor.speaker
+                state: "on"
+            then:
+              - event: save_media_player
+
+              - wait_template: "{{ has_value('sensor.saved_media_player') }}"
+                timeout: 10
+
+              - if:
                   - condition: template
-                    alias: "Media playing on bathroom speaker"
+                    alias: "Bathroom speaker not in active media players"
                     value_template: >
-                      {% from 'tts.jinja' import tts_player %}
-                      {% from 'alarm_clock.jinja' import alarm_clock_player %}
-                      {% set player = 'media_player.bathroom_speaker' %}
-                      {{ is_state(player, ['playing', 'buffering', 'paused'])
-                          and not bool(tts_player(player))
-                          and not bool(alarm_clock_player(player)) }}
-                sequence:
+                      {{ 'media_player.bathroom_speaker'
+                            not in state_attr('binary_sensor.speaker', 'entity_id') }}
+                then:
                   - action: media_player.volume_set
                     target:
                       entity_id: media_player.bathroom_speaker
                     data:
-                      volume_level: "{{ states('input_number.media_volume_shower') | float / 100 }}"
-                    continue_on_error: true
+                      volume_level: 0
 
-              - conditions:
-                  - condition: template
-                    alias: "Media playing elsewhere"
-                    value_template: "{{ is_state('binary_sensor.speaker', 'on') }}"
-                sequence:
-                  - event: save_media_player
+                  - action: music_assistant.transfer_queue
+                    target:
+                      entity_id: media_player.bathroom_speaker_mass
+                    data:
+                      source_player: "{{ states('sensor.saved_media_player') }}_mass"
+                      auto_play: true
+                    continue_on_error: false
 
-                  - wait_template: "{{ has_value('sensor.saved_media_player') }}"
-                    timeout: 10
-
-                  - if: "{{ wait.completed }}"
-                    then:
-                      - action: music_assistant.transfer_queue
-                        target:
-                          entity_id: media_player.bathroom_speaker_mass
-                        data:
-                          source_player: "{{ states('sensor.saved_media_player') }}_mass"
-                          auto_play: true
-                        continue_on_error: false
-
-                      - action: media_player.volume_set
-                        target:
-                          entity_id: media_player.bathroom_speaker
-                        data:
-                          volume_level: "{{ states('input_number.media_volume_shower') | float / 100 }}"
-                        continue_on_error: true
-                    else: # media didn't transfer play shower preset
-                      - action: script.media_play
-                        data:
-                          preset: shower
-                        continue_on_error: true
-            default:
+              - action: media_player.volume_set
+                target:
+                  entity_id: media_player.bathroom_speaker
+                data:
+                  volume_level: "{{ states('input_number.media_volume_shower') | float / 100 }}"
+                continue_on_error: true
+            else:
               - action: script.media_play
                 data:
                   preset: shower
@@ -193,17 +180,27 @@ script:
 
           - if:
               - condition: template
-                alias: "There is a stored media player and media is playing."
-                value_template: >
-                  {{ has_value('sensor.saved_media_player')
-                      and is_state('binary_sensor.speaker', 'on') }}
+                alias: "There is a saved media queue."
+                value_template: "{{ has_value('sensor.saved_media_player') }}"
             then:
-              - action: music_assistant.transfer_queue
-                target:
-                  entity_id: "{{ states('sensor.saved_media_player') }}_mass"
-                data:
-                  source_player: media_player.bathroom_speaker_mass
-                  auto_play: true
+              - if:
+                  - condition: template
+                    alias: "Bathroom speaker not in saved queue media players."
+                    value_template: >
+                      {{ 'media_player.bathroom_speaker'
+                            not in state_attr('sensor.saved_media_player', 'entity_id') }}
+                then:
+                  - action: music_assistant.transfer_queue
+                    target:
+                      entity_id: "{{ states('sensor.saved_media_player') }}_mass"
+                    data:
+                      source_player: media_player.bathroom_speaker_mass
+                      auto_play: true
+
+                  - action: script.turn_media_player_off
+                    data:
+                      entity_id: media_player.bathroom_speaker
+                    continue_on_error: true
 
               - action: script.media_player_set_volumes
                 data:
